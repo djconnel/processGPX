@@ -898,7 +898,7 @@ sub shiftCircuit {
   my $lastPoint = $copyPoint ? $#$points -1 : $#$points;
   my @newPoints = @$points[$startIndex .. $lastPoint];
   push @newPoints, @$points[0 .. $startIndex - 1];
-  push @newPoints, @$points[0 .. $copyPoint ? $startIndex : $startIndex - 1];
+  push @newPoints, \%{$newPoints[0]} if $copyPoint;
 
   return \@newPoints;
 }
