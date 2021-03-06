@@ -1573,7 +1573,6 @@ for my $file ( @files ) {
 	my $dzigzag = 100;
 	my @UTurns = ();
 	for my $i ( 1 .. $#$points - 1 ) {
-	  warn("dotProduct = ", latlngDotProduct($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1]), "\n");
 	  push @UTurns, $i + 1
 	    if (latlngDotProduct($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1]) < -0.98);
 	}
