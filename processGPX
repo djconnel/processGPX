@@ -2,7 +2,7 @@
 use strict;
 use Getopt::Long;
 use Geo::Gpx;
-use POSIX qw(erf erfc floor);
+use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
@@ -14,6 +14,53 @@ $0 =~ s(.*/)();
 sub ferfc {
   my $x = shift;
   return ( ($x < -5) ? 2 : ($x > 5) ? 0 : erfc($x) );
+}
+
+# error function
+sub erf {
+  my $x = shift;
+
+  # constants
+  my $a1 =  0.254829592;
+  my $a2 = -0.284496736;
+  my $a3 =  1.421413741;
+  my $a4 = -1.453152027;
+  my $a5 =  1.061405429;
+  my $p  =  0.3275911;
+
+  # Save the sign of x
+  my $sign = ($x <=> 0);
+  return 0 if ($sign == 0);
+  $x = abs($x);
+
+  # A & S 7.1.26
+  my $t = 1.0/(1.0 + $p*$x);
+  my $y = 1.0 - ((((($a5*$t + $a4)*$t) + $a3)*$t + $a2)*$t + $a1)*$t*exp(-$x*$x);
+  return $sign*$y;
+}
+
+# complementary error function
+sub erfc {
+  my $x = shift;
+
+  # constants
+  my $a1 =  0.254829592;
+  my $a2 = -0.284496736;
+  my $a3 =  1.421413741;
+  my $a4 = -1.453152027;
+  my $a5 =  1.061405429;
+  my $p  =  0.3275911;
+
+  # Save the sign of x
+  my $sign = ($x <=> 0);
+  return 1 if ($sign == 0);
+  $x = abs($x);
+
+  # A & S 7.1.26
+  my $t = 1.0/(1.0 + $p*$x);
+  my $z = ((((($a5*$t + $a4)*$t) + $a3)*$t + $a2)*$t + $a1)*$t*exp(-$x*$x);
+  my $y = ($sign > 0) ? $z : 2 - $z;
+  return $y;
 }
 
 # set the suffix of a filename
@@ -85,7 +132,6 @@ sub dotProduct {
 }
 
 sub latlngDotProduct {
-  my $sub = "latlngDotProduct";
   my $p1 = shift;
   my $p2 = shift;
   my $p3 = shift;
