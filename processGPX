@@ -6,7 +6,9 @@ use POSIX qw(erf erfc floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.1;
+my $version = 0.1;   # make sure this matches pod value
+
+$0 =~ s(.*/)();
 
 # truncated error function:
 sub ferfc {
@@ -1486,11 +1488,11 @@ $append  += $extend;
 # autospacing triggered if max angle specified
 my $smoothRadians;
 if ((defined $smoothAngle) && ($smoothAngle <= 0)) {
-  $smoothAngle = 10;
+  $smoothAngle = 20;
   $autoSpacing //= 1;
 }
 if ($autoSpacing) {
-  $smoothAngle //= 10;
+  $smoothAngle //= 20;
   $smoothRadians = $smoothAngle * $deg2rad;
 }
 
@@ -1525,6 +1527,7 @@ for my $file ( @files ) {
       # eliminate duplicate x,y points
       my $removeDuplicates = 1;
       if ( $removeDuplicates ) {
+        note "removing duplicate points...\n";
         my @pNew = ();
         my $i = 0;
         while ( $i <= $#$points ) {
@@ -1561,8 +1564,36 @@ for my $file ( @files ) {
         $points = \@pNew;
       }
 
+      #
+      # zig-zags: pairs of 180 degree turns within a certain distance are probably misplaced control points
+      # this is just a warning for now... easy to fix if it's along a line, but what if it goes around a corner?
+      #
+      {
+	note "checking for zig-zags...\n";
+	my $dzigzag = 100;
+	my @UTurns = ();
+	for my $i ( 1 .. $#$points - 1 ) {
+	  warn("dotProduct = ", latlngDotProduct($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1]), "\n");
+	  push @UTurns, $i + 1
+	    if (latlngDotProduct($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1]) < -0.98);
+	}
+
+	if (@UTurns) {
+	  addDistanceField(points=> $points);
+	  for my $i ( 0 .. $#UTurns - 1 ) {
+	    my $p1 = $points->[$UTurns[$i]];
+	    my $p2 = $points->[$UTurns[$i + 1]];
+	    if ($p2->{distance} - $p1->{distance} < $dzigzag) {
+	      warn("WARNING: zig-zag found on original points : ", $UTurns[$i], " and ", $UTurns[$i + 1], " : ", sprintf("%.4f", 1000 * $p1->{distance}), " to ", sprintf("%.4f", 1000 * $p1->{distance}), "km\n");
+	    }
+	  }
+	}
+      }
+
       # check for snapping
       if ( ($snap > 0) && ($snapDistance >= 0) ) {
+	note("snapping repeated points...\n");
+
         # snap = 1: subsequent laps snap to position of earlier laps
         # snap = 2: earlier laps snap to position of layer laps
         # snap 2 can be handled by reversing points, then doing snap, then reversing back
@@ -2052,7 +2083,8 @@ for my $file ( @files ) {
                   my $dRefine = 3 * $lSmooth;
 
                   # refine spacing -- need to refine to sufficient resolution to resolve the angle
-                  my $spacing = 0.5 * $lSmooth * (0.01 + abs($smoothRadians / $a));
+		  # this was multipled by 0.5, but that generated too many points, so updating
+                  my $spacing = $lSmooth * (0.01 + abs($smoothRadians / $a));
 
                   # tricky bit -- we need to insert points back to the desired range, but that may extend earlier than points
                   # which we've already placed, so we'll need to keep track of points as we rewind.
@@ -3018,6 +3050,10 @@ processGPX
 =head1 SYNOPSIS
 
 smoothGPX [options] <input files>
+
+=head1 VERSION
+
+0.10
 
 =head1 DESCRIPTION
 
