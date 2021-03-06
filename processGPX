@@ -16,29 +16,6 @@ sub ferfc {
   return ( ($x < -5) ? 2 : ($x > 5) ? 0 : erfc($x) );
 }
 
-# error function
-sub erf {
-  my $x = shift;
-
-  # constants
-  my $a1 =  0.254829592;
-  my $a2 = -0.284496736;
-  my $a3 =  1.421413741;
-  my $a4 = -1.453152027;
-  my $a5 =  1.061405429;
-  my $p  =  0.3275911;
-
-  # Save the sign of x
-  my $sign = ($x <=> 0);
-  return 0 if ($sign == 0);
-  $x = abs($x);
-
-  # A & S 7.1.26
-  my $t = 1.0/(1.0 + $p*$x);
-  my $y = 1.0 - ((((($a5*$t + $a4)*$t) + $a3)*$t + $a2)*$t + $a1)*$t*exp(-$x*$x);
-  return $sign*$y;
-}
-
 # complementary error function
 sub erfc {
   my $x = shift;
@@ -823,9 +800,12 @@ sub bikeSpeedModel {
   my $VAMMax = $vars{VAMMax} // 0.52;
   my $v0     = $vars{v0} // 9.5;
   my $g      = $vars{g} // 0;
+  # convert g to sine
+  $g /= sqrt(1 + $g ** 2);
   my $a      = $vMax / $VAMMax;
   my $b      = $vMax / $v0 - $ln2;
-  return  $vMax / ( exp(-((3 * $g) ** 4)) * ($b + log(1 + exp($a * $g))) );
+  my $fV     = exp(-((3 * $g) ** 4)) * ($b + log(1 + exp($a * $g)));
+  return  $vMax / $fV;
 }
 
 #
