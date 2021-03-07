@@ -6,38 +6,19 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.11;   # make sure this matches pod value
+my $version = 0.12;   # make sure this matches pod value
 
 $0 =~ s(.*/)();
 
-# truncated error function:
-sub ferfc {
+# a function which transitions from 1 (x = -1) to 1/2 (x = 0) to 0 ( x = 1 )
+my $pi2 = atan2(1, 0);
+sub transition {
   my $x = shift;
-  return ( ($x < -5) ? 2 : ($x > 5) ? 0 : erfc($x) );
-}
-
-# complementary error function
-sub erfc {
-  my $x = shift;
-
-  # constants
-  my $a1 =  0.254829592;
-  my $a2 = -0.284496736;
-  my $a3 =  1.421413741;
-  my $a4 = -1.453152027;
-  my $a5 =  1.061405429;
-  my $p  =  0.3275911;
-
-  # Save the sign of x
-  my $sign = ($x <=> 0);
-  return 1 if ($sign == 0);
-  $x = abs($x);
-
-  # A & S 7.1.26
-  my $t = 1.0/(1.0 + $p*$x);
-  my $z = ((((($a5*$t + $a4)*$t) + $a3)*$t + $a2)*$t + $a1)*$t*exp(-$x*$x);
-  my $y = ($sign > 0) ? $z : 2 - $z;
-  return $y;
+  return (
+	  ($x < -1) ? 1 :
+	  ($x > 1) ? 0 :
+	  (1 - sin($x * $pi2)) / 2
+	 );
 }
 
 # set the suffix of a filename
@@ -2714,14 +2695,14 @@ for my $file ( @files ) {
       #
       note("lane shift...\n");
       if ( $laneShift != 0) {
-        my $shiftDistance = 10 * abs($laneShift) ** (2/3);
+        my $shiftDistance = 20 * abs($laneShift) ** (2/3);
         my $s = 0;
         for my $i ( 0 .. $#$points ) {
           $s += latlngDistance($points->[$i - 1], $points->[$i])
             if ( $i > 0 );
           my $shift = $laneShift;
-          $shift *= 0.5 * ferfc(($shiftStart - $s) / $shiftDistance) if (defined $shiftStart);
-          $shift *= 0.5 * ferfc(($s - $shiftEnd) / $shiftDistance) if (defined $shiftEnd);
+          $shift *= transition(($shiftStart - $s) / $shiftDistance) if (defined $shiftStart);
+          $shift *= transition(($s - $shiftEnd) / $shiftDistance) if (defined $shiftEnd);
           $points->[$i]->{shift} = $shift;
         }
       }
@@ -3126,7 +3107,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.11
+0.12
 
 =head1 DESCRIPTION
 
@@ -3203,7 +3184,7 @@ for example with the "cpan" command-line tool:
 
  Getopt::Long : used for processing comamnd-line options
  Geo::Gpx     : parsing and generating GPX files
- POSIX        : erf, erfc, and floor functions
+ POSIX        : floor function
  Date::Parse  : for parsing time, with the -startTime option
  Pod::Usage   : for the -help option
 
