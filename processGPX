@@ -2692,6 +2692,8 @@ for my $file ( @files ) {
 
       #
       # calculate a lane shift field, if we're doing lane shifts
+      # shiftStart < shiftEnd: shifting between shiftStart and shiftEnd
+      # shiftStart > shiftEnd: shifting up to shiftEnd, then after shiftStart
       #
       note("lane shift...\n");
       if ( $laneShift != 0) {
@@ -2701,8 +2703,12 @@ for my $file ( @files ) {
           $s += latlngDistance($points->[$i - 1], $points->[$i])
             if ( $i > 0 );
           my $shift = $laneShift;
-          $shift *= transition(($shiftStart - $s) / $shiftDistance) if (defined $shiftStart);
-          $shift *= transition(($s - $shiftEnd) / $shiftDistance) if (defined $shiftEnd);
+	  if ( (defined $shiftStart) && (defined $shiftEnd) && ($shiftEnd < $shiftStart) ) {
+	    $shift *= (transition(($shiftStart - $s) / $shiftDistance) + transition(($s - $shiftEnd) / $shiftDistance));
+	  } else {
+	    $shift *= transition(($shiftStart - $s) / $shiftDistance) if (defined $shiftStart);
+	    $shift *= transition(($s - $shiftEnd) / $shiftDistance)   if (defined $shiftEnd);
+	  }
           $points->[$i]->{shift} = $shift;
         }
       }
@@ -3563,6 +3569,18 @@ radius of tight turns to too small value.  Lane shifting should thus
 be combined with a sufficient degree of position smoothing to avoid
 tight corners, or else restrict the lane shifting from a portion of
 the course with tight corners.
+
+If shiftStart < shiftEnd, then the shift occurs between shiftStart and
+shiftEnd.
+
+if shiftStart > shiftEnd, then the shift occurs up to shiftEnd, then
+begins again at shiftStart.  This is useful for a "lollipop" course,
+where you go out on a road, then do a loop, then return along the
+original road.  So put shiftEnd at the end of the outward leg, then
+shiftStart at the beginning of the return leg, and leave the loop part
+unshifted.  Place the transitions slightly past where the directions
+diverge, so the transition regaions do not cause the lanes to come
+together at the beginning of the return leg (end of the outward leg).
 
 The -laneShift option still needs to be specified.
 
