@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.12;   # make sure this matches pod value
+my $version = 0.13;   # make sure this matches pod value
 
 $0 =~ s(.*/)();
 
@@ -889,7 +889,7 @@ sub placeGradientSigns {
     my $ds = distanceDifference($ps->[$range[0]], $ps->[$range[1]], $courseDistance, $isLoop);
     my $dz = $ps->[$range[1]]->{ele} - $ps->[$range[0]]->{ele};
     my $g = $dz / $ds;
-    my $text = sprintf("%.2f\%", 100 * $g) . " for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", $dz) . " m altitude)";
+    my $text = sprintf("%.2f", 100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", $dz) . " m altitude)";
     note("gradient sign @ ", sprintf("%.2f", $ps->[$range[0]]->{distance} / 1000), "km to ", sprintf("%.2f", $ps->[$range[1]]->{distance} / 1000), " km: $text\n");
 
     # DEBUG
@@ -1418,6 +1418,7 @@ my $copyPoint = 0;     # whether to make sure first point and last point in data
 my $copyright;         # copyright field, for GPX
 my $cropMax;           # maximum distance of retained data (distance calculated in original coordinates
 my $cropMin;           # minimum distance of retained data (distance calculated in original coordinates)
+my $csv = 0;           # whether to use CSV instead of GPX
 my $description;       # description, for GPX metadata
 my $extend = 0;        # apply to both append and prepend
 my $fixCrossings = 0;  # whether to flatten crossings
@@ -1472,6 +1473,7 @@ GetOptions (
             "crop=f"        => \$cropMax,
             "cropMax=f"     => \$cropMax,
             "cropMin=f"     => \$cropMin,
+            "csv"           => \$csv,
             "description=s" => \$description,
             "addGradientSigns" => \$addGradientSigns,
             "extend=f"      => \$extend,
@@ -1540,6 +1542,12 @@ warn("WARNING: if snapping distance ($snapDistance) is more than smoothing dista
 if ($isLoop && ($rTurnaround > 0)) {
   warn("WARNING: ignoring -lap or -loop option when rTurnaround > 0\n");
   $isLoop = 0;
+}
+
+# csv option can be inferred from filename, if specified
+if (defined $outFile) {
+  $csv = 1 if ($outFile =~ /csv$/i);
+  $csv = 0 if ($outFile =~ /gpx$/i);
 }
 
 # apply extend
@@ -3014,8 +3022,11 @@ for my $file ( @files ) {
       }
 
       # copy the first point to the last point if specified
-      push @$points, \%{$points->[0]}
-        if ( $copyPoint && (($points->[0]->{lat} != $points->[-1]->{lat}) || ($points->[0]->{lon} != $points->[-1]->{lon}) || ($points->[0]->{ele} != $points->[-1]->{ele})) );
+      if ( $copyPoint && (($points->[0]->{lat} != $points->[-1]->{lat}) || ($points->[0]->{lon} != $points->[-1]->{lon}) || ($points->[0]->{ele} != $points->[-1]->{ele})) ) {
+	my %p = %{$points->[0]};
+	push @$points, \%p;
+	$points->[-1]->{distance} = $points-[-2]->{distance} + latlngDistance($points->[-2], $points->[-1]) if (defined $points->[-2]->{distance});
+      }
 
       #
       # create a distance field
@@ -3075,28 +3086,53 @@ for my $file ( @files ) {
   $gpx->waypoints($waypoints) if (defined $waypoints);
 
   unless ( $noSave ) {
-    my $k = "processGPX";
-    my @newKeywords = split('\s*,\s*', $newKeywords);
-    push @newKeywords, $k;
-    my $keywords = $gpx->keywords();
-    $keywords = [] unless (defined $keywords);
-    for my $k ( @newKeywords ) {
-      push @$keywords, $k
-	unless ( grep { $_ eq $k} @$keywords );
+    if ($csv) {
+      my $fNew = ($outFile eq "") ? setFileNameSuffix($file, "_processed.csv") : $outFile;
+      my $fcsv;
+      open $fcsv, ">$fNew" or die( "ERROR opening file $fcsv\n" );
+      my @keys;
+      my $nTrack = 0;
+      for my $track ( @$tracks ) {
+	$nTrack ++;
+	my $segments = $track->{segments};
+	my $nSegment = 0;
+	for my $segment ( @$segments ) {
+	  $nSegment ++;
+	  my $points = $segment->{points};
+	  unless (@keys) {
+	    @keys = keys %{$points->[0]};
+	    print $fcsv join( ",", "track", "segment", @keys ), "\n";;
+	  }
+	  for my $p ( @$points ) {
+	    print $fcsv join( ",", $nTrack, $nSegment, @$p{@keys} ), "\n";
+	  }
+	}
+      }
+      close $fcsv;
+    } else {
+      my $k = "processGPX";
+      my @newKeywords = split('\s*,\s*', $newKeywords);
+      push @newKeywords, $k;
+      my $keywords = $gpx->keywords();
+      $keywords = [] unless (defined $keywords);
+      for my $k ( @newKeywords ) {
+	push @$keywords, $k
+	  unless ( grep { $_ eq $k} @$keywords );
+      }
+      $gpx->keywords( $keywords );
+
+      $gpx->author($author) if (defined $author);
+      $gpx->name($title) if (defined $title);
+      $gpx->copyright($copyright) if (defined $copyright);
+      $gpx->desc($description) if (defined $description);
+      $gpx->time(time());
+
+      my $fNew = ($outFile eq "") ? setFileNameSuffix($file, "_processed.gpx") : $outFile;
+      note("saving processed data in file $fNew...\n");
+      open my $fout, ">$fNew";
+      print $fout $gpx->xml("1.1");
+      close $fout;
     }
-    $gpx->keywords( $keywords );
-
-    $gpx->author($author) if (defined $author);
-    $gpx->name($title) if (defined $title);
-    $gpx->copyright($copyright) if (defined $copyright);
-    $gpx->desc($description) if (defined $description);
-    $gpx->time(time());
-
-    my $fNew = ($outFile eq "") ? setFileNameSuffix($file, "_processed.gpx") : $outFile;
-    note("saving processed data in file $fNew...\n");
-    open my $fout, ">$fNew";
-    print $fout $gpx->xml("1.1");
-    close $fout;
   }
   note("done with file $file.\n");
 }
@@ -3113,7 +3149,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.12
+0.13
 
 =head1 DESCRIPTION
 
@@ -3345,6 +3381,13 @@ of that section of road.
 Points prior to this will be stripped, and if needed, a point will be
 interpolated to this position.  This shifts the start position of the
 GPX route.  See --cropMax for more discussion.
+
+=item B<csv>
+
+Specifies the output will be CSV rather than GPX.  This is ignored if
+an output file is specied with either a "csv" or "gpx" suffix (case
+insensitive), in which case the suffix is used to determine the
+format.  Other suffixes are ignored.
 
 =item B<description> <string>
 
