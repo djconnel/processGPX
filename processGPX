@@ -2658,8 +2658,8 @@ for my $file ( @files ) {
             }
           }
 
-          if (($s >= $cropMin) &&
-              (($cropMax <= 0) || ($s <= $cropMax))) {
+          if (((! defined $cropMin) || ($s >= $cropMin)) &&
+              ((! defined $cropMax) || ($cropMax <= 0) || ($s <= $cropMax))) {
             push @pNew, $points->[$i];
           }
 
