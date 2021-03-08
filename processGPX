@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.13;   # make sure this matches pod value
+my $version = 0.14;   # make sure this matches pod value
 
 $0 =~ s(.*/)();
 
@@ -1711,8 +1711,10 @@ for my $file ( @files ) {
 
             # check altitude.  If altitude is out of range, maybe we're across a tight swichback, or there's a bridge or tunnel
             # this was already done previously, but now we're closer
-            next jLoop1
-              if (abs($p1->{ele} - $points->[$j]->{ele}) > 1 + 0.3 * $d);
+	    if (abs($p1->{ele} - $points->[$j]->{ele}) > 1 + 0.3 * $d) {
+	      $j += $snapStep;
+	      next jLoop1;
+	    }
 
             #
             # we've got a possible point match between two points.
@@ -1775,7 +1777,6 @@ for my $file ( @files ) {
                              $snapDistance
                             )
                    ) {
-                  note("point on road!  $ja .. $i .. $jb\n");
                   $j = $jb;
                   last jLoop2;
                 }
@@ -1949,30 +1950,60 @@ for my $file ( @files ) {
             # irange encapsulates j range
             # may need to retain outer points of j range if they're not duplicated by points in irange
 
+	    # avoid duplicate points at ends of range
+	    # this is the same independent of sign: i1 connects with j1, i2 connects with j2
+	    $i1 ++ while (($i1 < $i2) && pointsAreClose($points->[$i1], $points->[$j1]));
+	    $i2 -- while (($i2 > $i1) && pointsAreClose($points->[$i2], $points->[$j2]));
+
+	    if ($i1 >= $i2) {
+	      $j += $snapStep;
+	      next jLoop1;
+	    }
+
+	    die "zero sign encountered\n" if ($sign == 0);
+
+	    # now check for zig-zags at start... algorithm shouldn't allow them.
+	    while (1) {
+              my $p1 = $points->[$j1];
+	      my $p2 = $points->[$i1];
+	      my $p3 = $points->[$i1 + 1];
+	      last if (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9);
+	      $i1 ++;
+	      if ($i1 >= $i2) {
+		$j += $snapStep;
+		next jLoop1;
+	      }
+	    }
+
+	    # now check for zig-zags at end... algorithm shouldn't allow them.
+	    while (1) {
+	      my $p1 = $points->[$j2];
+	      my $p2 = $points->[$i2];
+	      my $p3 = $points->[$i2 - 1];
+	      last if (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9);
+	      $i2 --;
+	      if ($i1 >= $i2) {
+		$j += $snapStep;
+		next jLoop1;
+	      }
+	    }
+
             if (($i2 > $i1) && (abs($j2 - $j1) > 0)) {
               note("i = $i, j = $j: snapping ", ($sign > 0) ? "forward" : "reverse", " segment: $i1 .. $i2 <=> $j1 .. $j2\n");
-            }
 
-            note("splicing in points:\n original points: $j1 .. $j2\n replaced points: $i1 .. $i2\n");
-
-
-            # avoid duplicate points at ends of range
-            # this is the same independent of sign: i1 connects with j1, i2 connects with j2
-            $i1 ++ while (($i1 <= $i2) && pointsAreClose($points->[$i1], $points->[$j1]));
-            $i2 -- while (($i2 >= $i1) && pointsAreClose($points->[$i2], $points->[$j2]));
-
-            my @pNew;
-            if ( $sign > 0 ) {
-              # keep everything up to start of j range
-              @pNew = @$points[0 .. $j1];
-              push @pNew, @$points[$i1 .. $i2] if ($i2 >= $i1);   # splice in i range (exclude end-points)
-              push @pNew, @$points[$j2 .. $#$points];             # keep everything which follows j range
-            } else {
-              @pNew = @$points[0 .. $j2];
-              push @pNew, reverse @$points[$i1 .. $i2] if ($i2 >= $i1);
-              push @pNew, @$points[$j1 .. $#$points];
-            }
-            $points = \@pNew;
+	      my @pNew;
+	      if ( $sign > 0 ) {
+		# keep everything up to start of j range
+		@pNew = @$points[0 .. $j1];
+		push @pNew, @$points[$i1 .. $i2] if ($i2 >= $i1);   # splice in i range (exclude end-points)
+		push @pNew, @$points[$j2 .. $#$points];             # keep everything which follows j range
+	      } else {
+		@pNew = @$points[0 .. $j2];
+		push @pNew, reverse @$points[$i1 .. $i2] if ($i2 >= $i1);
+		push @pNew, @$points[$j1 .. $#$points];
+	      }
+	      $points = \@pNew;
+	    }
 
 	    # snap transition...
 	    # adjust altitude...
@@ -3149,7 +3180,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.13
+0.14
 
 =head1 DESCRIPTION
 
