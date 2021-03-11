@@ -1596,6 +1596,12 @@ for my $file ( @files ) {
       # eliminate duplicate x,y points
       $points = removeDuplicatePoints(points=> $points);
 
+      if ($isLoop) {
+	my $d =latlngDistance($points->[0], $points->[-1]);
+	warn("WARNING: -loop or -lap specified, with large ($d meter) distance between first and last point: are you sure you wanted -loop or -lap?\n")
+	  if ($d > 150);
+      }
+
       #
       # zig-zags: pairs of 180 degree turns within a certain distance are probably misplaced control points
       # this is just a warning for now... easy to fix if it's along a line, but what if it goes around a corner?
