@@ -15,10 +15,10 @@ my $pi2 = atan2(1, 0);
 sub transition {
   my $x = shift;
   return (
-	  ($x < -1) ? 1 :
-	  ($x > 1) ? 0 :
-	  (1 - sin($x * $pi2)) / 2
-	 );
+          ($x < -1) ? 1 :
+          ($x > 1) ? 0 :
+          (1 - sin($x * $pi2)) / 2
+         );
 }
 
 # set the suffix of a filename
@@ -508,15 +508,15 @@ sub removeDuplicatePoints {
       my $j = $i;
       my %var;
       while (($j <= $#$points) && (abs($points->[$j]->{lat} - $lat0) < 1e-9) && (abs($points->[$j]->{lon} - $lng0) < 1e-9)) {
-	warn("($lat0, $lng0): combining duplicate point $j...\n");
-	$sum0 ++;
-	for my $key ( keys %$p ) {
-	  $sum1{$key} += $points->[$j]->{$key};
-	}
-	$j ++;
+        warn("($lat0, $lng0): combining duplicate point $j...\n");
+        $sum0 ++;
+        for my $key ( keys %$p ) {
+          $sum1{$key} += $points->[$j]->{$key};
+        }
+        $j ++;
       }
       for my $key ( keys %$p ) {
-	$var{$key} = $sum1{$key} / $sum0;
+        $var{$key} = $sum1{$key} / $sum0;
       }
       $i = $j;
       push @pNew, { %var };
@@ -899,14 +899,14 @@ sub placeGradientSigns {
 
     push @waypoints,
       @{placeGradientSigns(
-			   points => [ @$ps[0 .. $range[0]] ],
-			   courseDistance=> $courseDistance,
-			   simplifyPoints=> 0,
-			   shiftCircuit=> 0,
-			   gradientPower=> $gradientPower,
-			   gradientThreshold=> $gradientThreshold,
-			   isLoop=> $isLoop)}
-	if ($range[0] > 0);
+                           points => [ @$ps[0 .. $range[0]] ],
+                           courseDistance=> $courseDistance,
+                           simplifyPoints=> 0,
+                           shiftCircuit=> 0,
+                           gradientPower=> $gradientPower,
+                           gradientThreshold=> $gradientThreshold,
+                           isLoop=> $isLoop)}
+        if ($range[0] > 0);
 
     push @waypoints,
       {
@@ -924,14 +924,14 @@ sub placeGradientSigns {
 
     push @waypoints,
       @{placeGradientSigns(
-			   points => [ @$ps[$range[1] .. $#$ps] ],
-			   courseDistance=> $courseDistance,
-			   simplifyPoints=> 0,
-			   shiftCircuit=> 0,
-			   gradientPower=> $gradientPower,
-			   gradientThreshold=> $gradientThreshold,
-			   isLoop=> $isLoop)}
-	if ($range[1] < $#$ps);
+                           points => [ @$ps[$range[1] .. $#$ps] ],
+                           courseDistance=> $courseDistance,
+                           simplifyPoints=> 0,
+                           shiftCircuit=> 0,
+                           gradientPower=> $gradientPower,
+                           gradientThreshold=> $gradientThreshold,
+                           isLoop=> $isLoop)}
+        if ($range[1] < $#$ps);
   }
   return \@waypoints;
 }
@@ -1459,12 +1459,12 @@ my $zSmooth = 0;       # smoothing applied additionally to altitude
 my @flatten;           # points come in sets of 4: altitude, start point, finish point, lambda
 
 GetOptions (
-	    "addSigma"      => \$addSigma,
+            "addSigma"      => \$addSigma,
             "addDistance"    => \$addDistance,
             "addGradient"    => \$addGradient,
             "anchorSF"      => \$anchorSF,
             "append=f"      => \$append,
-	    "author=s"      => \$author,
+            "author=s"      => \$author,
             "autoSmoothZ=f" => \$zAutoSmooth,
             "autoSpacing"   => \$autoSpacing,
             "closed"        => \$copyPoint,
@@ -1483,7 +1483,7 @@ GetOptions (
             "gradientThreshold=f"  => \$gradientThreshold,
             "h"             => \$needHelp,
             "help"          => \$needHelp,
-	    "keywords=s"    => \$newKeywords,
+            "keywords=s"    => \$newKeywords,
             "interpolate=f" => \$linterpolate,
             "laneShift=f"   => \$laneShift,
             "lap"           => \$isLoop,
@@ -1496,7 +1496,7 @@ GetOptions (
             "pruneD=f"      => \$pruneD,
             "pruneX=f"      => \$pruneX,
             "prunedg=f"     => \$prunedg,
-	    "quiet"         => \$quiet,
+            "quiet"         => \$quiet,
             "rCrossings=f"  => \$rCrossings,
             "rLap=f"        => \$rLap,
             "rTurnaround=f" => \$rTurnaround,
@@ -1597,9 +1597,9 @@ for my $file ( @files ) {
       $points = removeDuplicatePoints(points=> $points);
 
       if ($isLoop) {
-	my $d =latlngDistance($points->[0], $points->[-1]);
-	warn("WARNING: -loop or -lap specified, with large ($d meter) distance between first and last point: are you sure you wanted -loop or -lap?\n")
-	  if ($d > 150);
+        my $d =latlngDistance($points->[0], $points->[-1]);
+        warn("WARNING: -loop or -lap specified, with large ($d meter) distance between first and last point: are you sure you wanted -loop or -lap?\n")
+          if ($d > 150);
       }
 
       #
@@ -1607,29 +1607,29 @@ for my $file ( @files ) {
       # this is just a warning for now... easy to fix if it's along a line, but what if it goes around a corner?
       #
       {
-	note "checking for zig-zags...\n";
-	my $dzigzag = 100;
-	my @UTurns = ();
-	for my $i ( 1 .. $#$points - 1 ) {
-	  push @UTurns, $i + 1
-	    if (UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1]));
-	}
+        note "checking for zig-zags...\n";
+        my $dzigzag = 100;
+        my @UTurns = ();
+        for my $i ( 1 .. $#$points - 1 ) {
+          push @UTurns, $i + 1
+            if (UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1]));
+        }
 
-	if (@UTurns) {
-	  addDistanceField(points=> $points);
-	  for my $i ( 0 .. $#UTurns - 1 ) {
-	    my $p1 = $points->[$UTurns[$i]];
-	    my $p2 = $points->[$UTurns[$i + 1]];
-	    if ($p2->{distance} - $p1->{distance} < $dzigzag) {
-	      warn("WARNING: zig-zag found on original points : ", $UTurns[$i], " and ", $UTurns[$i + 1], " : ", sprintf("%.4f", 0.001 * $p1->{distance}), " to ", sprintf("%.4f", 0.001 * $p1->{distance}), "km\n");
-	    }
-	  }
-	}
+        if (@UTurns) {
+          addDistanceField(points=> $points);
+          for my $i ( 0 .. $#UTurns - 1 ) {
+            my $p1 = $points->[$UTurns[$i]];
+            my $p2 = $points->[$UTurns[$i + 1]];
+            if ($p2->{distance} - $p1->{distance} < $dzigzag) {
+              warn("WARNING: zig-zag found on original points : ", $UTurns[$i], " and ", $UTurns[$i + 1], " : ", sprintf("%.4f", 0.001 * $p1->{distance}), " to ", sprintf("%.4f", 0.001 * $p1->{distance}), "km\n");
+            }
+          }
+        }
       }
 
       # check for snapping
       if ( ($snap > 0) && ($snapDistance >= 0) ) {
-	note("snapping repeated points...\n");
+        note("snapping repeated points...\n");
 
         # snap = 1: subsequent laps snap to position of earlier laps
         # snap = 2: earlier laps snap to position of layer laps
@@ -1644,7 +1644,7 @@ for my $file ( @files ) {
         }
 
         # on large courses, since initial search is O(N-squared), step thru multiple points, then refine
-	# snap step 1 has a potential bug (infinite loop) so lower bound is 2
+        # snap step 1 has a potential bug (infinite loop) so lower bound is 2
         my $snapStep = 2 + int(scalar(@$points) / 200);
 
         #
@@ -1717,10 +1717,10 @@ for my $file ( @files ) {
 
             # check altitude.  If altitude is out of range, maybe we're across a tight swichback, or there's a bridge or tunnel
             # this was already done previously, but now we're closer
-	    if (abs($p1->{ele} - $points->[$j]->{ele}) > 1 + 0.3 * $d) {
-	      $j += $snapStep;
-	      next jLoop1;
-	    }
+            if (abs($p1->{ele} - $points->[$j]->{ele}) > 1 + 0.3 * $d) {
+              $j += $snapStep;
+              next jLoop1;
+            }
 
             #
             # we've got a possible point match between two points.
@@ -1956,135 +1956,135 @@ for my $file ( @files ) {
             # irange encapsulates j range
             # may need to retain outer points of j range if they're not duplicated by points in irange
 
-	    # avoid duplicate points at ends of range
-	    # this is the same independent of sign: i1 connects with j1, i2 connects with j2
-	    $i1 ++ while (($i1 < $i2) && pointsAreClose($points->[$i1], $points->[$j1]));
-	    $i2 -- while (($i2 > $i1) && pointsAreClose($points->[$i2], $points->[$j2]));
+            # avoid duplicate points at ends of range
+            # this is the same independent of sign: i1 connects with j1, i2 connects with j2
+            $i1 ++ while (($i1 < $i2) && pointsAreClose($points->[$i1], $points->[$j1]));
+            $i2 -- while (($i2 > $i1) && pointsAreClose($points->[$i2], $points->[$j2]));
 
-	    if ($i1 >= $i2) {
-	      $j += $snapStep;
-	      next jLoop1;
-	    }
+            if ($i1 >= $i2) {
+              $j += $snapStep;
+              next jLoop1;
+            }
 
-	    die "zero sign encountered\n" if ($sign == 0);
+            die "zero sign encountered\n" if ($sign == 0);
 
-	    # now check for zig-zags at start... algorithm shouldn't allow them.
-	    while (1) {
+            # now check for zig-zags at start... algorithm shouldn't allow them.
+            while (1) {
               my $p1 = $points->[$j1];
-	      my $p2 = $points->[$i1];
-	      my $p3 = $points->[$i1 + 1];
-	      last if (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9);
-	      $i1 ++;
-	      if ($i1 >= $i2) {
-		$j += $snapStep;
-		next jLoop1;
-	      }
-	    }
+              my $p2 = $points->[$i1];
+              my $p3 = $points->[$i1 + 1];
+              last if (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9);
+              $i1 ++;
+              if ($i1 >= $i2) {
+                $j += $snapStep;
+                next jLoop1;
+              }
+            }
 
-	    # now check for zig-zags at end... algorithm shouldn't allow them.
-	    while (1) {
-	      my $p1 = $points->[$j2];
-	      my $p2 = $points->[$i2];
-	      my $p3 = $points->[$i2 - 1];
-	      last if (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9);
-	      $i2 --;
-	      if ($i1 >= $i2) {
-		$j += $snapStep;
-		next jLoop1;
-	      }
-	    }
+            # now check for zig-zags at end... algorithm shouldn't allow them.
+            while (1) {
+              my $p1 = $points->[$j2];
+              my $p2 = $points->[$i2];
+              my $p3 = $points->[$i2 - 1];
+              last if (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9);
+              $i2 --;
+              if ($i1 >= $i2) {
+                $j += $snapStep;
+                next jLoop1;
+              }
+            }
 
             if (($i2 > $i1) && (abs($j2 - $j1) > 0)) {
               note("i = $i, j = $j: snapping ", ($sign > 0) ? "forward" : "reverse", " segment: $i1 .. $i2 <=> $j1 .. $j2\n");
 
-	      my @pNew;
-	      if ( $sign > 0 ) {
-		# keep everything up to start of j range
-		@pNew = @$points[0 .. $j1];
-		push @pNew, @$points[$i1 .. $i2] if ($i2 >= $i1);   # splice in i range (exclude end-points)
-		push @pNew, @$points[$j2 .. $#$points];             # keep everything which follows j range
-	      } else {
-		@pNew = @$points[0 .. $j2];
-		push @pNew, reverse @$points[$i1 .. $i2] if ($i2 >= $i1);
-		push @pNew, @$points[$j1 .. $#$points];
-	      }
-	      $points = \@pNew;
-	    }
+              my @pNew;
+              if ( $sign > 0 ) {
+                # keep everything up to start of j range
+                @pNew = @$points[0 .. $j1];
+                push @pNew, @$points[$i1 .. $i2] if ($i2 >= $i1);   # splice in i range (exclude end-points)
+                push @pNew, @$points[$j2 .. $#$points];             # keep everything which follows j range
+              } else {
+                @pNew = @$points[0 .. $j2];
+                push @pNew, reverse @$points[$i1 .. $i2] if ($i2 >= $i1);
+                push @pNew, @$points[$j1 .. $#$points];
+              }
+              $points = \@pNew;
+            }
 
-	    # snap transition...
-	    # adjust altitude...
-	    # the first pass goes from i1 to i2
-	    # the replaced portion goes from j3 to j4
-	    # for points beyond this range, transition the altitude
-	    # this presently does not work with loops
-	    if ( $snapTransition > 0 ) {
-	      my $j3 = (($sign > 0) ? $j1 : $j2) + 1;
-	      my $j4 = $j3 + $i2 - $i1 + 1;
+            # snap transition...
+            # adjust altitude...
+            # the first pass goes from i1 to i2
+            # the replaced portion goes from j3 to j4
+            # for points beyond this range, transition the altitude
+            # this presently does not work with loops
+            if ( $snapTransition > 0 ) {
+              my $j3 = (($sign > 0) ? $j1 : $j2) + 1;
+              my $j4 = $j3 + $i2 - $i1 + 1;
 
-	      # d = 1: forward direction, -1: backard direction
-	      for my $d ( -1, 1 ) {
-		my $s = 0;
-		$i = ($d > 0) ? $i2 : $i1;
-		my @sis = (0);
-		my @is = ($i);
-		while (($s < $snapTransition) && ($i > 0) && ($i < $#$points)) {
-		  $s += latlngDistance($points->[$i], $points->[$i + $d]);
-		  $i += $d;
-		  push @sis, $s;
-		  push @is, $i;
-		}
-		my $jd = $d * $sign;
-		$j = ($jd > 0) ? $j4 : $j3;
-		my @sjs = (0);
-		my @js = ($j);
+              # d = 1: forward direction, -1: backard direction
+              for my $d ( -1, 1 ) {
+                my $s = 0;
+                $i = ($d > 0) ? $i2 : $i1;
+                my @sis = (0);
+                my @is = ($i);
+                while (($s < $snapTransition) && ($i > 0) && ($i < $#$points)) {
+                  $s += latlngDistance($points->[$i], $points->[$i + $d]);
+                  $i += $d;
+                  push @sis, $s;
+                  push @is, $i;
+                }
+                my $jd = $d * $sign;
+                $j = ($jd > 0) ? $j4 : $j3;
+                my @sjs = (0);
+                my @js = ($j);
 
-		$s = 0;
-		while (($s < $snapTransition) && ($j > 0) && ($j < $#$points)) {
-		  $s += latlngDistance($points->[$j], $points->[$j + $jd]);
-		  $j += $jd;
-		  push @sjs, $s;
-		  push @js, $j;
-		}
-		# step thru and adjust altitudes
-		my $u = 0;
-		my $v = 0;
-		my @zis   = ( $points->[$is[0]]->{ele} );
-		my @zjs   = ( $points->[$js[0]]->{ele} );
-		while (($u < $#sis) && ($v < $#sjs)) {
-		  my $i = $is[$u];
-		  my $j = $js[$v];
-		  if ($sis[$u + 1] < $sjs[$v + 1]) {
-		    $u ++;
-		    # interpolate the point onto the other interval
-		    my $f = ($sis[$u] - $sjs[$v]) / ($sjs[$v + 1] - $sjs[$v]);
-		    my $z0   = (1 - $f) * $points->[$js[$v]]->{ele} + $f * $points->[$js[$v + 1]]->{ele};
-		    # note: in limit of being close to the snapped section, altitude is average of two branches, then it diverges
-		    my $g = ( 1 + cos($pi * $sis[$u] / $snapTransition) ) / 4;   # from 0.5 to 0
-		    die "negative g!" if ($g < 0);
-		    my $z1 = $points->[$is[$u]]->{ele};
-		    $zis[$u] = $g * $z0 + (1 - $g) * $z1;
-		  } else {
-		    $v ++;
-		    my $f = ($sjs[$v] - $sis[$u]) / ($sis[$u + 1] - $sis[$u]);
-		    my $z0   = (1 - $f) * $points->[$is[$u]]->{ele} + $f * $points->[$is[$u + 1]]->{ele};
-		    my $g = ( 1 + cos($pi * $sjs[$v] / $snapTransition) ) / 4;   # from 0.5 to 0
-		    die "negative g!" if ($g < 0);
-		    # note: in limit of being close to the snapped section, altitude is average of two branches, then it diverges
-		    my $z1 = $points->[$js[$v]]->{ele};
-		    $zjs[$v] = $g * $z0 + (1 - $g) * $z1;
-		  }
-		}
+                $s = 0;
+                while (($s < $snapTransition) && ($j > 0) && ($j < $#$points)) {
+                  $s += latlngDistance($points->[$j], $points->[$j + $jd]);
+                  $j += $jd;
+                  push @sjs, $s;
+                  push @js, $j;
+                }
+                # step thru and adjust altitudes
+                my $u = 0;
+                my $v = 0;
+                my @zis   = ( $points->[$is[0]]->{ele} );
+                my @zjs   = ( $points->[$js[0]]->{ele} );
+                while (($u < $#sis) && ($v < $#sjs)) {
+                  my $i = $is[$u];
+                  my $j = $js[$v];
+                  if ($sis[$u + 1] < $sjs[$v + 1]) {
+                    $u ++;
+                    # interpolate the point onto the other interval
+                    my $f = ($sis[$u] - $sjs[$v]) / ($sjs[$v + 1] - $sjs[$v]);
+                    my $z0   = (1 - $f) * $points->[$js[$v]]->{ele} + $f * $points->[$js[$v + 1]]->{ele};
+                    # note: in limit of being close to the snapped section, altitude is average of two branches, then it diverges
+                    my $g = ( 1 + cos($pi * $sis[$u] / $snapTransition) ) / 4;   # from 0.5 to 0
+                    die "negative g!" if ($g < 0);
+                    my $z1 = $points->[$is[$u]]->{ele};
+                    $zis[$u] = $g * $z0 + (1 - $g) * $z1;
+                  } else {
+                    $v ++;
+                    my $f = ($sjs[$v] - $sis[$u]) / ($sis[$u + 1] - $sis[$u]);
+                    my $z0   = (1 - $f) * $points->[$is[$u]]->{ele} + $f * $points->[$is[$u + 1]]->{ele};
+                    my $g = ( 1 + cos($pi * $sjs[$v] / $snapTransition) ) / 4;   # from 0.5 to 0
+                    die "negative g!" if ($g < 0);
+                    # note: in limit of being close to the snapped section, altitude is average of two branches, then it diverges
+                    my $z1 = $points->[$js[$v]]->{ele};
+                    $zjs[$v] = $g * $z0 + (1 - $g) * $z1;
+                  }
+                }
 
-		# assign the new elevations to the appropriate points
-		for my $u ( 0 .. $#zis ) {
-		  $points->[$is[$u]]->{ele} = $zis[$u];
-		}
-		for my $v ( 0 .. $#zjs ) {
-		  $points->[$js[$v]]->{ele} = $zjs[$v];
-		}
-	      }
-	    }
-	    # end of snap transition
+                # assign the new elevations to the appropriate points
+                for my $u ( 0 .. $#zis ) {
+                  $points->[$is[$u]]->{ele} = $zis[$u];
+                }
+                for my $v ( 0 .. $#zjs ) {
+                  $points->[$js[$v]]->{ele} = $zjs[$v];
+                }
+              }
+            }
+            # end of snap transition
 
             # jump to next ivalue outside of range if we did replacement
             # this isn't perfect, but note points in j range are changed, so
@@ -2152,7 +2152,7 @@ for my $file ( @files ) {
                   my $dRefine = 3 * $lSmooth;
 
                   # refine spacing -- need to refine to sufficient resolution to resolve the angle
-		  # this was multipled by 0.5, but that generated too many points, so updating
+                  # this was multipled by 0.5, but that generated too many points, so updating
                   my $spacing = $lSmooth * (0.01 + abs($smoothRadians / $a));
 
                   # tricky bit -- we need to insert points back to the desired range, but that may extend earlier than points
@@ -2162,7 +2162,7 @@ for my $file ( @files ) {
                   my $s = 0;
                   my $i3 = $#pNew;
                   my @ds;
-		  $ds[$i3] = 0;
+                  $ds[$i3] = 0;
                 sLoop: while ($s < $dRefine) {
                     last sLoop if ($i3 <= 0);
                     $i3 --;
@@ -2187,7 +2187,7 @@ for my $file ( @files ) {
                   my $ff = 0.5 * $spacing / $ds[$#pNew];  # normalized spacing of new points
                   if ( ($f > $ff) && ($f < 1 - $ff) ) {
                     push @pNew, interpolatePoint($pNew[-1], $pStack[-1], $f);
-		    # adjust spacing to next point to account for interpolated point
+                    # adjust spacing to next point to account for interpolated point
                     $ds[$#pNew] = $ds[$#pNew - 1] * (1 - $f);
                     $ds[$#pNew - 1] *= $f;
                   }
@@ -2196,19 +2196,19 @@ for my $file ( @files ) {
                   while (@pStack) {
                     my $p1 = $pNew[-1];
                     my $p2 = $pStack[-1];
-		    my $dsTot = latlngDistance($p1, $p2);
+                    my $dsTot = latlngDistance($p1, $p2);
                     my $N = int($dsTot / $spacing + 0.5);
-		    if ($N > 0 ) {
-		      $ds[$#pNew] = $dsTot / $N;
-		      for my $n ( 1 .. $N - 1 ) {
-			push @pNew, interpolatePoint($p1, $p2, $n / $N);
-			$ds[$#pNew] = $dsTot / $N;
-		      }
-		    } else {
-		      $ds[$#pNew] = $dsTot;
-		    }
+                    if ($N > 0 ) {
+                      $ds[$#pNew] = $dsTot / $N;
+                      for my $n ( 1 .. $N - 1 ) {
+                        push @pNew, interpolatePoint($p1, $p2, $n / $N);
+                        $ds[$#pNew] = $dsTot / $N;
+                      }
+                    } else {
+                      $ds[$#pNew] = $dsTot;
+                    }
                     push @pNew, pop @pStack;
-		    $ds[$#pNew] = 0;
+                    $ds[$#pNew] = 0;
                   }
                 }
               }
@@ -2264,7 +2264,7 @@ for my $file ( @files ) {
         $smooth = $lAutoSmooth if ($smoothLoop == 2);
         $smooth = $zAutoSmooth if ($smoothLoop == 3);
 
-	# scale factors
+        # scale factors
         if ( $smoothLoop % 2 == 0 ) {
           %fsigma = (
                     "ele" => 1,
@@ -2278,7 +2278,7 @@ for my $file ( @files ) {
                     "lon" => 0,
                    );
         }
-	my $autoSmoothing = ($smoothLoop > 1);
+        my $autoSmoothing = ($smoothLoop > 1);
 
         my @keys = keys %fsigma;
         my $sumSigma2 = 0;
@@ -2291,150 +2291,150 @@ for my $file ( @files ) {
         #
 
         if ( $smooth > 0 ) {
-	  note("smoothing loop $smoothLoop: parameter = $smooth\n");
+          note("smoothing loop $smoothLoop: parameter = $smooth\n");
 
-	  # calculate smoothing sigma for autosmoothing based on gradient
-	  calcSigma(points=> $points)
-	    if ($smoothLoop == 3);
+          # calculate smoothing sigma for autosmoothing based on gradient
+          calcSigma(points=> $points)
+            if ($smoothLoop == 3);
 
           my @pNew;
 
-	  # step thru the points
+          # step thru the points
           for my $i ( 0 .. $#$points ) {
-	    my $sigma0 = ($autoSmoothing ? $smooth * $points->[$i]->{sigma} : $smooth);
+            my $sigma0 = ($autoSmoothing ? $smooth * $points->[$i]->{sigma} : $smooth);
 
-	    # create smoothed data: initialize with unsmoothed data
-	    my %var = %{$points->[$i]};
+            # create smoothed data: initialize with unsmoothed data
+            my %var = %{$points->[$i]};
 
-	    if ($sigma0 > 0) {
-	      my $dsMax = 4 * $sigma0;
+            if ($sigma0 > 0) {
+              my $dsMax = 4 * $sigma0;
 
-	      my $j = $i;
-	      my $s = 0;
-	      while ((($j > 0) || $isLoop) &&
-		     ($j > $i - @$points) &&
-		     ($s  < $dsMax)
-		    ) {
-		$s += latlngDistance( $points->[$j], $points->[$j - 1] );
-		$j --;
-	      }
+              my $j = $i;
+              my $s = 0;
+              while ((($j > 0) || $isLoop) &&
+                     ($j > $i - @$points) &&
+                     ($s  < $dsMax)
+                    ) {
+                $s += latlngDistance( $points->[$j], $points->[$j - 1] );
+                $j --;
+              }
 
-	      $s = 0;
-	      my $k = $i;
-	      while ((($k < $#$points) || $isLoop) &&
-		     ($k < $i + @$points) &&
-		     ($s < $dsMax )
-		    ) {
-		$s += latlngDistance( $points->[$k % @$points], $points->[($k + 1) % @$points] );
-		$k ++;
-	      }
+              $s = 0;
+              my $k = $i;
+              while ((($k < $#$points) || $isLoop) &&
+                     ($k < $i + @$points) &&
+                     ($s < $dsMax )
+                    ) {
+                $s += latlngDistance( $points->[$k % @$points], $points->[($k + 1) % @$points] );
+                $k ++;
+              }
 
-	      my $p0 = $points->[$i];
+              my $p0 = $points->[$i];
 
-	      # create list of separations
-	      $s = 0;
-	      my @ss = (0);
-	      for my $ii ( $j .. $k - 1 ) {
-		my $ds = latlngDistance($points->[($ii + 1) % @$points], $points->[$ii % @$points]);
-		$s += $ds;
-		push @ss, $s;
-	      }
+              # create list of separations
+              $s = 0;
+              my @ss = (0);
+              for my $ii ( $j .. $k - 1 ) {
+                my $ds = latlngDistance($points->[($ii + 1) % @$points], $points->[$ii % @$points]);
+                $s += $ds;
+                push @ss, $s;
+              }
 
-	      for my $key ( @keys ) {
+              for my $key ( @keys ) {
 
-		next
-		  if ( $fsigma{$key} <= 0 );
+                next
+                  if ( $fsigma{$key} <= 0 );
 
-		my $sigma = $fsigma{$key} * $sigma0;
+                my $sigma = $fsigma{$key} * $sigma0;
 
-		my $sum0 = 0;
-		my $sum1 = 0;
+                my $sum0 = 0;
+                my $sum1 = 0;
 
-		my @us = ();
+                my @us = ();
 
-		# find normalized distance to center point
-		for my $ii ( 0 .. $#ss ) {
-		  push @us, ($ss[$ii] - $ss[$i - $j]) / $sigma;
-		}
+                # find normalized distance to center point
+                for my $ii ( 0 .. $#ss ) {
+                  push @us, ($ss[$ii] - $ss[$i - $j]) / $sigma;
+                }
 
-		next
-		  if ( (@us < 2) );
+                next
+                  if ( (@us < 2) );
 
-		# simple weighted average -- does not consider density of points
-		# more sophisticated approach could use 2D convolution
-		for my $ii ( 0 .. $#us ) {
-		  my $u = $us[$ii];
-		  my $p = $points->[($j + $ii) % @$points];
-		  my $z = $p->{$key};
+                # simple weighted average -- does not consider density of points
+                # more sophisticated approach could use 2D convolution
+                for my $ii ( 0 .. $#us ) {
+                  my $u = $us[$ii];
+                  my $p = $points->[($j + $ii) % @$points];
+                  my $z = $p->{$key};
 
-		  # weight by distance
-		  my $du = ($ii > 0) ? $u - $us[$ii - 1] : 0;
-		  $du += $us[$ii + 1] - $u if ($ii < $#us);
+                  # weight by distance
+                  my $du = ($ii > 0) ? $u - $us[$ii - 1] : 0;
+                  $du += $us[$ii + 1] - $u if ($ii < $#us);
 
-		  my $w = exp(-($u ** 2) / 2) * $du;
-		  $sum1 += $w * $z;
-		  $sum0 += $w;
-		}
+                  my $w = exp(-($u ** 2) / 2) * $du;
+                  $sum1 += $w * $z;
+                  $sum0 += $w;
+                }
 
-		# this may be deletable if there's a legitimate reason for a zero sum
-		die("zero sum found!!!\npoint = $i\nss = @ss\nus = @us\n")
-		  if ( $sum0 == 0 );
+                # this may be deletable if there's a legitimate reason for a zero sum
+                die("zero sum found!!!\npoint = $i\nss = @ss\nus = @us\n")
+                  if ( $sum0 == 0 );
 
-		$var{$key} = $sum1 / $sum0 if ($sum0 != 0);
-	      }
+                $var{$key} = $sum1 / $sum0 if ($sum0 != 0);
+              }
             }
             push @pNew, \%var;
           }
-	  $points = \@pNew;
-	}
+          $points = \@pNew;
+        }
       }
 
       # anchoring: return start point and, if not a loop, finish point to original values
       # if anchoring requested
       if ( $anchorSF && (! $isLoop) ) {
-	for my $d ( 1, -1 ) {
-	  my %sigma = (
-		       ele => sqrt($lSmooth ** 2 + $zSmooth ** 2),
-		       lat => $lSmooth,
-		       lon => $lSmooth,
-		      );
+        for my $d ( 1, -1 ) {
+          my %sigma = (
+                       ele => sqrt($lSmooth ** 2 + $zSmooth ** 2),
+                       lat => $lSmooth,
+                       lon => $lSmooth,
+                      );
 
-	  # the point to anchor
-	  my $i0 = ($d == 1) ? 0 : -1;
+          # the point to anchor
+          my $i0 = ($d == 1) ? 0 : -1;
 
-	  # if autosmoothing is used, then add that in
-	  $sigma{ele} = sqrt($sigma{ele} ** 2 + ($points->[$i0]->{sigma} * $zAutoSmooth) ** 2)
-	    if ($zAutoSmooth > 0);
+          # if autosmoothing is used, then add that in
+          $sigma{ele} = sqrt($sigma{ele} ** 2 + ($points->[$i0]->{sigma} * $zAutoSmooth) ** 2)
+            if ($zAutoSmooth > 0);
 
-	  # this is from BEFORE smoothing since we've not updated the distance field: this is important
-	  my $courseDistance = $points->[-1]->{distance} - $points->[0]->{distance};
+          # this is from BEFORE smoothing since we've not updated the distance field: this is important
+          my $courseDistance = $points->[-1]->{distance} - $points->[0]->{distance};
 
-	  for my $key ( keys %sigma ) {
-	    if ($sigma{$key} > 0) {
-	      my $dy0 = $points->[$i0]->{$key} - $endPoints[$i0]->{$key};
+          for my $key ( keys %sigma ) {
+            if ($sigma{$key} > 0) {
+              my $dy0 = $points->[$i0]->{$key} - $endPoints[$i0]->{$key};
 
-	      # step thru points
-	      my $i = $i0 % @$points;
+              # step thru points
+              my $i = $i0 % @$points;
 
-	      my $dsMax = 6 * $sigma{$key};
-	      while ( ($i <= $#$points) && ($i >= 0) ) {
+              my $dsMax = 6 * $sigma{$key};
+              while ( ($i <= $#$points) && ($i >= 0) ) {
 
-		# distance: using values calculated from the original course, not
-		# distorted by smoothing, since smoothing can collapse points,
-		# and point of anchoring is to reduce collapse
-		my $s = abs(distanceDifference($points->[$i], $points->[$i0], $courseDistance, $isLoop));
-		last if ($s > $dsMax );
+                # distance: using values calculated from the original course, not
+                # distorted by smoothing, since smoothing can collapse points,
+                # and point of anchoring is to reduce collapse
+                my $s = abs(distanceDifference($points->[$i], $points->[$i0], $courseDistance, $isLoop));
+                last if ($s > $dsMax );
 
-		my $u = $s / $sigma{$key};
-		my $w = exp(-$u ** 2 / 2) * (1 - $s / $courseDistance);
-		$points->[$i]->{$key} -= $w * $dy0;
+                my $u = $s / $sigma{$key};
+                my $w = exp(-$u ** 2 / 2) * (1 - $s / $courseDistance);
+                $points->[$i]->{$key} -= $w * $dy0;
 
-		$i += $d;
-	      }
-	    }
+                $i += $d;
+              }
+            }
           }
-	}
-	deleteField(points=> $points, field=> "sigma") unless ($addSigma);
+        }
+        deleteField(points=> $points, field=> "sigma") unless ($addSigma);
       }
 
       # spline again post-smoothing, if requested
@@ -2447,7 +2447,7 @@ for my $file ( @files ) {
       # set up a distance field for the next few sections
       #
       if (@flatten || ((defined $cropMin) && ($cropMin > 0)) || ((defined $cropMax) && ($cropMax > 0)) ) {
-	addDistanceField(points=> $points)
+        addDistanceField(points=> $points)
       }
 
       #
@@ -2500,24 +2500,24 @@ for my $file ( @files ) {
         # monitor the direction and when the direction changes enough, add a point
         #
         my @simplified = (0, 1);
-	die("course lacks at least two points... quitting\n") unless (@$points > 1);
+        die("course lacks at least two points... quitting\n") unless (@$points > 1);
         my $aMax = $pi / 16;
         for my $i ( 2 .. $#$points ) {
-	  my $angle = latlngAngle($points->[$i], $points->[$simplified[-1]], $points->[$simplified[-2]]);
-	  # add points which cause an angle change
+          my $angle = latlngAngle($points->[$i], $points->[$simplified[-1]], $points->[$simplified[-2]]);
+          # add points which cause an angle change
           if (
-	      (defined $angle) &&
-	      (abs($angle) > $aMax) &&
-	      (($isLoop || ($i < $#$points)))
-	     ) {
-	    my $a1 = latlngAngle($points->[($i + 1) % @$points], $points->[$i], $points->[$simplified[-1]]);
-	    my $a2 = latlngAngle($points->[($i + 1) % @$points], $points->[$i], $points->[$i - 1]);
-	    if (
-		((defined $a1) && (abs($a1) > $aMax)) ||
-		((defined $a2) && (abs($a2) > $aMax))
-	       ) {
-	      push @simplified, $i;
-	    }
+              (defined $angle) &&
+              (abs($angle) > $aMax) &&
+              (($isLoop || ($i < $#$points)))
+             ) {
+            my $a1 = latlngAngle($points->[($i + 1) % @$points], $points->[$i], $points->[$simplified[-1]]);
+            my $a2 = latlngAngle($points->[($i + 1) % @$points], $points->[$i], $points->[$i - 1]);
+            if (
+                ((defined $a1) && (abs($a1) > $aMax)) ||
+                ((defined $a2) && (abs($a2) > $aMax))
+               ) {
+              push @simplified, $i;
+            }
           }
         }
         if ( $isLoop ) {
@@ -2543,27 +2543,27 @@ for my $file ( @files ) {
               my $v2 =  ((($fs[1] > 0.5) && ($j < $#simplified - 1)) ? $simplified[$j + 2] : $simplified[$j + 1]) - 1;
 
               # find the specific segments and positions where the crossings occur
-	      my $crossingsFound = 0;
+              my $crossingsFound = 0;
               for my $u ( $u1 .. $u2 ) {
                 for my $v ( $v1 .. $v2 ) {
                   if ( (my @gs =
-			segmentIntercept(
-					 [$points->[$u], $points->[($u + 1) % @$points]],
-					 [$points->[$v], $points->[($v + 1) % @$points]]
-					)
-		       ) == 2
-		     ) {
-		    # note("... found intercept on full course: points: segments $u and $v (intercepts = @gs)\n");
+                        segmentIntercept(
+                                         [$points->[$u], $points->[($u + 1) % @$points]],
+                                         [$points->[$v], $points->[($v + 1) % @$points]]
+                                        )
+                       ) == 2
+                     ) {
+                    # note("... found intercept on full course: points: segments $u and $v (intercepts = @gs)\n");
                     push @crossings, interpolatePoint($points->[$u], $points->[($u + 1) % @$points], $gs[0]);
                     push @crossings, interpolatePoint($points->[$v], $points->[($v + 1) % @$points], $gs[1]);
-		    $crossingsFound ++;
+                    $crossingsFound ++;
                   }
                 }
               }
 
-	      # we didn't find any crossings...
-	      warn("crossing detected from simplified route but not found on detailed route -- check crossings.\n")
-		unless ($crossingsFound);
+              # we didn't find any crossings...
+              warn("crossing detected from simplified route but not found on detailed route -- check crossings.\n")
+                unless ($crossingsFound);
             }
           }
         }
@@ -2596,14 +2596,14 @@ for my $file ( @files ) {
 
         @si = sort { $a <=> $b } @si;
 
-	if (@si) {
-	  my @siNew = ( $si[0] );
-	  for my $j ( 1 .. $#si ) {
-	    push @siNew, $si[$j] if (abs($si[$j] - $siNew[-1]) > 0.5);
-	  }
+        if (@si) {
+          my @siNew = ( $si[0] );
+          for my $j ( 1 .. $#si ) {
+            push @siNew, $si[$j] if (abs($si[$j] - $siNew[-1]) > 0.5);
+          }
 
-	  @si = @siNew;
-	}
+          @si = @siNew;
+        }
 
         # report simplified route
         {
@@ -2617,13 +2617,13 @@ for my $file ( @files ) {
         }
 
         # interpolate points
-	# si: position of point to be interpolated
-	# i : index to the existing points
-	# s1: distance to point i
-	# s2: distance to point 1 + 1
-	# j : index into interpolated point array
+        # si: position of point to be interpolated
+        # i : index to the existing points
+        # s1: distance to point i
+        # s2: distance to point 1 + 1
+        # j : index into interpolated point array
         if ( @si) {
-	  note("adding additional points at crossings...\n");
+          note("adding additional points at crossings...\n");
           my @newPoints = $points->[0];
           my $j = 0;
           for my $i ( 0 .. $#$points - 1) {
@@ -2633,7 +2633,7 @@ for my $file ( @files ) {
             while (($j < @si) && ($s2 > $si[$j])) {
               if ( (abs($si[$j] - $s1) > 0.5) && (abs($si[$j] - $s2) > 0.5) ) {
                 my $f = ($si[$j] - $s1) / ($s2 - $s1);
-		note("point added @ ", $si[$j], " meters\n");
+                note("point added @ ", $si[$j], " meters\n");
                 push @newPoints, interpolatePoint($points->[$i], $points->[$i + 1], $f);
               }
               $j ++;
@@ -2684,6 +2684,7 @@ for my $file ( @files ) {
           # if this is cropMin, this may be followed by including the point
           # if this is cropMax, then the point will be excluded
           for my $s0 ( $cropMin, $cropMax ) {
+	    next unless (defined $s0);
             if ( ($i > 0) && ($s0 > 0) && ($points->[$i]->{distance} > $s0) && ($points->[$i - 1]->{distance} < $s0) ) {
               my $ds = $points->[$i]->{distance} - $points->[$i - 1]->{distance};
               my $f = ($s0 - $points->[$i - 1]->{distance}) / $ds;
@@ -2748,12 +2749,12 @@ for my $file ( @files ) {
           $s += latlngDistance($points->[$i - 1], $points->[$i])
             if ( $i > 0 );
           my $shift = $laneShift;
-	  if ( (defined $shiftStart) && (defined $shiftEnd) && ($shiftEnd < $shiftStart) ) {
-	    $shift *= (transition(($shiftStart - $s) / $shiftDistance) + transition(($s - $shiftEnd) / $shiftDistance));
-	  } else {
-	    $shift *= transition(($shiftStart - $s) / $shiftDistance) if (defined $shiftStart);
-	    $shift *= transition(($s - $shiftEnd) / $shiftDistance)   if (defined $shiftEnd);
-	  }
+          if ( (defined $shiftStart) && (defined $shiftEnd) && ($shiftEnd < $shiftStart) ) {
+            $shift *= (transition(($shiftStart - $s) / $shiftDistance) + transition(($s - $shiftEnd) / $shiftDistance));
+          } else {
+            $shift *= transition(($shiftStart - $s) / $shiftDistance) if (defined $shiftStart);
+            $shift *= transition(($s - $shiftEnd) / $shiftDistance)   if (defined $shiftEnd);
+          }
           $points->[$i]->{shift} = $shift;
         }
       }
@@ -2778,14 +2779,14 @@ for my $file ( @files ) {
       # shift lanes to the right (positive) or left (negative)
       #
       if ( $laneShift != 0 ) {
-	my @pNews;
+        my @pNews;
         for my $ps ( $points, $rPoints ) {
           unless (@$ps) {
-	    push @pNews, [];
-	    next;
-	  }
+            push @pNews, [];
+            next;
+          }
 
-	  my @pNew = ();
+          my @pNew = ();
 
           # create list of (x, y) coordinates
           my @dxs = ();
@@ -2815,35 +2816,35 @@ for my $file ( @files ) {
 
           # lane shift: to right, which means adding pi/2 to the direction
           shiftLoop: for my $i ( 0 .. $#$ps ) {
-	    my ($dir1, $dir2);
-	    if (($i > 0) || $isLoop) {
-	      $dir1 = $dirs[$i - 1];
-	      $dir2 = $dir1 + reduceAngle($dirs[$i] - $dir1);
-	    } else {
-	      $dir1 = $dirs[$i];
-	      $dir2 = $dirs[$i];
-	    }
+            my ($dir1, $dir2);
+            if (($i > 0) || $isLoop) {
+              $dir1 = $dirs[$i - 1];
+              $dir2 = $dir1 + reduceAngle($dirs[$i] - $dir1);
+            } else {
+              $dir1 = $dirs[$i];
+              $dir2 = $dirs[$i];
+            }
 
-	    # for sharp turns repeat a point: there's no way to decide if it's an "inside" or "outside" sharp turn
-	    if ( ($isLoop || (($i > 0) && ($i < $#$points))) && (abs($dir2 - $dir1) > 0.99 * $pi) ) {
-	      my @pTurns = ();
-	      for my $dir ( $dir1, $dir2 ) {
-		push @pTurns,
-		  shiftPoint(point=> $ps->[$i], direction=> $dir, distance=> $ps->[$i]->{shift});
-	      }
-	      # check if there's a knot.. if not use the doubled points
-	      my @fs = segmentIntercept( [$ps->[$i - 1], $pTurns[0]], [$pTurns[1], $ps->[($i + 1) % @$points]] );
-	      if ( @fs == 0 ) {
-		push @pNew, @pTurns;
-		next shiftLoop;
-	      }
-	    }
+            # for sharp turns repeat a point: there's no way to decide if it's an "inside" or "outside" sharp turn
+            if ( ($isLoop || (($i > 0) && ($i < $#$points))) && (abs($dir2 - $dir1) > 0.99 * $pi) ) {
+              my @pTurns = ();
+              for my $dir ( $dir1, $dir2 ) {
+                push @pTurns,
+                  shiftPoint(point=> $ps->[$i], direction=> $dir, distance=> $ps->[$i]->{shift});
+              }
+              # check if there's a knot.. if not use the doubled points
+              my @fs = segmentIntercept( [$ps->[$i - 1], $pTurns[0]], [$pTurns[1], $ps->[($i + 1) % @$points]] );
+              if ( @fs == 0 ) {
+                push @pNew, @pTurns;
+                next shiftLoop;
+              }
+            }
 
-	    push @pNew, shiftVertex(point=> $ps->[$i], directions=> [$dir1, $dir2], distance=> $ps->[$i]->{shift});
-	  }
-	  push @pNews, \@pNew;
+            push @pNew, shiftVertex(point=> $ps->[$i], directions=> [$dir1, $dir2], distance=> $ps->[$i]->{shift});
+          }
+          push @pNews, \@pNew;
         }
-	($points, $rPoints) = @pNews;
+        ($points, $rPoints) = @pNews;
       }
 
       #
@@ -2865,15 +2866,15 @@ for my $file ( @files ) {
         my $dir2 = atan2($dy2, $dx2);
         my $dir = averageAngles($dir1, $dir2);
 
-	# create the loop
-	my $loop = makeLoop(points=> [$ps1->[-1], $ps2->[0]], direction=> $dir, radius=> $R, defaultSign=> (($laneShift < 0) ? -1 : 1));
-	push @$ps1, @$loop;
+        # create the loop
+        my $loop = makeLoop(points=> [$ps1->[-1], $ps2->[0]], direction=> $dir, radius=> $R, defaultSign=> (($laneShift < 0) ? -1 : 1));
+        push @$ps1, @$loop;
       }
 
       # eliminate temporary fields (for now)
       for my $k ( "distance", "shift" ) {
-	for my $ps ( $points, $rPoints ) {
-	  deleteField(points=> $ps, field=> $k);
+        for my $ps ( $points, $rPoints ) {
+          deleteField(points=> $ps, field=> $k);
         }
       }
 
@@ -2891,43 +2892,43 @@ for my $file ( @files ) {
       #
       note("U-turn loops...\n");
       if ( (defined $rUTurn) && ($rUTurn > 0) ) {
-	my @pNew = ();
-	my $i = 0;
-	push @pNew, $points->[$i++]
-	  if (! $isLoop);
-	while ($i <= $#$points) {
-	  push @pNew, $points->[$i];
+        my @pNew = ();
+        my $i = 0;
+        push @pNew, $points->[$i++]
+          if (! $isLoop);
+        while ($i <= $#$points) {
+          push @pNew, $points->[$i];
 
-	  if (
-	      ($isLoop || ($i < $#$points)) &&
-	      UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[($i + 1) % @$points])
-	     ) {
-	    my $d1 = latlngDirection($points->[$i - 1], $points->[$i]);
-	    my $d2 = latlngDirection($points->[($i + 1) % @$points], $points->[$i]);
-	    note("3-point U-turn detected!  Directions = $d1, $d2: processing!\n");
+          if (
+              ($isLoop || ($i < $#$points)) &&
+              UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[($i + 1) % @$points])
+             ) {
+            my $d1 = latlngDirection($points->[$i - 1], $points->[$i]);
+            my $d2 = latlngDirection($points->[($i + 1) % @$points], $points->[$i]);
+            note("3-point U-turn detected!  Directions = $d1, $d2: processing!\n");
 
-	    my $dir = averageAngles($d1, $d2);
-	    my $loop = makeLoop(points=> [$points->[$i], $points->[$i]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
-	    push @pNew, @$loop;
-	    push @pNew, \%{$points->[$i]};   # put a copy of the turn-around point here
-	  } elsif (
-		   ($isLoop || ($i < $#$points - 1)) &&
-		   UTurnCheck($points->[$i - 1], $points->[$i], $points->[($i + 1) % @$points], $points->[($i + 2) % @$points]) &&
-		   (latlngDistance($points->[$i], $points->[($i + 1) % @$points]) < 10)
-		  ) {
-	    my $d1 = latlngDirection($points->[$i - 1], $points->[$i]);
-	    my $d2 = latlngDirection($points->[($i + 2) % @$points], $points->[($i + 1) % @$points]);
-	    note("4-point U-turn detected!  Directions = $d1, $d2: processing!\n");
-	    my $dir = averageAngles($d1, $d2);
-	    my $loop = makeLoop(points=> [$points->[$i], $points->[($i + 1) % @$points]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
-	    push @pNew, @$loop;
-	    $i ++;
-	    push @pNew, $points->[$i];
-	  }
-	  $i ++;
-	}
-	push @pNew, $points->[$i++] while ($i < $#$points);
-	$points = \@pNew;
+            my $dir = averageAngles($d1, $d2);
+            my $loop = makeLoop(points=> [$points->[$i], $points->[$i]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
+            push @pNew, @$loop;
+            push @pNew, \%{$points->[$i]};   # put a copy of the turn-around point here
+          } elsif (
+                   ($isLoop || ($i < $#$points - 1)) &&
+                   UTurnCheck($points->[$i - 1], $points->[$i], $points->[($i + 1) % @$points], $points->[($i + 2) % @$points]) &&
+                   (latlngDistance($points->[$i], $points->[($i + 1) % @$points]) < 10)
+                  ) {
+            my $d1 = latlngDirection($points->[$i - 1], $points->[$i]);
+            my $d2 = latlngDirection($points->[($i + 2) % @$points], $points->[($i + 1) % @$points]);
+            note("4-point U-turn detected!  Directions = $d1, $d2: processing!\n");
+            my $dir = averageAngles($d1, $d2);
+            my $loop = makeLoop(points=> [$points->[$i], $points->[($i + 1) % @$points]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
+            push @pNew, @$loop;
+            $i ++;
+            push @pNew, $points->[$i];
+          }
+          $i ++;
+        }
+        push @pNew, $points->[$i++] while ($i < $#$points);
+        $points = \@pNew;
       }
 
 
@@ -3060,9 +3061,9 @@ for my $file ( @files ) {
 
       # copy the first point to the last point if specified
       if ( $copyPoint && (($points->[0]->{lat} != $points->[-1]->{lat}) || ($points->[0]->{lon} != $points->[-1]->{lon}) || ($points->[0]->{ele} != $points->[-1]->{ele})) ) {
-	my %p = %{$points->[0]};
-	push @$points, \%p;
-	$points->[-1]->{distance} = $points-[-2]->{distance} + latlngDistance($points->[-2], $points->[-1]) if (defined $points->[-2]->{distance});
+        my %p = %{$points->[0]};
+        push @$points, \%p;
+        $points->[-1]->{distance} = $points-[-2]->{distance} + latlngDistance($points->[-2], $points->[-1]) if (defined $points->[-2]->{distance});
       }
 
       #
@@ -3108,14 +3109,14 @@ for my $file ( @files ) {
       # finish up
       #
       if ($addGradient) {
-	note("adding gradient field\n");
-	addGradientField(points=> $points, isLoop=> $isLoop);
+        note("adding gradient field\n");
+        addGradientField(points=> $points, isLoop=> $isLoop);
       } else {
-	deleteField(points=> $points, field=> "gradient")
+        deleteField(points=> $points, field=> "gradient")
       }
 
       deleteField(points=> $points, field=> "distance")
-	unless ( $addDistance );
+        unless ( $addDistance );
     }
   }
   close $fin;
@@ -3130,20 +3131,20 @@ for my $file ( @files ) {
       my @keys;
       my $nTrack = 0;
       for my $track ( @$tracks ) {
-	$nTrack ++;
-	my $segments = $track->{segments};
-	my $nSegment = 0;
-	for my $segment ( @$segments ) {
-	  $nSegment ++;
-	  my $points = $segment->{points};
-	  unless (@keys) {
-	    @keys = keys %{$points->[0]};
-	    print $fcsv join( ",", "track", "segment", @keys ), "\n";;
-	  }
-	  for my $p ( @$points ) {
-	    print $fcsv join( ",", $nTrack, $nSegment, @$p{@keys} ), "\n";
-	  }
-	}
+        $nTrack ++;
+        my $segments = $track->{segments};
+        my $nSegment = 0;
+        for my $segment ( @$segments ) {
+          $nSegment ++;
+          my $points = $segment->{points};
+          unless (@keys) {
+            @keys = keys %{$points->[0]};
+            print $fcsv join( ",", "track", "segment", @keys ), "\n";;
+          }
+          for my $p ( @$points ) {
+            print $fcsv join( ",", $nTrack, $nSegment, @$p{@keys} ), "\n";
+          }
+        }
       }
       close $fcsv;
     } else {
@@ -3153,8 +3154,8 @@ for my $file ( @files ) {
       my $keywords = $gpx->keywords();
       $keywords = [] unless (defined $keywords);
       for my $k ( @newKeywords ) {
-	push @$keywords, $k
-	  unless ( grep { $_ eq $k} @$keywords );
+        push @$keywords, $k
+          unless ( grep { $_ eq $k} @$keywords );
       }
       $gpx->keywords( $keywords );
 
