@@ -3835,7 +3835,7 @@ Synonym for -smoothz
 The following example was from a criterium course:
 
 C<processGPX -laneShift -4 -shiftStart 740 -shiftEnd 1390 -spacing 3 \
-   -prune -smooth 7 -snapDistance 2 -snap 1 -copyPoint -lap CherryPieCritRGT.gpx>
+    -prune -smooth 7 -snapDistance 2 -snap 1 -copyPoint -lap CherryPieCritRGT.gpx>
 
 The course has an out-and-back section ending in a loop.  In the
 actual race, the out-and-back is separated by cones. However, for
@@ -4113,7 +4113,7 @@ The default of "2" seems to work well.
 GPX files have "metadata" which is various tags. You can change values of
 metadata with various options. This is an example:
 
-C<processGPX -author "Dan Connelly" -keywords "race, RGT" -copyright "Dan Connelly" -name "Crit Course" crit.gpx -out critRGT.gpx -description "the best crit course"
+C<processGPX -author "Dan Connelly" -keywords "race, RGT" -copyright "Dan Connelly" -name "Crit Course" crit.gpx -out critRGT.gpx -description "the best crit course">
 
 This example specifies an author name, adds keywords, a copyright, a
 title, and a description, taking the trackpoints from the file
