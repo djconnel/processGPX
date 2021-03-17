@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.14;   # make sure this matches pod value
+my $version = 0.15;   # make sure this matches pod value
 
 $0 =~ s(.*/)();
 
@@ -1059,6 +1059,45 @@ sub deleteField {
   }
 }
 
+sub cropPoints {
+  my %vars = @_;
+  my $points = $vars{points} // die;
+  my $cropMin = $vars{min} // 0;
+  my $cropMax = $vars{max} // 0;
+
+  note("cropping ", (defined $cropMin) ? "from $cropMin " : "", (defined $cropMax) ? "to $cropMax " : "", "meters...\n");
+
+  addDistanceField(points=> $points);
+
+  my $s = 0;
+  my @pNew = ();
+  for my $i (0 .. $#$points) {
+
+    # interpolate a point for cropMin, cropMax
+    # if this is cropMin, this may be followed by including the point
+    # if this is cropMax, then the point will be excluded
+    for my $s0 ( $cropMin, $cropMax ) {
+      if ( ($i > 0) && ($s0 > 0) && ($points->[$i]->{distance} > $s0) && ($points->[$i - 1]->{distance} < $s0) ) {
+	my $ds = $points->[$i]->{distance} - $points->[$i - 1]->{distance};
+	my $f = ($s0 - $points->[$i - 1]->{distance}) / $ds;
+	my $d1 = $f * $ds;
+	my $d2 = (1 - $f) * $ds;
+	if (($d1 > 0.01) && ($d2 > 0.01)) {
+	  push @pNew, interpolatePoint($points->[$i - 1], $points->[$i], $f);
+	}
+      }
+    }
+
+    if (((! defined $cropMin) || ($s >= $cropMin)) &&
+	((! defined $cropMax) || ($cropMax <= 0) || ($s <= $cropMax))) {
+      push @pNew, $points->[$i];
+    }
+
+    $s += latlngDistance($points->[$i], $points->[$i + 1])
+      if ($i < $#$points);
+  }
+  return \@pNew;
+}
 
 #
 # UTurnCheck
@@ -1419,6 +1458,7 @@ my $cropMin;           # minimum distance of retained data (distance calculated 
 my $csv = 0;           # whether to use CSV instead of GPX
 my $description;       # description, for GPX metadata
 my $extend = 0;        # apply to both append and prepend
+my $extendBack = 0;    # amount to extend the route with a loop.
 my $fixCrossings = 0;  # whether to flatten crossings
 my $gradientPower = 2; # power to raise gradient in evaluating segments for gradient signs
 my $gradientThreshold = 100;   # minimum climb @ 10% grade to get a gradient sign
@@ -1475,6 +1515,7 @@ GetOptions (
             "description=s" => \$description,
             "addGradientSigns" => \$addGradientSigns,
             "extend=f"      => \$extend,
+            "extendBack=f"  => \$extendBack,
             "fixCrossings"  => \$fixCrossings,
             "flatten=f{1,1000}" => \@flatten,
             "gradientPower=f" => \$gradientPower,
@@ -1524,12 +1565,17 @@ if ($needHelp) {
   pod2usage(-exitval=>0, -verbose=>2);
 }
 
-
 # proc to print user messages
 # here so it can access $quiet as a global variable
 sub note {
   warn(@_) unless ($quiet);
 }
+
+# if extendBack is specified, we need a turnaround loop... calculate crop
+# later
+$rTurnaround //= 0;
+$rTurnaround = 5
+  if (($extendBack > 0) && ($rTurnaround <= 0));
 
 die("Crop window minimum exceeds crop window maximum\n")
   if ((defined $cropMin) && (defined $cropMax) && ($cropMax > 0) && ($cropMin > $cropMax));
@@ -1605,7 +1651,7 @@ for my $file ( @files ) {
       # this is just a warning for now... easy to fix if it's along a line, but what if it goes around a corner?
       #
       {
-        note "checking for zig-zags...\n";
+        note("checking for zig-zags...\n");
         my $dzigzag = 100;
         my @UTurns = ();
         for my $i ( 1 .. $#$points - 1 ) {
@@ -2440,18 +2486,12 @@ for my $file ( @files ) {
       }
 
       #
-      # set up a distance field for the next few sections
-      #
-      if (@flatten || ((defined $cropMin) && ($cropMin > 0)) || ((defined $cropMax) && ($cropMax > 0)) ) {
-        addDistanceField(points=> $points)
-      }
-
-      #
       # flatten selected sections
       # points come in sets of 4: altitude, start point, finish point, lambda
       #
       if (@flatten) {
 	note("flattening...\n");
+	addDistanceField(points=> $points);
         for (my $nf = 0; $nf < @flatten; $nf += 4) {
           my $zFlatten     = $flatten[$nf];
           my $flattenStart = $flatten[$nf + 1] if ($nf < $#flatten);
@@ -2664,43 +2704,13 @@ for my $file ( @files ) {
         }
       }
 
-
       #
       # cropping: shorten distance of original GPX
       # note distance is calculated here... can change from lane shifts
       #
       if ( ((defined $cropMin) && ($cropMin > 0)) || ((defined $cropMax) && ($cropMax > 0)) ) {
-        note("cropping ", (defined $cropMin) ? "from $cropMin " : "", (defined $cropMax) ? "to $cropMax " : "", "meters...\n");
-        my $s = 0;
-        my @pNew = ();
-        for my $i (0 .. $#$points) {
-
-          # interpolate a point for cropMin, cropMax
-          # if this is cropMin, this may be followed by including the point
-          # if this is cropMax, then the point will be excluded
-          for my $s0 ( $cropMin, $cropMax ) {
-	    next unless (defined $s0);
-            if ( ($i > 0) && ($s0 > 0) && ($points->[$i]->{distance} > $s0) && ($points->[$i - 1]->{distance} < $s0) ) {
-              my $ds = $points->[$i]->{distance} - $points->[$i - 1]->{distance};
-              my $f = ($s0 - $points->[$i - 1]->{distance}) / $ds;
-              my $d1 = $f * $ds;
-              my $d2 = (1 - $f) * $ds;
-              if (($d1 > 0.01) && ($d2 > 0.01)) {
-                push @pNew, interpolatePoint($points->[$i - 1], $points->[$i], $f);
-              }
-            }
-          }
-
-          if (((! defined $cropMin) || ($s >= $cropMin)) &&
-              ((! defined $cropMax) || ($cropMax <= 0) || ($s <= $cropMax))) {
-            push @pNew, $points->[$i];
-          }
-
-          $s += latlngDistance($points->[$i], $points->[$i + 1])
-            if ($i < $#$points);
-        }
-        $points = \@pNew;
-        note("points remaining after cropping = ", scalar(@pNew), "\n");
+	$points = cropPoints(points=> $points, min=> $cropMin, max=> $cropMax);
+        note("points remaining after cropping = ", scalar(@$points), "\n");
       }
 
       #
@@ -2842,6 +2852,15 @@ for my $file ( @files ) {
         ($points, $rPoints) = @pNews;
       }
 
+
+      # for extendback, we calculate the crop crop position here: the loop counts as part
+      # of the extension distance
+      my $cropBack = 0;
+      if ($extendBack > 0) {
+	$cropBack = calcCourseDistance(points=> $points) + $extendBack;
+	note("calculating cropping position for extendBack = $cropBack\n");
+      }
+
       #
       # generate turn-around loops, if requested
       # last two points of outward leg, first two points of return leg, determine direction
@@ -2882,6 +2901,10 @@ for my $file ( @files ) {
         note("points on inbound = ", scalar(@$rPoints), "\n");
         push @$points, @$rPoints;
       }
+
+      # for -cropExtend, crop it here:
+      $points = cropPoints(points=> $points, max=> $cropBack)
+	if ($cropBack > 0);
 
       #
       # turn-around loops within the course, if requested
@@ -3059,7 +3082,7 @@ for my $file ( @files ) {
       if ( $copyPoint && (($points->[0]->{lat} != $points->[-1]->{lat}) || ($points->[0]->{lon} != $points->[-1]->{lon}) || ($points->[0]->{ele} != $points->[-1]->{ele})) ) {
         my %p = %{$points->[0]};
         push @$points, \%p;
-        $points->[-1]->{distance} = $points-[-2]->{distance} + latlngDistance($points->[-2], $points->[-1]) if (defined $points->[-2]->{distance});
+        $points->[-1]->{distance} = $points->[-2]->{distance} + latlngDistance($points->[-2], $points->[-1]) if (defined $points->[-2]->{distance});
       }
 
       #
@@ -3183,7 +3206,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.14
+0.15
 
 =head1 DESCRIPTION
 
@@ -3432,6 +3455,32 @@ or however else your command-line shell delimits spaces.
 =item B<extend> <meters>
 
 This is a simultaneous specificiation of both -prepend and -append.
+
+=item B<extendBack> <meters>
+
+With RGT point-to-point Magic Roads, the game will reserve the final
+100 meters for riders finishing.  If you've created a route to the
+top of a climb, for example, you may want the riders to be able to
+ride all the way to the top, rather than stopping up to 100 meters
+before the top.
+
+One way to deal with this is to use -append: this will extend
+the route with a straight line at the finish.  This may be enough,
+but this 100 meters might not be consistent with the real topography,
+for example the top of a twisting climb.
+
+So this is an alternative: it will create a loop of radius
+specified by -rTurnaround, then start returning on the route
+until the specified distance, I<including the loop>, is covered.
+If the loop is large enough, the route may end on the loop itself.
+If not, the route will end on the return section.
+
+It works by doing a normal turnaround, then cropping the course.
+So if there's not enough course to reach the specified distance, it will
+turn the route into a full out-and-back.  But typically the distance
+should be in the range of up to 100 meters or so.
+
+This disables -loop or -lap: it's meaningless with a lap course
 
 =item B<fixCrossings>
 

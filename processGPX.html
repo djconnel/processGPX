@@ -43,7 +43,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.14</p>
+<p>0.15</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -222,6 +222,20 @@
 <dd>
 
 <p>This is a simultaneous specificiation of both -prepend and -append.</p>
+
+</dd>
+<dt id="extendBack-meters"><b>extendBack</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>With RGT point-to-point Magic Roads, the game will reserve the final 100 meters for riders finishing. If you&#39;ve created a route to the top of a climb, for example, you may want the riders to be able to ride all the way to the top, rather than stopping up to 100 meters before the top.</p>
+
+<p>One way to deal with this is to use -append: this will extend the route with a straight line at the finish. This may be enough, but this 100 meters might not be consistent with the real topography, for example the top of a twisting climb.</p>
+
+<p>So this is an alternative: it will create a loop of radius specified by -rTurnaround, then start returning on the route until the specified distance, <i>including the loop</i>, is covered. If the loop is large enough, the route may end on the loop itself. If not, the route will end on the return section.</p>
+
+<p>It works by doing a normal turnaround, then cropping the course. So if there&#39;s not enough course to reach the specified distance, it will turn the route into a full out-and-back. But typically the distance should be in the range of up to 100 meters or so.</p>
+
+<p>This disables -loop or -lap: it&#39;s meaningless with a lap course</p>
 
 </dd>
 <dt id="fixCrossings"><b>fixCrossings</b></dt>
