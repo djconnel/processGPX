@@ -43,7 +43,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.15</p>
+<p>0.16</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -514,6 +514,24 @@
 <dd>
 
 <p>Synonym for -autoSmoothZ</p>
+
+</dd>
+<dt id="zOffset-meters"><b>zOffset</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>before scaling</i>. Use -zShift for changing altitude after scaling.</p>
+
+</dd>
+<dt id="zScale-factor"><b>zScale</b> &lt;factor&gt;</dt>
+<dd>
+
+<p>Multiply altitudes in the original file <i>after offset</i>. but <i>before shift</i>. This is useful for fantasy routes where climbing should be adjusted, or potentially for data from a poorly calibrated barometer where I want to perfectly tune the net altitude change of a climb.</p>
+
+</dd>
+<dt id="zShift-meters"><b>zShift</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. Use -zOffset for before scaling.</p>
 
 </dd>
 <dt id="zSmooth"><b>zSmooth</b></dt>

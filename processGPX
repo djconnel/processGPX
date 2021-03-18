@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.15;   # make sure this matches pod value
+my $version = 0.16;   # make sure this matches pod value
 
 $0 =~ s(.*/)();
 
@@ -1493,6 +1493,9 @@ my $splineMaxDegs = 60;  # maximum turn angle for spline
 my $startTime;         # start time for activity
 my $title;             # title, for GPX file
 my $zAutoSmooth = 0;   # auto-smoothing based on altitude
+my $zOffset = 0;       # offset for altitude before scaling
+my $zScale = 1;        # scale factor for altitude
+my $zShift = 0;        # offset for altitude after scaling
 my $zSmooth = 0;       # smoothing applied additionally to altitude
 my @flatten;           # points come in sets of 4: altitude, start point, finish point, lambda
 
@@ -1556,6 +1559,9 @@ GetOptions (
             "splineMaxDegs=f" => \$splineMaxDegs,
             "startTime=s"   => \$startTime,
             "title=s"       => \$title,
+	    "zOffset=f"     => \$zOffset,
+	    "zScale=f"      => \$zScale,
+	    "zShift=f"      => \$zShift,
             "zSmooth=f"     => \$zSmooth,
             "zsigma=f"      => \$zSmooth,
            )
@@ -1670,6 +1676,15 @@ for my $file ( @files ) {
           }
         }
       }
+
+      # adjust altitudes if requested
+      if (($zOffset != 0) || ($zScale != 1) || ($zShift != 0)) {
+	note("transforming altitude...\n");
+	for my $p ( @$points ) {
+	  $p->{ele} = ($p->{ele} + $zOffset) * $zScale + $zShift;
+	}
+      }
+
 
       # check for snapping
       if ( ($snap > 0) && ($snapDistance >= 0) ) {
@@ -3206,7 +3221,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.15
+0.16
 
 =head1 DESCRIPTION
 
@@ -3866,6 +3881,27 @@ in the source GPX.  This is synonymous with "-name".
 =item B<zAutoSmooth>
 
 Synonym for -autoSmoothZ
+
+=item B<zOffset> <meters>
+
+Add this to the altitudes in the original file.  This is useful for
+"fantasy courses", or where altiude is recorded by an improperly
+zeroed altimeter.  This is applied I<before scaling>.  Use -zShift for
+changing altitude after scaling.
+
+=item B<zScale> <factor>
+
+Multiply altitudes in the original file I<after offset>. but I<before
+shift>.  This is useful for fantasy routes where climbing should be
+adjusted, or potentially for data from a poorly calibrated barometer
+where I want to perfectly tune the net altitude change of a climb.
+
+=item B<zShift> <meters>
+
+Add this to the altitudes in the original file.  This is useful for
+"fantasy courses", or where altiude is recorded by an improperly
+zeroed altimeter.  This is applied I<after scaling>.  Use -zOffset for
+before scaling.
 
 =item B<zSmooth>
 
