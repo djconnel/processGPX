@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.16;   # make sure this matches pod value
+my $version = 0.17;   # make sure this matches pod value
 
 $0 =~ s(.*/)();
 
@@ -1478,6 +1478,7 @@ my $pruneX = 0.001;    # maximum cross product for pruning
 my $prunedg = 0.0005;  # maximum difference in grade for point pruning
 my $quiet = 0;         # suppressed notes to standard error
 my $rCrossings = 6;    # how much lenth to flatten crossings, each side
+my $reverse = 0;       # whether to reverse the course
 my $rLap= 0;           # if the route is turned into an out-and-back, the radius of the return loop
 my $rTurnaround= 0;    # if the route is turned into an out-and-back, the radius of the outer loop
 my $rUTurn;             # if the route is turned into an out-and-back, the radius of the two loops
@@ -1540,6 +1541,7 @@ GetOptions (
             "prunedg=f"     => \$prunedg,
             "quiet"         => \$quiet,
             "rCrossings=f"  => \$rCrossings,
+            "reverse"       => \$reverse,
             "rLap=f"        => \$rLap,
             "rTurnaround=f" => \$rTurnaround,
             "rUTurn=f"      => \$rUTurn,
@@ -1685,6 +1687,11 @@ for my $file ( @files ) {
 	}
       }
 
+      # reverse the points of the original course
+      if ($reverse) {
+	note("reversing course direction..\n");
+	@$points = reverse @$points;
+      }
 
       # check for snapping
       if ( ($snap > 0) && ($snapDistance >= 0) ) {
@@ -1699,7 +1706,7 @@ for my $file ( @files ) {
 
         # if we're snapping later for earlier, flip points
         if ( $snap == 2 ) {
-          $points = [ reverse(@$points) ];
+          @$points = reverse(@$points);
         }
 
         # on large courses, since initial search is O(N-squared), step thru multiple points, then refine
@@ -2154,7 +2161,7 @@ for my $file ( @files ) {
         }
 
         if ( $snap == 2 ) {
-          $points = [ reverse(@$points) ];
+          @$points = reverse(@$points);
         }
       }
 
@@ -3221,7 +3228,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.16
+0.17
 
 =head1 DESCRIPTION
 
@@ -3661,6 +3668,17 @@ intersection is at a particularly acute value, or if the roads will be wider tha
 RGT standard of 8 meters, a larger value may be better.  If the value is too large,
 the transitions too and from the flat section may be too steep, or the influence of
 crossings could overlap, which the algorithm does not handle well.
+
+=item B<reverse>
+
+This reverses a course immediately after loading the file.  So all
+subsequent operations will be done on the reversed course rather than
+the original course.  So for example, if I have an initial course
+which goes from point A to point B, and I specify a turnaround with
+-rTurnaround 5, instead of an route from A to B and back, it will
+instead be from B to A and back.  If you want to reverse the final
+product, then do a second run with just the -reverse option after an
+initial run on other options.
 
 =item B<rLap> <meters>
 

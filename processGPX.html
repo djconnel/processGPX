@@ -43,7 +43,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.16</p>
+<p>0.17</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -362,6 +362,12 @@
 <dd>
 
 <p>If &quot;-fixCrossings&quot; is invoked, then how far to each side of the crossing the road should be leveled. A transition of three times this length will be used, over which the altitude will be restored to the unaltered value. The default is 6 meters, which works fairly well with the RGT road width of 8 meters, althouugh if the intersection is at a particularly acute value, or if the roads will be wider than the RGT standard of 8 meters, a larger value may be better. If the value is too large, the transitions too and from the flat section may be too steep, or the influence of crossings could overlap, which the algorithm does not handle well.</p>
+
+</dd>
+<dt id="reverse"><b>reverse</b></dt>
+<dd>
+
+<p>This reverses a course immediately after loading the file. So all subsequent operations will be done on the reversed course rather than the original course. So for example, if I have an initial course which goes from point A to point B, and I specify a turnaround with -rTurnaround 5, instead of an route from A to B and back, it will instead be from B to A and back. If you want to reverse the final product, then do a second run with just the -reverse option after an initial run on other options.</p>
 
 </dd>
 <dt id="rLap-meters"><b>rLap</b> &lt;meters&gt;</dt>
