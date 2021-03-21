@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.17;   # make sure this matches pod value
+my $version = 0.18;   # make sure this matches pod value
 
 $0 =~ s(.*/)();
 
@@ -1078,18 +1078,18 @@ sub cropPoints {
     # if this is cropMax, then the point will be excluded
     for my $s0 ( $cropMin, $cropMax ) {
       if ( ($i > 0) && ($s0 > 0) && ($points->[$i]->{distance} > $s0) && ($points->[$i - 1]->{distance} < $s0) ) {
-	my $ds = $points->[$i]->{distance} - $points->[$i - 1]->{distance};
-	my $f = ($s0 - $points->[$i - 1]->{distance}) / $ds;
-	my $d1 = $f * $ds;
-	my $d2 = (1 - $f) * $ds;
-	if (($d1 > 0.01) && ($d2 > 0.01)) {
-	  push @pNew, interpolatePoint($points->[$i - 1], $points->[$i], $f);
-	}
+        my $ds = $points->[$i]->{distance} - $points->[$i - 1]->{distance};
+        my $f = ($s0 - $points->[$i - 1]->{distance}) / $ds;
+        my $d1 = $f * $ds;
+        my $d2 = (1 - $f) * $ds;
+        if (($d1 > 0.01) && ($d2 > 0.01)) {
+          push @pNew, interpolatePoint($points->[$i - 1], $points->[$i], $f);
+        }
       }
     }
 
     if (((! defined $cropMin) || ($s >= $cropMin)) &&
-	((! defined $cropMax) || ($cropMax <= 0) || ($s <= $cropMax))) {
+        ((! defined $cropMax) || ($cropMax <= 0) || ($s <= $cropMax))) {
       push @pNew, $points->[$i];
     }
 
@@ -1561,9 +1561,9 @@ GetOptions (
             "splineMaxDegs=f" => \$splineMaxDegs,
             "startTime=s"   => \$startTime,
             "title=s"       => \$title,
-	    "zOffset=f"     => \$zOffset,
-	    "zScale=f"      => \$zScale,
-	    "zShift=f"      => \$zShift,
+            "zOffset=f"     => \$zOffset,
+            "zScale=f"      => \$zScale,
+            "zShift=f"      => \$zShift,
             "zSmooth=f"     => \$zSmooth,
             "zsigma=f"      => \$zSmooth,
            )
@@ -1681,16 +1681,16 @@ for my $file ( @files ) {
 
       # adjust altitudes if requested
       if (($zOffset != 0) || ($zScale != 1) || ($zShift != 0)) {
-	note("transforming altitude...\n");
-	for my $p ( @$points ) {
-	  $p->{ele} = ($p->{ele} + $zOffset) * $zScale + $zShift;
-	}
+        note("transforming altitude...\n");
+        for my $p ( @$points ) {
+          $p->{ele} = ($p->{ele} + $zOffset) * $zScale + $zShift;
+        }
       }
 
       # reverse the points of the original course
       if ($reverse) {
-	note("reversing course direction..\n");
-	@$points = reverse @$points;
+        note("reversing course direction..\n");
+        @$points = reverse @$points;
       }
 
       # check for snapping
@@ -2167,7 +2167,7 @@ for my $file ( @files ) {
 
       # spline of corners
       if ( $splineRadians > 0 ) {
-	note("corner splines, pre-smoothing...\n");
+        note("corner splines, pre-smoothing...\n");
         my $points = addSplines(points=> $points, splineRadians=> $splineRadians, splineMaxRadians=> $splineMaxRadians, isLoop=> $isLoop);
       }
 
@@ -2286,7 +2286,7 @@ for my $file ( @files ) {
 
       # interpolation if requested
       if ( @$points && ($linterpolate > 0) ) {
-	note("interpolation...\n");
+        note("interpolation...\n");
         my @pNew = ();
         my $iMax = $#$points - ($isLoop ? 0 : 1);
         for my $i ( 0 .. $iMax ) {
@@ -2355,7 +2355,7 @@ for my $file ( @files ) {
         #
 
         if ( $smooth > 0 ) {
-	  note("smoothing...", ($smoothLoop==0) ? "position" : ($smoothLoop==1) ? "altitude" : ($smoothLoop==3) ? "altitude(auto)" : "other", ": parameter = $smooth\n");
+          note("smoothing...", ($smoothLoop==0) ? "position" : ($smoothLoop==1) ? "altitude" : ($smoothLoop==3) ? "altitude(auto)" : "other", ": parameter = $smooth\n");
 
           # calculate smoothing sigma for autosmoothing based on gradient
           calcSigma(points=> $points)
@@ -2503,7 +2503,7 @@ for my $file ( @files ) {
 
       # spline again post-smoothing, if requested
       if ( ($splineRadians > 0) && (($lSmooth > 1) || ($zSmooth > 0)) ) {
-	note("corner splines, post-smoothing...\n");
+        note("corner splines, post-smoothing...\n");
         my $points = addSplines(points=> $points, splineRadians=> $splineRadians, splineMaxRadians=> $splineMaxRadians, isLoop=> $isLoop);
       }
 
@@ -2512,8 +2512,8 @@ for my $file ( @files ) {
       # points come in sets of 4: altitude, start point, finish point, lambda
       #
       if (@flatten) {
-	note("flattening...\n");
-	addDistanceField(points=> $points);
+        note("flattening...\n");
+        addDistanceField(points=> $points);
         for (my $nf = 0; $nf < @flatten; $nf += 4) {
           my $zFlatten     = $flatten[$nf];
           my $flattenStart = $flatten[$nf + 1] if ($nf < $#flatten);
@@ -2546,7 +2546,7 @@ for my $file ( @files ) {
       # roads proximate to intersections
       #
       if ( $fixCrossings ) {
-	note("fixing crossings...\n");
+        note("fixing crossings...\n");
 
         #
         # create a distance field
@@ -2730,8 +2730,18 @@ for my $file ( @files ) {
       # cropping: shorten distance of original GPX
       # note distance is calculated here... can change from lane shifts
       #
+
+      # if crops may have been specified with negative append or prepend...
+      if ((! $isLoop) && (! defined $cropMax) || ($cropMax <= 0) && ($append < 0)) {
+        $cropMax = calcCourseDistance(points=> $points, isLoop=> $isLoop) + $append;
+        warn("setting cropping to $cropMax for negative -append\n");
+      }
+      if ((! defined $cropMin) || ($cropMin <= 0) && ($prepend < 0)) {
+        $cropMin = -$prepend;
+      }
+
       if ( ((defined $cropMin) && ($cropMin > 0)) || ((defined $cropMax) && ($cropMax > 0)) ) {
-	$points = cropPoints(points=> $points, min=> $cropMin, max=> $cropMax);
+        $points = cropPoints(points=> $points, min=> $cropMin, max=> $cropMax);
         note("points remaining after cropping = ", scalar(@$points), "\n");
       }
 
@@ -2769,7 +2779,7 @@ for my $file ( @files ) {
       # shiftStart > shiftEnd: shifting up to shiftEnd, then after shiftStart
       #
       if ( $laneShift != 0) {
-	note("lane shift...\n");
+        note("lane shift...\n");
         my $shiftDistance = 20 * abs($laneShift) ** (2/3);
         my $s = 0;
         for my $i ( 0 .. $#$points ) {
@@ -2794,7 +2804,7 @@ for my $file ( @files ) {
       #
       my $rPoints = [];
       if ( (defined $rTurnaround) && ($rTurnaround > 0) ) {
-	note("out-and-back...\n");
+        note("out-and-back...\n");
         for my $p (reverse @$points) {
           my %h = %$p;
           push @$rPoints, \%h;
@@ -2879,8 +2889,8 @@ for my $file ( @files ) {
       # of the extension distance
       my $cropBack = 0;
       if ($extendBack > 0) {
-	$cropBack = calcCourseDistance(points=> $points) + $extendBack;
-	note("calculating cropping position for extendBack = $cropBack\n");
+        $cropBack = calcCourseDistance(points=> $points) + $extendBack;
+        note("calculating cropping position for extendBack = $cropBack\n");
       }
 
       #
@@ -2903,7 +2913,7 @@ for my $file ( @files ) {
         my $dir = averageAngles($dir1, $dir2);
 
         # create the loop
-	note("creating turn-around loop...\n");
+        note("creating turn-around loop...\n");
         my $loop = makeLoop(points=> [$ps1->[-1], $ps2->[0]], direction=> $dir, radius=> $R, defaultSign=> (($laneShift < 0) ? -1 : 1));
         push @$ps1, @$loop;
       }
@@ -2926,13 +2936,13 @@ for my $file ( @files ) {
 
       # for -cropExtend, crop it here:
       $points = cropPoints(points=> $points, max=> $cropBack)
-	if ($cropBack > 0);
+        if ($cropBack > 0);
 
       #
       # turn-around loops within the course, if requested
       #
       if ( (defined $rUTurn) && ($rUTurn > 0) ) {
-	note("checking for U-turn loops...\n");
+        note("checking for U-turn loops...\n");
         my @pNew = ();
         my $i = 0;
         push @pNew, $points->[$i++]
@@ -3113,7 +3123,7 @@ for my $file ( @files ) {
       addDistanceField(points=> $points);
 
       if ((defined $startTime) && ($startTime ne "")) {
-	note("adding time...\n");
+        note("adding time...\n");
         my $tStart = str2time($startTime);
         if ($tStart > 0) {
           note("start time found: $tStart\n");
@@ -3228,7 +3238,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.17
+0.18
 
 =head1 DESCRIPTION
 
@@ -3386,8 +3396,13 @@ because riders group along the road-side after crossing the finish.
 Extended points will be set to the altitude of the final point.
 
 Since RGT tends to create loop courses when start and finish points are
-close, the code may put a bend in the road it creates with this commend,
+close, the code may put a bend in the road it creates with this command,
 if both "-append" and "-prepend" are specified (perhaps via "-extend").
+
+Negative values crop the course by the negative distance.  So
+"-append -100" will move the finish line back 100 meters.  This is
+useful for preventing RGT from connecting the finish and start points,
+which has a 100 meter threshold, as this is written.
 
 =item B<author> <string>
 
@@ -3623,6 +3638,8 @@ the start of a GPX file, so this can provide for that distance,
 although a better solution is to design in the 100 meter buffer from
 the start, so it conforms to the actual roadway.
 
+A negative number will crop the course at the beginning, so is
+an alternative to -cropMin.
 
 =item B<prune>
 

@@ -43,7 +43,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.17</p>
+<p>0.18</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -145,7 +145,9 @@
 
 <p>Extended points will be set to the altitude of the final point.</p>
 
-<p>Since RGT tends to create loop courses when start and finish points are close, the code may put a bend in the road it creates with this commend, if both &quot;-append&quot; and &quot;-prepend&quot; are specified (perhaps via &quot;-extend&quot;).</p>
+<p>Since RGT tends to create loop courses when start and finish points are close, the code may put a bend in the road it creates with this command, if both &quot;-append&quot; and &quot;-prepend&quot; are specified (perhaps via &quot;-extend&quot;).</p>
+
+<p>Negative values crop the course by the negative distance. So &quot;-append -100&quot; will move the finish line back 100 meters. This is useful for preventing RGT from connecting the finish and start points, which has a 100 meter threshold, as this is written.</p>
 
 </dd>
 <dt id="author-string"><b>author</b> &lt;string&gt;</dt>
@@ -326,6 +328,8 @@
 <dd>
 
 <p>See the -append option for details, except instead of adding roadway to the end of a point-to-point course, this adds it to the beginning of the course. RGT in general puts the start line 100 meters after the start of a GPX file, so this can provide for that distance, although a better solution is to design in the 100 meter buffer from the start, so it conforms to the actual roadway.</p>
+
+<p>A negative number will crop the course at the beginning, so is an alternative to -cropMin.</p>
 
 </dd>
 <dt id="prune"><b>prune</b></dt>
