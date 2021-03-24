@@ -1720,9 +1720,9 @@ for my $file ( @files ) {
             if ($p2->{distance} - $p1->{distance} < $dzigzag) {
               warn("WARNING: zig-zag found on original points : ",
                    $UTurns[$i], " and ", $UTurns[$i + 1], " : ",
-                   sprintf("%.4f km: (%g, $g)", 0.001 * $p1->{distance}, $p1->{lon}, $p1->{lat}),
+                   sprintf("%.4f km: (%g, %g)", 0.001 * $p1->{distance}, $p1->{lon}, $p1->{lat}),
                    " to ",
-                   sprintf("%.4f km: (%g, $g)", 0.001 * $p2->{distance}, $p2->{lon}, $p2->{lat}),
+                   sprintf("%.4f km: (%g, %g)", 0.001 * $p2->{distance}, $p2->{lon}, $p2->{lat}),
                    "\n");
             }
           }
