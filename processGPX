@@ -152,7 +152,7 @@ sub pointDirection {
   my $p1 = shift;
   my $p2 = shift;
   my $p3 = shift;
-  return averageAngle(latlngDirection($p1, $p1), latlngDirection($p2, $p3));
+  return averageAngles(latlngDirection($p1, $p1), latlngDirection($p2, $p3));
 }
 
 #
@@ -249,44 +249,42 @@ sub interpolatePoint {
 }
 
 # for splines...
-# start at p1 aiming at p2, end up at p3 coming from p2
+# start at p1 aiming at p2, and from p3 to p4
 # p2 is never reached (the corner is rounded)
 sub interpolateCorner {
-  my $p1 = shift;
-  my $p2 = shift;
-  my $p3 = shift;
+  my $points = shift;
   my $f = shift;
+
+  my ($p1, $p2, $p3) = @$points;
+  my $g = 1 - $f;
 
   my %var = ();
   for my $k ( keys %$p2 ) {
-    $var{$k} =
-      ((1 - $f) ** 2) * $p1->{$k} +
-        2 * $f * (1 - $f) * $p2->{$k} +
+   $var{$k} =
+      ($g ** 2) * $p1->{$k} +
+        2 * $f * $g * $p2->{$k} +
           ($f ** 2) * $p3->{$k}
             if ( (defined $p1->{$k}) && (defined $p2->{$k}) && (defined $p3->{$k}) );
-  }
+   }
   return \%var;
 }
 
 # two-point corner interpolation
 # corner is between p2 and p3
-# this isn't presently used in this code
-# but is left here because I think it's cool.
 sub interpolateCorner4 {
-  my $p1 = shift;
-  my $p2 = shift;
-  my $p3 = shift;
-  my $p4 = shift;
+  my $points = shift;
+  my ($p1, $p2, $p3, $p4) = @$points;
   my $f  = shift;
   my $d2 = pointDirection($p1, $p2, $p3);
   my $d3 = pointDirection($p2, $p3, $p4);
   my ($dxi, $dyi) = pointIntercept($p2, $p3, $d2, $d3);
   my $pi = addVectorToPoint($p2, [$dxi, $dyi]);
-  return interpolateCorner($p2, $pi, $p3, $f);
+  return interpolateCorner([$p2, $pi, $p3], $f);
 }
 
+
 #
-# curve intercept
+# point intercept
 #
 # given two points p1 and p2, and two directions, d1 and d2, calculate
 # the intercept of the lines in these directions passing thru these
@@ -434,7 +432,7 @@ sub splineInterpolation {
   my $p2 = shift;
   my $d1 = shift;
   my $d2 = shift;
-  my $dd = shift;   # minimum angle for spline
+  my $dd = shift // ($pi / 16);   # minimum angle for spline
 
   # calculate number of points based on the angle
   my $deltad  = reduceAngle($d2 - $d1);
@@ -446,20 +444,20 @@ sub splineInterpolation {
 
   return [] unless ($npoints > 0);
 
-  # calculate the intercept of the vectors
-  my ($dxi, $dyi) =  pointIntercept($p1, $p2, $d1, $d2);
-  my $pi = addVectorToPoint($p1, [$dxi, $dyi]);
-
   my @points;
+
+  # distance between the points
+  my $r = latlngDistance($p1, $p2);
+
+  my ($dxi, $dyi) =  pointIntercept($p1, $p2, $d1, $d2);
+  my $px = addVectorToPoint($p1, [$dxi, $dyi]);
+
   # create points along asymptotes
   for my $i ( 1 .. $npoints ) {
     my $f = $i / ($npoints + 1);
-    my $p = interpolateCorner($p1, $pi, $p2, $f);
-
-    # if this is too close to the previous point, skip it
+    my $p = interpolateCorner([$p1, $px, $p2], $f);
     push @points, $p;
   }
-
 
   # interpolate points with respect to distance along spline
   # spline does not in general have equally spaced points, so point
@@ -1460,6 +1458,7 @@ my $description;       # description, for GPX metadata
 my $extend = 0;        # apply to both append and prepend
 my $extendBack = 0;    # amount to extend the route with a loop.
 my $fixCrossings = 0;  # whether to flatten crossings
+my $join;              # a GPS file to join to this one
 my $gradientPower = 2; # power to raise gradient in evaluating segments for gradient signs
 my $gradientThreshold = 100;   # minimum climb @ 10% grade to get a gradient sign
 my $isLoop = 0;        # whether to apply periodic boundary conditions (smooth around the Loop)
@@ -1526,6 +1525,7 @@ GetOptions (
             "gradientThreshold=f"  => \$gradientThreshold,
             "h"             => \$needHelp,
             "help"          => \$needHelp,
+            "join=s"        => \$join,
             "keywords=s"    => \$newKeywords,
             "interpolate=f" => \$linterpolate,
             "laneShift=f"   => \$laneShift,
@@ -1637,6 +1637,7 @@ for my $file ( @files ) {
   my $tracks    = $gpx->tracks();
 
   # process tracks
+  my $nJoins = 0;
   for my $track ( @$tracks ) {
     my $segments = $track->{segments};
     for my $segment ( @$segments ) {
@@ -1647,6 +1648,50 @@ for my $file ( @files ) {
 
       # eliminate duplicate x,y points
       $points = removeDuplicatePoints(points=> $points);
+
+      # if join was specified, join points from a second file
+      if ((defined $join) && ($join ne "") && ($nJoins ++ == 0)) {
+        warn("joining file $join to the end of tfile $file...\n");
+        open my $fjoin, "<$join";
+
+        # Parse GPX from open file
+        my $gpx2 = Geo::Gpx->new( input => $fjoin );
+
+        my $tracks2    = $gpx2->tracks();
+
+        # process tracks
+        for my $track2 ( @$tracks2 ) {
+          my $segments2 = $track2->{segments};
+          for my $segment2 ( @$segments2 ) {
+            my $points2 = $segment2->{points};
+            die("no course data found in first track, segment of file $join\n")
+              unless ((defined $points2) && (@$points2 > 1));
+
+            warn("number of points in file $join = ", scalar(@$points2), "\n");
+
+            # join points2 to points
+            warn("checking distance to joined file..\n");
+            my $d = latlngDistance($points->[-1], $points2->[0]);
+            warn("distance = $d\n");
+            my $dot = latlngDotProduct($points->[-2], $points->[-1], $points2->[0], $points2->[1]);
+            warn("dot = $dot\n");
+
+            # routes must be within striking distance to join
+            die("ERROR: trying to join files $file and $join, but points are too far apart (", sprintf("%.5f", $d / 1000), " km)\n")
+              if ($d > 1000);
+
+            # if the points are very close, then exclude the first point of the second set
+            shift @$points2
+              while(@$points2 && latlngDistance($points->[-1], $points2->[0]) < 0.1);
+
+            die("ERROR joining file $join to file $file...\n")
+              unless (@$points2);
+
+            # add the points2 to the original points
+            push @$points, @$points2;
+          }
+        }
+      }
 
       if ($isLoop) {
         my $d =latlngDistance($points->[0], $points->[-1]);
@@ -1673,7 +1718,12 @@ for my $file ( @files ) {
             my $p1 = $points->[$UTurns[$i]];
             my $p2 = $points->[$UTurns[$i + 1]];
             if ($p2->{distance} - $p1->{distance} < $dzigzag) {
-              warn("WARNING: zig-zag found on original points : ", $UTurns[$i], " and ", $UTurns[$i + 1], " : ", sprintf("%.4f", 0.001 * $p1->{distance}), " to ", sprintf("%.4f", 0.001 * $p1->{distance}), "km\n");
+              warn("WARNING: zig-zag found on original points : ",
+                   $UTurns[$i], " and ", $UTurns[$i + 1], " : ",
+                   sprintf("%.4f km: (%g, $g)", 0.001 * $p1->{distance}, $p1->{lon}, $p1->{lat}),
+                   " to ",
+                   sprintf("%.4f km: (%g, $g)", 0.001 * $p2->{distance}, $p2->{lon}, $p2->{lat}),
+                   "\n");
             }
           }
         }
@@ -2732,7 +2782,7 @@ for my $file ( @files ) {
       #
 
       # if crops may have been specified with negative append or prepend...
-      if ((! $isLoop) && (! defined $cropMax) || ($cropMax <= 0) && ($append < 0)) {
+      if ((! $isLoop) && ((! (defined $cropMax)) || ($cropMax <= 0) && ($append < 0))) {
         $cropMax = calcCourseDistance(points=> $points, isLoop=> $isLoop) + $append;
         warn("setting cropping to $cropMax for negative -append\n");
       }
@@ -3142,6 +3192,8 @@ for my $file ( @files ) {
 
       note("final number of points = ", scalar(@$points), "\n");
       note("altitude quality score of final course = ", sprintf("%.4f", calcQualityScore(points=> $points, isLoop=> $isLoop)), "\n");
+      note("distance from last point to first point = ", sprintf("%.3f", latlngDistance($points->[-1], $points->[0])), " meters\n");
+
       $segment->{points} = $points;
 
       #
@@ -3558,6 +3610,11 @@ Distances are calculated i<after> smoothing but before cropping or extension.
 =item B<interpolate> <meters>
 
 Synonym for "-spacing"
+
+=item B<join> <filename>
+
+Add the points from the first track, segment found in this file and
+append them to the first track, segment in the original file.
 
 =item B<keywords> <meters>
 
