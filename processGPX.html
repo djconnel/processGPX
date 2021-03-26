@@ -43,7 +43,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.18</p>
+<p>0.19</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -141,7 +141,7 @@
 <dt id="append-meters"><b>append</b> &lt;meters&gt;</dt>
 <dd>
 
-<p>A distance in meters which should be added to point-to-point courses. In RGT, the finish line is typically places 100 meters prior to the end of a point-to-point course, so if for example you design a course to be exactly 10 miles, (a typical UK time trial distance), then to put the finish line at the end of those 10 miles, the option &quot;-append 100&quot; would add 100 meters. This buffer is needed by RGT because riders group along the road-side after crossing the finish.</p>
+<p>A distance in meters which should be added to point-to-point courses. In RGT, the finish line is typically places 140 meters prior to the end of a point-to-point course, so if for example you design a course to be exactly 10 miles, (a typical UK time trial distance), then to put the finish line at the end of those 10 miles, the option &quot;-append 140&quot; would add 140 meters. This buffer is needed by RGT because riders group along the road-side after crossing the finish. Note the start line would also need to be extended, via -prepend, by 60 meters, in this case.</p>
 
 <p>Extended points will be set to the altitude of the final point.</p>
 
@@ -229,13 +229,13 @@
 <dt id="extendBack-meters"><b>extendBack</b> &lt;meters&gt;</dt>
 <dd>
 
-<p>With RGT point-to-point Magic Roads, the game will reserve the final 100 meters for riders finishing. If you&#39;ve created a route to the top of a climb, for example, you may want the riders to be able to ride all the way to the top, rather than stopping up to 100 meters before the top.</p>
+<p>With RGT point-to-point Magic Roads, the game will reserve the final 140 meters for riders finishing. If you&#39;ve created a route to the top of a climb, for example, you may want the riders to be able to ride all the way to the top, rather than stopping up to 140 meters before the top.</p>
 
-<p>One way to deal with this is to use -append: this will extend the route with a straight line at the finish. This may be enough, but this 100 meters might not be consistent with the real topography, for example the top of a twisting climb.</p>
+<p>One way to deal with this is to use -append: this will extend the route with a straight line at the finish. This may be enough, but this 140 meters might not be consistent with the real topography, for example the top of a twisting climb.</p>
 
 <p>So this is an alternative: it will create a loop of radius specified by -rTurnaround, then start returning on the route until the specified distance, <i>including the loop</i>, is covered. If the loop is large enough, the route may end on the loop itself. If not, the route will end on the return section.</p>
 
-<p>It works by doing a normal turnaround, then cropping the course. So if there&#39;s not enough course to reach the specified distance, it will turn the route into a full out-and-back. But typically the distance should be in the range of up to 100 meters or so.</p>
+<p>It works by doing a normal turnaround, then cropping the course. So if there&#39;s not enough course to reach the specified distance, it will turn the route into a full out-and-back. But typically the distance should be in the range of up to 140 meters or so.</p>
 
 <p>This disables -loop or -lap: it&#39;s meaningless with a lap course</p>
 
@@ -333,7 +333,7 @@
 <dt id="prepend-meters"><b>prepend</b> &lt;meters&gt;</dt>
 <dd>
 
-<p>See the -append option for details, except instead of adding roadway to the end of a point-to-point course, this adds it to the beginning of the course. RGT in general puts the start line 100 meters after the start of a GPX file, so this can provide for that distance, although a better solution is to design in the 100 meter buffer from the start, so it conforms to the actual roadway.</p>
+<p>See the -append option for details, except instead of adding roadway to the end of a point-to-point course, this adds it to the beginning of the course. RGT in general puts the start line 60 meters after the start of a GPX file, so this can provide for that distance, although a better solution is to design in the 60 meter buffer from the start, so it conforms to the actual roadway.</p>
 
 <p>A negative number will crop the course at the beginning, so is an alternative to -cropMin.</p>
 
@@ -427,9 +427,9 @@
 
 <p>For -loop courses, the amount to shift the start/finish forwards (positive) or backwards (negative).</p>
 
-<p>For loop courses, RGT Cycling puts the start/finish line 100 meters after the start of the GPX data. This is evidently to provide room for riders to line up before the start, although that is only necessary in point-to-point courses, so the reason for this is unclear. In circuit courses careful placement of the start/finish line, for example at the crest of a hill, or a specific distance from a final corner, is critical, so with this option you can carefully place the start point for the GPX file at the desired start/finish, then use &quot;-loop -shiftSF -100&quot; to move the start of the GPX file back 100 meters, putting the start where it should be.</p>
+<p>For loop courses, RGT Cycling puts the start/finish line 60 meters after the start of the GPX data. This is evidently to provide room for riders to line up before the start, although that is only necessary in point-to-point courses, so the reason for this is unclear. In circuit courses careful placement of the start/finish line, for example at the crest of a hill, or a specific distance from a final corner, is critical, so with this option you can carefully place the start point for the GPX file at the desired start/finish, then use &quot;-loop -shiftSF -60&quot; to move the start of the GPX file back 60 meters, putting the start where it should be.</p>
 
-<p>Since this is so commonly used in loop courses, the default is -100, so to disable it, use &quot;-shiftSF 0 -loop&quot;.</p>
+<p>Since this is so commonly used in loop courses, the default is -60, so to disable it, use &quot;-shiftSF 0 -loop&quot;.</p>
 
 </dd>
 <dt id="sigma-meters"><b>sigma</b> &lt;meters&gt;</dt>
@@ -587,7 +587,7 @@
 <dt id="shiftStart-740--shiftEnd-1390"><b>-shiftStart 740 -shiftEnd 1390</b></dt>
 <dd>
 
-<p>The lane shift is applied starting at 740 meters and ending at 1390 meters, with a transition calculated from the lane shift. This is applied after all smoothing, but before the lane shifting, and importantly, before the route start shift. Note there is a default &quot;-shiftSF -100&quot; applied at the end of the process, so if you want to determine the distance to apply the lane shift, then make sure to either do a run first with &quot;-shiftSF 0 -laneShift 0&quot;, or subtract 100 meters from the distance coordinates to judge what the distance would have been at the time the lane shift is applied.</p>
+<p>The lane shift is applied starting at 740 meters and ending at 1390 meters, with a transition calculated from the lane shift. This is applied after all smoothing, but before the lane shifting, and importantly, before the route start shift. Note there is a default &quot;-shiftSF -60&quot; applied at the end of the process, so if you want to determine the distance to apply the lane shift, then make sure to either do a run first with &quot;-shiftSF 0 -laneShift 0&quot;, or subtract 100 meters from the distance coordinates to judge what the distance would have been at the time the lane shift is applied.</p>
 
 <p>It&#39;s important to check to make sure at the edge of the lane shift region the two directions don&#39;t get too close, due to the transition. If they do, then extend the lane shift region somewhat to make room for the transition. Also check the lane shift hasn&#39;t caused any corners to fold into points, or invert. If this happens, apply more smoothing to round the corners more before applying the lane shift. Unfortunately there is no support yet for position-dependent smoothing, which would help.</p>
 
@@ -641,7 +641,7 @@
 <dt id="crop-38730"><b>-crop 38730</b></dt>
 <dd>
 
-<p>The course was designed beyond the desired end of the RGT course, since the end is on an out-and-back section, and to assure the end is perfectly aligned with the outward portion of the same road, it was extended further and cropped back. This is important since smoothing uses both the road ahead of and behind a certain point, so at an endpoint of GPX data, smoothing will be different than if that road had been extended further. This course ended up being 38.73 km, which corresponds to a distance between banners of 37.63 km, since 100 meters at each end is reserved for riders gathering.</p>
+<p>The course was designed beyond the desired end of the RGT course, since the end is on an out-and-back section, and to assure the end is perfectly aligned with the outward portion of the same road, it was extended further and cropped back. This is important since smoothing uses both the road ahead of and behind a certain point, so at an endpoint of GPX data, smoothing will be different than if that road had been extended further. This course ended up being 38.73 km, which corresponds to a distance between banners of 37.63 km, since 60 meters (start) and 140 meters (finish) each end is reserved for riders gathering.</p>
 
 </dd>
 <dt id="anchor"><b>-anchor</b></dt>
