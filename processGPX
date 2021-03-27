@@ -6,7 +6,10 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.19;   # make sure this matches pod value
+my $version = 0.195;   # make sure this matches pod value
+
+my $number_regexp =
+  '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
 
 $0 =~ s(.*/)();
 
@@ -243,7 +246,13 @@ sub interpolatePoint {
   my $f = shift;
   my %var = ();
   for my $k ( keys %$p1 ) {
-    $var{$k} = $p1->{$k} * (1 - $f) + $p2->{$k} * $f if (defined $p2->{$k});
+    if ((defined $p1->{$k}) && (defined $p2->{$k})) {
+      if (($p1->{$k} =~ /^$number_regexp$/o) && ($p2->{$k} =~ /^$number_regexp$/o)) {
+	$var{$k} = $p1->{$k} * (1 - $f) + $p2->{$k} * $f;
+      } else {
+	$var{$k} = $p1->{$k};
+      }
+    }
   }
   return \%var;
 }
@@ -475,7 +484,11 @@ sub splineInterpolation {
       for my $k ( keys %$p1 ) {
         if (($k ne "lat") && ($k ne "lon")) {
           my $f = $ss[$i] / $ss[-1];
-          $p->{$k} = (1 - $f) * $p1->{$k} + $f * $p2->{$k};
+	  if ( ($p1->{$k} =~ /^$number_regexp$/) &&  ($p2->{$k} =~ /^$number_regexp$/) ) {
+            $p->{$k} = (1 - $f) * $p1->{$k} + $f * $p2->{$k};
+          } else {
+            $p->{$k} = $p1->{$k};
+          }
         }
       }
     }
@@ -3290,7 +3303,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.19
+0.195
 
 =head1 DESCRIPTION
 
