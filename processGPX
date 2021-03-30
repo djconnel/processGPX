@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.195;   # make sure this matches pod value
+my $version = 0.20;   # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1498,6 +1498,8 @@ my $shiftEnd;          # where to end land shifting (define: don't end it)
 my $shiftSF = -60;     # amount to shift the S/F if a loop course: RGT puts the start line 60 meters after start of course, so -60 works here
 my $shiftStart;        # where to start lane shifting (default: don't start it)
 my $smoothAngle;       # angle at which direction changes trigger point interpolation
+my $smoothStart;       # where to start smoothing (default: beginning)
+my $smoothEnd;         # where to finish smoothing (default: end)
 my $snap = 0;          # whether to check for near-coincident road segments, and make them exactly coincide: upward direction: 1 = up, 2 = down, 0 = none
 my $snapDistance = 2;  # number of meters threshold for point snapping
 my $snapTransition = 0;  # whether to transition the altitude around snaps to match the source
@@ -1565,6 +1567,8 @@ GetOptions (
             "sigmaz=f"      => \$zSmooth,
             "smooth=f"      => \$lSmooth,
             "smoothAngle=f" => \$smoothAngle,
+            "smoothEnd=f"   => \$smoothEnd,
+            "smoothStart=f" => \$smoothStart,
             "smoothz=f"     => \$zSmooth,
             "snap=i"        => \$snap,
             "snapDistance=f" => \$snapDistance,
@@ -2434,6 +2438,23 @@ for my $file ( @files ) {
             my %var = %{$points->[$i]};
 
             if ($sigma0 > 0) {
+	      # if smoothStart and/or smoothEnd are defined, then create a window for smoothing
+	      {
+		my $smoothDistance = 4 * $sigma0;
+		my $s = $points->[$i]->{distance};
+		if ( (defined $smoothStart) && (defined $smoothEnd) && ($smoothEnd < $smoothStart) ) {
+		  $sigma0 *= (transition(($smoothStart - $s) / $smoothDistance) + transition(($s - $smoothEnd) / $smoothDistance));
+		} else {
+		  $sigma0 *= transition(($smoothStart - $s) / $smoothDistance) if (defined $smoothStart);
+		  $sigma0 *= transition(($s - $smoothEnd) / $smoothDistance)   if (defined $smoothEnd);
+		}
+	      }
+
+	      if (abs($sigma0) < 0.01) {
+		push @pNew, $points->[$i];
+		next;
+	      }
+
               my $dsMax = 4 * $sigma0;
 
               my $j = $i;
@@ -3303,7 +3324,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.195
+0.20
 
 =head1 DESCRIPTION
 
@@ -3877,6 +3898,24 @@ position, so additional altitude smoothing is required.
 
 For "-autoSpacing", determines how dense to place points such that
 the maximum angle between points is no more than approximately this angle.
+
+=item B<smoothEnd> <meters>
+
+See -smoothStart.  The default is to continue smoothing to the end of
+the GPX data.
+
+=item B<smoothStart> <meters>
+
+If specified, smoothing will be phased in starting at this position in
+the course.  Note 0 has an effect, as it will phase in smoothing
+starting at 0, as opposed to the default, which is to apply the same
+smoothing to all points. This applies to all smoothing, so consider
+running processGPX multiple times if you want different limits on
+different smoothing components.  For example, you might want to
+exclude position smoothing from critical corners, but maintain
+altitude smoothing.  If the start is after the finish, then the region
+between the two is not smoothed, rather than smoothed.
+
 
 =item B<smoothz> <meters>
 

@@ -43,7 +43,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.19</p>
+<p>0.20</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -454,6 +454,18 @@
 <dd>
 
 <p>For &quot;-autoSpacing&quot;, determines how dense to place points such that the maximum angle between points is no more than approximately this angle.</p>
+
+</dd>
+<dt id="smoothEnd-meters"><b>smoothEnd</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>See -smoothStart. The default is to continue smoothing to the end of the GPX data.</p>
+
+</dd>
+<dt id="smoothStart-meters"><b>smoothStart</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>If specified, smoothing will be phased in starting at this position in the course. Note 0 has an effect, as it will phase in smoothing starting at 0, as opposed to the default, which is to apply the same smoothing to all points. This applies to all smoothing, so consider running processGPX multiple times if you want different limits on different smoothing components. For example, you might want to exclude position smoothing from critical corners, but maintain altitude smoothing. If the start is after the finish, then the region between the two is not smoothed, rather than smoothed.</p>
 
 </dd>
 <dt id="smoothz-meters"><b>smoothz</b> &lt;meters&gt;</dt>
