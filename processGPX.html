@@ -22,6 +22,7 @@
     <ul>
       <li><a href="#criterium-course">criterium course</a></li>
       <li><a href="#road-course-w-out-and-back">road course w/ out-and-back</a></li>
+      <li><a href="#Multi-step-processing:-selective-smoothing">Multi-step processing: selective smoothing</a></li>
       <li><a href="#Multi-step-processing:-snapping-after-spacing">Multi-step processing: snapping after spacing</a></li>
       <li><a href="#adding-time-to-an-activity">adding time to an activity</a></li>
       <li><a href="#adding-gradient-signs">adding gradient signs</a></li>
@@ -708,6 +709,82 @@
 <dd>
 
 <p>This is the name of the original file. The processed file will be <i>NoonRide_processed.gpx</i>. If the result is good, it&#39;s best to rename this to something different, so if you rerun the <code>smoothGPX</code>, it doesn&#39;t get over-written.</p>
+
+</dd>
+</dl>
+
+<h2 id="Multi-step-processing:-selective-smoothing">Multi-step processing: selective smoothing</h2>
+
+<p>Here is an example where an urban route with reasonably sharp corners, except it followed an oval path around a park. The oval path came out of Strava Route Editor slightly ragged, so I wanted enough smoothing there to make it smooth, but the rest of the route, I wanted less smoothing. For this I used -smoothStart and -smoothEnd, to isolate the oval, but then to get smoothing on the rest of the loop as well, I needed to run the code twice:</p>
+
+<p><code>processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -copyPoint -lap -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -out processed.gpx</code></p>
+
+<p>This uses a shell &quot;pipe&quot;, which is a way to run the program twice on the same data without saving to an intermediate file. although the intermediate file would be useful for debugging.</p>
+
+<dl>
+
+<dt id="shiftSF-0"><b>-shiftSF 0</b></dt>
+<dd>
+
+<p>The first call to processGPX specifies no S/F line shift (that will be done the second call, and I want to maintain the position of the start of the GPX for the first call).</p>
+
+</dd>
+<dt id="lap2"><b>-lap</b></dt>
+<dd>
+
+<p>It is a lap course.</p>
+
+</dd>
+<dt id="spacing-31"><b>-spacing 3</b></dt>
+<dd>
+
+<p>A fine spacing is used here, as the loop is only 1600 meters, and I&#39;ll rely on pruning to reduce the number of points later.</p>
+
+</dd>
+<dt id="zsmooth-10"><b>-zsmooth 10</b></dt>
+<dd>
+
+<p>This is moderate altitude smoothing. It&#39;s an urban course, but the climbs have fairly smooth transitions, and observing the gradient profile, there were some anomalies with using 5 meter smoothing. Strava Route Editor tends to produce abrupt gradient changes.</p>
+
+</dd>
+<dt id="smooth-5"><b>-smooth 5</b></dt>
+<dd>
+
+<p>This is a fairly small amount of smoothing, for urban corners with some rounding, or where the actual road is wider than the Magic Roads 8 meter road width, and wider lines are available.</p>
+
+</dd>
+<dt id="original.gpx"><b>original.gpx</b></dt>
+<dd>
+
+<p>This is the name of the original GPX file</p>
+
+</dd>
+<dt id="out"><b>-out -</b></dt>
+<dd>
+
+<p>This tells the code to write the resulting GPX to &quot;the standard output&quot;.</p>
+
+</dd>
+<dt id="processGPX"><b>| processGPX -</b></dt>
+<dd>
+
+<p>This tells the command line shell to &quot;send the standard output to the standard input of the next program&quot;, which is a sepearate call to processGPX. It&#39;s called a &quot;pipe&quot;. The &quot;-&quot; tells the code that this call takes its input from the pipe. So think of it as a virtual file, a direct line of communication from one call of the code to the next.</p>
+
+</dd>
+<dt id="copyPoint--lap"><b>-copyPoint -lap</b></dt>
+<dd>
+
+<p>Tell this call to the code that it&#39;s a lap, and I want to copy the first point to the last point to close the loop.</p>
+
+</dd>
+<dt id="smooth-15--smoothStart-1540--smoothEnd-270"><b>-smooth 15 -smoothStart 1540 -smoothEnd 270</b></dt>
+<dd>
+
+<p>Apply 15 meter smoothing this time, except start it at 1540 meters into the course, and end it as 270 meters into the course. The smoothing domain wraps around, because it starts after it finishes. So the end of the loop, and the beginning of the loop, will be additionally smoothed, while the rest will be kept unaltered, with a transitional range applied to avoid abrupt changes.</p>
+
+</dd>
+<dt id="out-processed.gpx"><b>-out processed.gpx</b></dt>
+<dd>
 
 </dd>
 </dl>

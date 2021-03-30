@@ -4235,6 +4235,87 @@ doesn't get over-written.
 
 =back
 
+=head2 Multi-step processing: selective smoothing
+
+Here is an example where an urban route with reasonably sharp corners,
+except it followed an oval path around a park.  The oval path came out
+of Strava Route Editor slightly ragged, so I wanted enough smoothing
+there to make it smooth, but the rest of the route, I wanted less
+smoothing.  For this I used -smoothStart and -smoothEnd, to isolate
+the oval, but then to get smoothing on the rest of the loop as well,
+I needed to run the code twice:
+
+C<processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -copyPoint -lap -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -out processed.gpx>
+
+This uses a shell "pipe", which is a way to run the program twice on
+the same data without saving to an intermediate file. although the
+intermediate file would be useful for debugging.
+
+=over
+
+=item B<-shiftSF 0>
+
+The first call to processGPX specifies no S/F line shift (that will be done the
+second call, and I want to maintain the position of the start of the GPX for
+the first call).
+
+=item B<-lap>
+
+It is a lap course.
+
+=item B<-spacing 3>
+
+A fine spacing is used here, as the loop is only 1600 meters, and I'll rely on
+pruning to reduce the number of points later.
+
+=item B<-zsmooth 10>
+
+This is moderate altitude smoothing.  It's an urban course, but the climbs
+have fairly smooth transitions, and observing the gradient profile, there
+were some anomalies with using 5 meter smoothing.  Strava Route Editor
+tends to produce abrupt gradient changes.
+
+=item B<-smooth 5>
+
+This is a fairly small amount of smoothing, for urban corners with some
+rounding, or where the actual road is wider than the Magic Roads 8 meter
+road width, and wider lines are available.
+
+=item B<original.gpx>
+
+This is the name of the original GPX file
+
+=item B<-out ->
+
+This tells the code to write the resulting GPX to "the standard
+output".
+
+=item B<| processGPX ->
+
+This tells the command line shell to "send the standard output to the
+standard input of the next program", which is a sepearate call to
+processGPX.  It's called a "pipe".  The "-" tells the code that this
+call takes its input from the pipe.  So think of it as a virtual file, a
+direct line of communication from one call of the code to the next.
+
+=item B<-copyPoint -lap>
+
+Tell this call to the code that it's a lap, and I want to copy the
+first point to the last point to close the loop.
+
+=item B<-smooth 15 -smoothStart 1540 -smoothEnd 270>
+
+Apply 15 meter smoothing this time, except start it at 1540 meters
+into the course, and end it as 270 meters into the course.  The
+smoothing domain wraps around, because it starts after it finishes.
+So the end of the loop, and the beginning of the loop, will be
+additionally smoothed, while the rest will be kept unaltered, with a
+transitional range applied to avoid abrupt changes.
+
+=item B<-out processed.gpx>
+
+=back
+
 =head2 Multi-step processing: snapping after spacing
 
 Snapping (making sure the course is aligned where it repeats itself)
