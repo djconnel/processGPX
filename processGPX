@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.21;   # make sure this matches pod value
+my $version = 0.22;   # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1725,12 +1725,14 @@ for my $file ( @files ) {
         my $dzigzag = 100;
         my @UTurns = ();
         for my $i ( 1 .. $#$points - 1 ) {
-          push @UTurns, $i + 1
+          push @UTurns, $i
             if (UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1]));
         }
+	warn("UTurns = @UTurns\n");
 
         if (@UTurns) {
 	  addDistanceField(points=> $points);
+	  my $zigzagCount = 0;
 	  while ( @UTurns > 1 ) {
 	    my $U1 = shift @UTurns;
 	    my $U2 = $UTurns[0];
@@ -1738,7 +1740,7 @@ for my $file ( @files ) {
 	    my $p2 = $points->[$U2];
 
             if ($p2->{distance} - $p1->{distance} < $dzigzag) {
-              warn("WARNING: zig-zag found on original points : ",
+              warn("WARNING: zig-zag found on original points (first point = 0) : ",
                    $U1, " and ", $U2, " : ",
                    sprintf("%.4f km: (%g, %g)", 0.001 * $p1->{distance}, $p1->{lon}, $p1->{lat}),
                    " to ",
@@ -1765,6 +1767,7 @@ for my $file ( @files ) {
 		      );
 
 	      warn("eliminating ", $v - $u - 1, " points\n");
+	      $zigzagCount ++;
 
 	      my @pNew = @$points[0 .. $u];
 	      push @pNew, @$points[$v .. $#$points];
@@ -1787,9 +1790,10 @@ for my $file ( @files ) {
 	      # get rid of obsolete U-turns
 	      shift @UTurns
 		while (@UTurns && ( $UTurns[0] < 0));
-
             }
           }
+	  deleteField(points=> $points, field=> "distance")
+	    if ($zigzagCount > 0);
         }
       }
 
@@ -3371,7 +3375,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.21
+0.22
 
 =head1 DESCRIPTION
 
