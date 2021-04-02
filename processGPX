@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.22;   # make sure this matches pod value
+my $version = 0.23;   # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1507,6 +1507,7 @@ my $splineDegs = 0;    # maximum degrees use if we use spline interpolation
 my $splineMaxDegs = 60;  # maximum turn angle for spline
 my $startTime;         # start time for activity
 my $title;             # title, for GPX file
+my $vFlag = 0;         # print version
 my $zAutoSmooth = 0;   # auto-smoothing based on altitude
 my $zOffset = 0;       # offset for altitude before scaling
 my $zScale = 1;        # scale factor for altitude
@@ -1578,6 +1579,8 @@ GetOptions (
             "splineMaxDegs=f" => \$splineMaxDegs,
             "startTime=s"   => \$startTime,
             "title=s"       => \$title,
+	    "version"       => \$vFlag,
+	    "v"             => \$vFlag,
             "zOffset=f"     => \$zOffset,
             "zScale=f"      => \$zScale,
             "zShift=f"      => \$zShift,
@@ -1588,6 +1591,11 @@ GetOptions (
 
 if ($needHelp) {
   pod2usage(-exitval=>0, -verbose=>2);
+}
+
+if ($vFlag ) {
+  warn("$0: version $version\n");
+  exit 0;
 }
 
 # proc to print user messages
@@ -3375,7 +3383,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.22
+0.23
 
 =head1 DESCRIPTION
 
@@ -3973,7 +3981,6 @@ exclude position smoothing from critical corners, but maintain
 altitude smoothing.  If the start is after the finish, then the region
 between the two is not smoothed, rather than smoothed.
 
-
 =item B<smoothz> <meters>
 
 Additional smoothing to be applied to altitude, on top of the
@@ -4080,6 +4087,9 @@ depend on the road grade.
 Specify the name of the GPX route. The default is the name listed
 in the source GPX.  This is synonymous with "-name".
 
+=item B<v> or B<version>
+
+Print the version number and exit.
 
 =item B<zAutoSmooth>
 
