@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.20;   # make sure this matches pod value
+my $version = 0.21;   # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1730,17 +1730,64 @@ for my $file ( @files ) {
         }
 
         if (@UTurns) {
-          addDistanceField(points=> $points);
-          for my $i ( 0 .. $#UTurns - 1 ) {
-            my $p1 = $points->[$UTurns[$i]];
-            my $p2 = $points->[$UTurns[$i + 1]];
+	  addDistanceField(points=> $points);
+	  while ( @UTurns > 1 ) {
+	    my $U1 = shift @UTurns;
+	    my $U2 = $UTurns[0];
+	    my $p1 = $points->[$U1];
+	    my $p2 = $points->[$U2];
+
             if ($p2->{distance} - $p1->{distance} < $dzigzag) {
               warn("WARNING: zig-zag found on original points : ",
-                   $UTurns[$i], " and ", $UTurns[$i + 1], " : ",
+                   $U1, " and ", $U2, " : ",
                    sprintf("%.4f km: (%g, %g)", 0.001 * $p1->{distance}, $p1->{lon}, $p1->{lat}),
                    " to ",
                    sprintf("%.4f km: (%g, %g)", 0.001 * $p2->{distance}, $p2->{lon}, $p2->{lat}),
                    "\n");
+
+	      # repairing zig-zags...
+	      # zig-zags are two U-turns within a specified distance
+	      # p1 -> p2 -> ... ->  p3 -> p4
+	      # U-turn @ p2, and U-turn @ p3
+	      # 1. eliminate all points between p2 and p3
+	      # 2. as long as P3 has a U-turn, delete it... there will be a new P3
+              # 3. as long as P2 has a U-turn, delete it...
+              # 4. go back step 2 if er deleted any U-turns
+
+	      # eliminate points between
+	      warn("repairing zig-zag...\n");
+	      my $u = $U1; # keep points up to u
+	      my $v = $U2 + 1; # keep points starting with v
+	      $v ++
+		while (
+		       ($v < $#$points) &&
+		       UTurnCheck($points->[$u], $points->[$v], $points->[$v], $points->[$v + 1])
+		      );
+
+	      warn("eliminating ", $v - $u - 1, " points\n");
+
+	      my @pNew = @$points[0 .. $u];
+	      push @pNew, @$points[$v .. $#$points];
+
+	      # if we ran out of points, something is wrong
+	      die("repairing zig-zags eliminated entire route\n")
+		if (@pNew < 2);
+
+	      $points = \@pNew;
+
+	      # adjust U-turn coordinates
+	      # We've eliminated the next Uturn, so pop it
+	      shift @UTurns;
+
+	      # adjust coordinates of remaining U-turns
+	      for my $U ( @UTurns ) {
+		$U += $u - $v + 1;
+	      }
+
+	      # get rid of obsolete U-turns
+	      shift @UTurns
+		while (@UTurns && ( $UTurns[0] < 0));
+
             }
           }
         }
@@ -2119,7 +2166,7 @@ for my $file ( @files ) {
               my $p1 = $points->[$j2];
               my $p2 = $points->[$i2];
               my $p3 = $points->[$i2 - 1];
-              last if (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9);
+              last if ((! defined $p1) || (! defined $p2) || (! defined $p3) || (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9));
               $i2 --;
               if ($i1 >= $i2) {
                 $j += $snapStep;
@@ -3324,7 +3371,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.20
+0.21
 
 =head1 DESCRIPTION
 
@@ -3368,7 +3415,8 @@ the result will be a file:
 F<myFavoriteRoute_processed.gpx>
 
 This file will be essentially equivalent to the input file, in the
-absence of any comment line options.
+absence of any comment line options, although if there are any
+"zig-zags" identified, those will be removed.
 
 If an alternate filename were desired for the output, that could be
 specified with the "-out" option:
@@ -3478,8 +3526,8 @@ course to be exactly 10 miles, (a typical UK time trial distance),
 then to put the finish line at the end of those 10 miles, the option
 "-append 140" would add 140 meters.  This buffer is needed by RGT
 because riders group along the road-side after crossing the finish.
-Note the start line would also need to be extended, via -prepend,
-by 60 meters, in this case.
+Note the start line would also need to be extended, via -prepend, by
+60 meters, in this case.
 
 Extended points will be set to the altitude of the final point.
 
@@ -3532,8 +3580,9 @@ Synonym for "-copyPoint"
 
 =item B<copyPoint>
 
-For "-loop" courses, copy the first point to the end of the list of points, so the circuit is explicitly
-closed.  This assures that RGT Cycling will recognize it as a loop course.
+For "-loop" courses, copy the first point to the end of the list of
+points, so the circuit is explicitly closed.  This assures that RGT
+Cycling will recognize it as a loop course.
 
 =item B<copyright> <strong>
 
@@ -3621,10 +3670,10 @@ allow for the crossing.  This creates that leveling.
 =item B<flatten> <altitude-meters> <start-meters> <end-meters> <transition-meters> ...
 
 This important option allows the route to be flattened over a
-specified coordinate range, with a specified transition length.
-This has been used where there are overpasses in a route, where it is important
-that the altitude difference between the upper and lower roadway be maintained,
-even with altitude smoothing.
+specified coordinate range, with a specified transition length.  This
+has been used where there are overpasses in a route, where it is
+important that the altitude difference between the upper and lower
+roadway be maintained, even with altitude smoothing.
 
 The transition length is used to describe a distance over which a cosine
 weighting term is used to transition between the fixed altitude, and the
@@ -3718,8 +3767,8 @@ which is reported to standard error.
 =item B<out> <filename>
 
 Instead of the default filename, which is the input file with
-F<_processed.gpx>, use this filename instead.  Make sure to specify the
-F<.gpx> suffix if that is what is wanted. A "-" implies standard
+F<_processed.gpx>, use this filename instead.  Make sure to specify
+the F<.gpx> suffix if that is what is wanted. A "-" implies standard
 output.
 
 =item B<prepend> <meters>
@@ -3756,10 +3805,11 @@ default value.
 
 =item B<prunedg> <value>
 
-Given three points in sequence, A, B, and C, if the difference in gradient
-from A to B, and B to C, exceeds this value (not specified as a percent,
-but as a raw value, so for example a 45-degree include has gradient = 1),
-then the point B is not removed.  There is a default value.
+Given three points in sequence, A, B, and C, if the difference in
+gradient from A to B, and B to C, exceeds this value (not specified as
+a percent, but as a raw value, so for example a 45-degree include has
+gradient = 1), then the point B is not removed.  There is a default
+value.
 
 =item B<quiet>
 
@@ -3770,14 +3820,16 @@ the altitude smoothness score, and the course distance.
 
 =item B<rCrossings> <meters>
 
-If "-fixCrossings" is invoked, then how far to each side of the crossing the road
-should be leveled.  A transition of three times this length will be used, over
-which the altitude will be restored to the unaltered value.  The default is 6 meters,
-which works fairly well with the RGT road width of 8 meters, althouugh if the
-intersection is at a particularly acute value, or if the roads will be wider than the
-RGT standard of 8 meters, a larger value may be better.  If the value is too large,
-the transitions too and from the flat section may be too steep, or the influence of
-crossings could overlap, which the algorithm does not handle well.
+If "-fixCrossings" is invoked, then how far to each side of the
+crossing the road should be leveled.  A transition of three times this
+length will be used, over which the altitude will be restored to the
+unaltered value.  The default is 6 meters, which works fairly well
+with the RGT road width of 8 meters, althouugh if the intersection is
+at a particularly acute value, or if the roads will be wider than the
+RGT standard of 8 meters, a larger value may be better.  If the value
+is too large, the transitions too and from the flat section may be too
+steep, or the influence of crossings could overlap, which the
+algorithm does not handle well.
 
 =item B<reverse>
 
@@ -3868,12 +3920,13 @@ For -loop courses, the amount to shift the start/finish forwards
 For loop courses, RGT Cycling puts the start/finish line 60 meters
 after the start of the GPX data.  This is evidently to provide room
 for riders to line up before the start, although that is only
-necessary in point-to-point courses, so the reason for this is unclear.
-In circuit courses careful placement of the start/finish line, for example
-at the crest of a hill, or a specific distance from a final corner, is critical,
-so with this option you can carefully place the start point for the GPX file at
-the desired start/finish, then use "-loop -shiftSF -60" to move the start of the GPX
-file back 60 meters, putting the start where it should be.
+necessary in point-to-point courses, so the reason for this is
+unclear.  In circuit courses careful placement of the start/finish
+line, for example at the crest of a hill, or a specific distance from
+a final corner, is critical, so with this option you can carefully
+place the start point for the GPX file at the desired start/finish,
+then use "-loop -shiftSF -60" to move the start of the GPX file back
+60 meters, putting the start where it should be.
 
 Since this is so commonly used in loop courses, the default is -60, so to
 disable it, use "-shiftSF 0 -loop".
@@ -4079,8 +4132,9 @@ Options:
 
 =item B<-laneshift -4>
 
-Riders remain to the left left on the out-and-back portion, so each direction is shifted 4 meters
-to the left.  The negative number implies left, a positive number implies right.
+Riders remain to the left left on the out-and-back portion, so each
+direction is shifted 4 meters to the left.  The negative number
+implies left, a positive number implies right.
 
 =item B<-shiftStart 740 -shiftEnd 1390>
 
@@ -4203,7 +4257,7 @@ Use 10 meter smoothing on position and, initially, on altitude.  This
 results in some rounding of corners.  For this course the result was
 compared with the "GPX Visualizer" website to satellite data, to make
 sure corners were fairly well aligned with actual corners, but
-additionally that there were no anoamlies such as "zig-zags" which did
+additionally that there were no anomalies such as "zig-zags" which did
 not exist in the real road.  More than 10 meters and some detail from
 the actual road may be lost, such as switchbacks with imperfect
 variable radius.
