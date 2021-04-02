@@ -44,7 +44,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.23</p>
+<p>0.24</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -62,7 +62,7 @@
 
 <p><i>myFavoriteRoute_processed.gpx</i></p>
 
-<p>This file will be essentially equivalent to the input file, in the absence of any comment line options, although if there are any &quot;zig-zags&quot; identified, those will be removed.</p>
+<p>This file will be essentially equivalent to the input file, in the absence of any comment line options, although if there are any &quot;zig-zags&quot; identified, those will be removed. The file will also be checked for &quot;loops&quot;, where the direction spins around within 100 meters, which might be from a poorly placed control point with mapping software.</p>
 
 <p>If an alternate filename were desired for the output, that could be specified with the &quot;-out&quot; option:</p>
 
@@ -109,6 +109,18 @@
 
 <dl>
 
+<dt id="addDirection"><b>addDirection</b></dt>
+<dd>
+
+<p>This option adds a &quot;direction&quot; field relative to east (in degrees) to the GPX file.</p>
+
+<p>examples: 0 degrees: east 90 degrees: north 180 degrees: west 270 degrees south</p>
+
+<p>Note this is not &quot;heading&quot;, as it is relative to east.</p>
+
+<p>Direction is calculated for each point as the average of the directions ahead and behind. The direction of the first or last points in a point-to-point course are calculated in only one direction. Directions for loop courses are calculated assuming the loop. The direction never changes by more than +/- 180 degrees from one point to the next, so the direction has no limits: it can be positive, negative, and outside the range from -360 to +360 degrees. For example, if a route started east (0) then lapped around counterclockwise 10 times, the final direction would be approximately 3600 degrees.</p>
+
+</dd>
 <dt id="addDistance"><b>addDistance</b></dt>
 <dd>
 
@@ -322,10 +334,10 @@
 <dt id="noSave"><b>noSave</b></dt>
 <dd>
 
-<p>The -nosave option suppressed generation of a GPX output file. This may be useful for debugging or for checking the distance of a file, which is reported to standard error.</p>
+<p>The -nosave option suppressed generation of a GPX output file. This may be useful for debugging or for checking the distance of a file, which is reported to standard error, and checking it for zig-zags and loops.</p>
 
 </dd>
-<dt id="out-filename"><b>out</b> &lt;filename&gt;</dt>
+<dt id="ou-filename"><b>ou</b> &lt;filename&gt;</dt>
 <dd>
 
 <p>Instead of the default filename, which is the input file with <i>_processed.gpx</i>, use this filename instead. Make sure to specify the <i>.gpx</i> suffix if that is what is wanted. A &quot;-&quot; implies standard output.</p>
