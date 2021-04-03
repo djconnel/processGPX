@@ -3245,52 +3245,62 @@ for my $file ( @files ) {
       #
       if ( (defined $rUTurn) && ($rUTurn > 0) ) {
         note("checking for U-turn loops...\n");
-        my @pNew = ();
-        my $i = 0;
-        push @pNew, $points->[$i++]
-          if (! $isLoop);
-        while ($i <= $#$points) {
-          push @pNew, $points->[$i];
 
-          if (
-              ($isLoop || ($i < $#$points)) &&
-              UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[($i + 1) % @$points])
-             ) {
-            my $d1 = latlngDirection($points->[$i - 1], $points->[$i]);
-            my $d2 = latlngDirection($points->[($i + 1) % @$points], $points->[$i]);
-            note("3-point U-turn detected!  Directions = $d1, $d2: processing!\n");
+	# two sweeps: one for 3-point turns, the next for 4-point turns.
+	for my $turnType (3, 4) {
+	  my @pNew = ();
+	  my $i = 0;
+	  push @pNew, $points->[$i++]
+	    if (! $isLoop);
+	  while ($i <= $#$points) {
+	    push @pNew, $points->[$i];
 
-            my $dir = averageAngles($d1, $d2);
-            my $loop = makeLoop(points=> [$points->[$i], $points->[$i]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
-            push @pNew, @$loop;
-            push @pNew, \%{$points->[$i]}; # put a copy of the turn-around point here
-          } elsif (
-                   ($isLoop || (($i > 0) && ($i < $#$points - 1))) &&
-                   UTurnCheck($points->[$i - 1], $points->[$i], $points->[($i + 1) % @$points], $points->[($i + 2) % @$points]) &&
-                   (latlngDistance($points->[$i], $points->[($i + 1) % @$points]) < 10)
-                  ) {
-	    my $h = ($i - 1) % @$points;
-	    my $j = ($i + 1) % @$points;
-	    my $k = ($j + 1) % @$points;
-            my $d1 = latlngDirection($points->[$h], $points->[$i]);
-            my $d2 = latlngDirection($points->[$k], $points->[$j]);
-            note("4-point U-turn detected @\n",
-                 "   1: point ", $h + 1, " of ", scalar(@$points), " ($points->[$h]->{lon}, $points->[$h]->{lat})\n",
-                 "   2: point ", $i + 1, " of ", scalar(@$points), " ($points->[$i]->{lon}, $points->[$i]->{lat})\n",
-                 "   3: point ", $j + 1, " of ", scalar(@$points), " ($points->[$j]->{lon}, $points->[$j]->{lat})\n",
-                 "   4: point ", $k + 1, " of ", scalar(@$points), " ($points->[$k]->{lon}, $points->[$k]->{lat})\n",
-		 "   directions = $d1, $d2\n");
-            my $dir = averageAngles($d1, $d2);
-            my $loop = makeLoop(points=> [$points->[$i], $points->[$j]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
-            push @pNew, @$loop;
-            $i ++;
-          }
-          $i ++;
-        }
-        push @pNew, $points->[$i++] while ($i < $#$points);
-        $points = \@pNew;
+	    if (
+		($turnType == 3) &&
+		($isLoop || ($i < $#$points)) &&
+		UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[($i + 1) % @$points])
+	       ) {
+	      my $d1 = latlngDirection($points->[$i - 1], $points->[$i]);
+	      my $d2 = latlngDirection($points->[($i + 1) % @$points], $points->[$i]);
+	      my $h = ($i - 1) % @$points;
+	      my $j = ($i + 1) % @$points;
+	      note("3-point U-turn detected @\n",
+		   "   1: point ", $h + 1, " of ", scalar(@$points), " ($points->[$h]->{lon}, $points->[$h]->{lat})\n",
+		   "   2: point ", $i + 1, " of ", scalar(@$points), " ($points->[$i]->{lon}, $points->[$i]->{lat})\n",
+		   "   3: point ", $j + 1, " of ", scalar(@$points), " ($points->[$j]->{lon}, $points->[$j]->{lat})\n",
+		   "   directions = $d1, $d2\n");
+	      my $dir = averageAngles($d1, $d2);
+	      my $loop = makeLoop(points=> [$points->[$i], $points->[$i]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
+	      push @pNew, @$loop;
+	      push @pNew, \%{$points->[$i]}; # put a copy of the turn-around point here
+	    } elsif (
+		     ($turnType == 4) &&
+		     ($isLoop || (($i > 0) && ($i < $#$points - 1))) &&
+		     UTurnCheck($points->[$i - 1], $points->[$i], $points->[($i + 1) % @$points], $points->[($i + 2) % @$points]) &&
+		     (latlngDistance($points->[$i], $points->[($i + 1) % @$points]) < 10)
+		    ) {
+	      my $h = ($i - 1) % @$points;
+	      my $j = ($i + 1) % @$points;
+	      my $k = ($j + 1) % @$points;
+	      my $d1 = latlngDirection($points->[$h], $points->[$i]);
+	      my $d2 = latlngDirection($points->[$k], $points->[$j]);
+	      note("4-point U-turn detected @\n",
+		   "   1: point ", $h + 1, " of ", scalar(@$points), " ($points->[$h]->{lon}, $points->[$h]->{lat})\n",
+		   "   2: point ", $i + 1, " of ", scalar(@$points), " ($points->[$i]->{lon}, $points->[$i]->{lat})\n",
+		   "   3: point ", $j + 1, " of ", scalar(@$points), " ($points->[$j]->{lon}, $points->[$j]->{lat})\n",
+		   "   4: point ", $k + 1, " of ", scalar(@$points), " ($points->[$k]->{lon}, $points->[$k]->{lat})\n",
+		   "   directions = $d1, $d2\n");
+	      my $dir = averageAngles($d1, $d2);
+	      my $loop = makeLoop(points=> [$points->[$i], $points->[$j]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
+	      push @pNew, @$loop;
+	      $i ++;
+	    }
+	    $i ++;
+	  }
+	  push @pNew, $points->[$i++] while ($i < $#$points);
+	  $points = \@pNew;
+	}
       }
-
 
       #
       # shift starting line
