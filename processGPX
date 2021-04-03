@@ -3293,7 +3293,6 @@ for my $file ( @files ) {
 	      my $dir = averageAngles($d1, $d2);
 	      my $loop = makeLoop(points=> [$points->[$i], $points->[$j]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
 	      push @pNew, @$loop;
-	      $i ++;
 	    }
 	    $i ++;
 	  }
