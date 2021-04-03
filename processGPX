@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.24;             # make sure this matches pod value
+my $version = 0.25;             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1042,8 +1042,6 @@ sub addGradientField {
 #
 # add direction field to points
 #
-# under construction
-#
 sub addDirectionField {
   my %var =@_;
   my $points = $var{points} // [];
@@ -1348,7 +1346,7 @@ sub calcSigma {
   return unless (@$points);
 
   # specify the window over which gradient variance is calculated
-  my $sigmaAvg = 100;
+  my $sigmaAvg = 200;
   my $twoSigmaAvg2 = 2 * $sigmaAvg ** 2;
   my $avgRange = 3 * $sigmaAvg;
 
@@ -1509,54 +1507,54 @@ sub calcQualityScore {
 my $addDirection = 0;           # whether to not add a direction field
 my $addDistance = 0;            # whether to not add a distance field
 my $addGradient = 0;            # whether to not add a gradient field
-my $addGradientSigns = 0;   # whether to create list of gradient signs
-my $addSigma = 0; # whether to create a sigma field when autosmoothing
+my $addGradientSigns = 0;       # whether to create list of gradient signs
+my $addSigma = 0;               # whether to create a sigma field when autosmoothing
 my $anchorSF = 0;               # whether to anchor the S/F
-my $append = 0; # distance to append on finish (140 meters allows room for finish): only for point-to-point
+my $append = 0;                 # distance to append on finish (140 meters allows room for finish): only for point-to-point
 my $autoSpacing;                # whether to do auto-spacing
 my $author;                     # author, for GPX
-my $copyPoint = 0; # whether to make sure first point and last point in data coincide
+my $copyPoint = 0;              # whether to make sure first point and last point in data coincide
 my $copyright;                  # copyright field, for GPX
-my $cropMax; # maximum distance of retained data (distance calculated in original coordinates
-my $cropMin; # minimum distance of retained data (distance calculated in original coordinates)
+my $cropMax;                    # maximum distance of retained data (distance calculated in original coordinates
+my $cropMin;                    # minimum distance of retained data (distance calculated in original coordinates)
 my $csv = 0;                    # whether to use CSV instead of GPX
 my $description;                # description, for GPX metadata
 my $extend = 0;                 # apply to both append and prepend
-my $extendBack = 0;          # amount to extend the route with a loop.
+my $extendBack = 0;             # amount to extend the route with a loop.
 my $fixCrossings = 0;           # whether to flatten crossings
 my $join;                       # a GPS file to join to this one
-my $gradientPower = 2; # power to raise gradient in evaluating segments for gradient signs
-my $gradientThreshold = 100; # minimum climb @ 10% grade to get a gradient sign
-my $isLoop = 0; # whether to apply periodic boundary conditions (smooth around the Loop)
+my $gradientPower = 2;          # power to raise gradient in evaluating segments for gradient signs
+my $gradientThreshold = 100;    # minimum climb @ 10% grade to get a gradient sign
+my $isLoop = 0;                 # whether to apply periodic boundary conditions (smooth around the Loop)
 my $lAutoSmooth = 0;            # auto-smoothing based on position
-my $lSmooth = 0; # general smoothing, applies to positions and all other fields
-my $laneShift = 0; # how much to shift lanes right (positive) or left (negative)
-my $linterpolate = 0; # target point spacing: linear interpolate between existing points
+my $lSmooth = 0;                # general smoothing, applies to positions and all other fields
+my $laneShift = 0;              # how much to shift lanes right (positive) or left (negative)
+my $linterpolate = 0;           # target point spacing: linear interpolate between existing points
 my $needHelp = 0;               # print the pod
 my $newKeywords = "";           # new keywords for the GPX file
 my $noSave = 0;                 # skip saving the file
-my $outFile = ""; # where to write the resulting GPX, unless -nosave is used
-my $prepend = 0; # distance to pre-pend on start (60 meters allows room for start): only for point-to-point
+my $outFile = "";               # where to write the resulting GPX, unless -nosave is used
+my $prepend = 0;                # distance to pre-pend on start (60 meters allows room for start): only for point-to-point
 my $prune = 0;                  # whether to prune points
-my $pruneD = 1; # distance a point can deviate in meters to avoid pruning.  also much match X-product.
+my $pruneD = 1;                 # distance a point can deviate in meters to avoid pruning.  also much match X-product.
 my $pruneX = 0.001;             # maximum cross product for pruning
-my $prunedg = 0.0005;  # maximum difference in grade for point pruning
+my $prunedg = 0.0005;           # maximum difference in grade for point pruning
 my $quiet = 0;                  # suppressed notes to standard error
-my $rCrossings = 6;   # how much lenth to flatten crossings, each side
+my $rCrossings = 6;             # how much lenth to flatten crossings, each side
 my $reverse = 0;                # whether to reverse the course
-my $rLap= 0; # if the route is turned into an out-and-back, the radius of the return loop
-my $rTurnaround= 0; # if the route is turned into an out-and-back, the radius of the outer loop
-my $rUTurn; # if the route is turned into an out-and-back, the radius of the two loops
-my $shiftEnd;      # where to end land shifting (define: don't end it)
-my $shiftSF = -60; # amount to shift the S/F if a loop course: RGT puts the start line 60 meters after start of course, so -60 works here
-my $shiftStart; # where to start lane shifting (default: don't start it)
-my $smoothAngle; # angle at which direction changes trigger point interpolation
-my $smoothStart;       # where to start smoothing (default: beginning)
-my $smoothEnd;              # where to finish smoothing (default: end)
-my $snap = 0; # whether to check for near-coincident road segments, and make them exactly coincide: upward direction: 1 = up, 2 = down, 0 = none
-my $snapDistance = 2;  # number of meters threshold for point snapping
-my $snapTransition = 0; # whether to transition the altitude around snaps to match the source
-my $splineDegs = 0; # maximum degrees use if we use spline interpolation
+my $rLap= 0;                    # if the route is turned into an out-and-back, the radius of the return loop
+my $rTurnaround= 0;             # if the route is turned into an out-and-back, the radius of the outer loop
+my $rUTurn;                     # if the route is turned into an out-and-back, the radius of the two loops
+my $shiftEnd;                   # where to end land shifting (define: don't end it)
+my $shiftSF = -60;              # amount to shift the S/F if a loop course: RGT puts the start line 60 meters after start of course, so -60 works here
+my $shiftStart;                 # where to start lane shifting (default: don't start it)
+my $smoothAngle;                # angle at which direction changes trigger point interpolation
+my $smoothStart;                # where to start smoothing (default: beginning)
+my $smoothEnd;                  # where to finish smoothing (default: end)
+my $snap = 0;                   # whether to check for near-coincident road segments, and make them exactly coincide: upward direction: 1 = up, 2 = down, 0 = none
+my $snapDistance = 2;           # number of meters threshold for point snapping
+my $snapTransition = 0;         # whether to transition the altitude around snaps to match the source
+my $splineDegs = 0;             # maximum degrees use if we use spline interpolation
 my $splineMaxDegs = 60;         # maximum turn angle for spline
 my $startTime;                  # start time for activity
 my $title;                      # title, for GPX file
@@ -1565,8 +1563,11 @@ my $zAutoSmooth = 0;            # auto-smoothing based on altitude
 my $zOffset = 0;                # offset for altitude before scaling
 my $zScale = 1;                 # scale factor for altitude
 my $zShift = 0;                 # offset for altitude after scaling
-my $zSmooth = 0;          # smoothing applied additionally to altitude
-my @flatten; # points come in sets of 4: altitude, start point, finish point, lambda
+my $zSmooth = 0;                # smoothing applied additionally to altitude
+my @flatten;                    # points come in sets of 4: altitude, start point, finish point, lambda
+
+# shortcut options:
+my $auto = 0;                   # automatically set options based on the course (doesn't turn options off)
 
 GetOptions (
             "addDirection"  => \$addDirection,
@@ -1576,6 +1577,7 @@ GetOptions (
             "anchorSF"      => \$anchorSF,
             "append=f"      => \$append,
             "author=s"      => \$author,
+            "auto"          => \$auto,
             "autoSmoothZ=f" => \$zAutoSmooth,
             "autoSpacing"   => \$autoSpacing,
             "closed"        => \$copyPoint,
@@ -1771,6 +1773,84 @@ for my $file ( @files ) {
           }
         }
       }
+
+
+      #
+      # auto: auto option will turn on options based ont he course
+      #
+
+      if ( $auto ) {
+        note("auto-setting options...\n");
+        if (
+            (! $isLoop) &&
+            (latlngDistance($points->[0], $points->[-1]) < 150) &&
+            (@$points > 3) &&
+            (latlngDotProduct($points->[-2], $points->[-1], $points->[0], $points->[1]) > -0.1)
+           ) {
+          $isLoop = 1;
+          $copyPoint = 1;
+         note("setting -loop\n");
+        }
+
+        my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+
+        # calculate position interpolation
+        if ( $linterpolate <= 0 ) {
+          $linterpolate = 3 * (1 + $courseDistance / 250) ** (1/4);
+          note("setting spacing to ", sprintf("%.3f", $linterpolate), " meters (distance = ", sprintf("%.3f", $courseDistance / 1000), " km)\n");
+        }
+
+        # smoothing
+        if ( $lSmooth <= 0 ) {
+          $lSmooth = 7;
+          note("setting smoothing to $lSmooth meters\n");
+        }
+
+        # other options
+	if (! $autoSpacing) {
+	  note("setting -autospacing...\n");
+	  $autoSpacing = 1;
+	}
+	if (! defined $smoothAngle) {
+	  $smoothAngle = 20;
+	  note("setting -smoothAngle $smoothAngle ...\n");
+	}
+	$smoothRadians = $smoothAngle * $deg2rad;
+
+	if (! $prune) {
+	  note("setting -prune ...\n");
+	  $prune = 1;
+	}
+        if ($zSmooth == 0) {
+          $zSmooth = 15;
+          note("setting altitude smoothing to $zSmooth meters\n");
+        }
+	if (! $anchorSF) {
+	  $anchorSF = 1;
+	  note("setting -anchorSF ...\n");
+	}
+	if (! $fixCrossings) {
+	  note("setting -fixCrossings ...\n");
+	  $fixCrossings = 1;
+	}
+	if (! defined  $rUTurn) {
+	  $rUTurn = 5;
+	  note("setting -RUTurn 5 (meters) ...\n");
+	}
+	if ($snap == 0) {
+	  $snap = 1;
+	  note("setting -snap 1 ...\n");
+	}
+	if ($snapTransition <= 0) {
+	  $snapTransition = 10;
+	  note("setting -snapTransition $snapTransition (meters) ...\n");
+	}
+      }
+
+
+      #
+      # check if loop specified for apparent point-to-point
+      #
 
       if ($isLoop) {
         my $d =latlngDistance($points->[0], $points->[-1]);
@@ -2416,6 +2496,8 @@ for my $file ( @files ) {
                 my $a = latlngAngle($points->[$i1], $points->[$i], $points->[$i2]);
 
                 # add points if needed
+		die("ERROR: smoothRadians not defined (smoothAngle = $smoothAngle\n")
+		  unless(defined $smoothRadians);
                 if ( abs($a) > abs($smoothRadians) ) {
                   # refine distance -- need to exceed the smoothing length
                   my $dRefine = 3 * $lSmooth;
@@ -3183,18 +3265,25 @@ for my $file ( @files ) {
             push @pNew, @$loop;
             push @pNew, \%{$points->[$i]}; # put a copy of the turn-around point here
           } elsif (
-                   ($isLoop || ($i < $#$points - 1)) &&
+                   ($isLoop || (($i > 0) && ($i < $#$points - 1))) &&
                    UTurnCheck($points->[$i - 1], $points->[$i], $points->[($i + 1) % @$points], $points->[($i + 2) % @$points]) &&
                    (latlngDistance($points->[$i], $points->[($i + 1) % @$points]) < 10)
                   ) {
-            my $d1 = latlngDirection($points->[$i - 1], $points->[$i]);
-            my $d2 = latlngDirection($points->[($i + 2) % @$points], $points->[($i + 1) % @$points]);
-            note("4-point U-turn detected!  Directions = $d1, $d2: processing!\n");
+	    my $h = ($i - 1) % @$points;
+	    my $j = ($i + 1) % @$points;
+	    my $k = ($j + 1) % @$points;
+            my $d1 = latlngDirection($points->[$h], $points->[$i]);
+            my $d2 = latlngDirection($points->[$k], $points->[$j]);
+            note("4-point U-turn detected @\n",
+                 "   1: point ", $h + 1, " of ", scalar(@$points), " ($points->[$h]->{lon}, $points->[$h]->{lat})\n",
+                 "   2: point ", $i + 1, " of ", scalar(@$points), " ($points->[$i]->{lon}, $points->[$i]->{lat})\n",
+                 "   3: point ", $j + 1, " of ", scalar(@$points), " ($points->[$j]->{lon}, $points->[$j]->{lat})\n",
+                 "   4: point ", $k + 1, " of ", scalar(@$points), " ($points->[$k]->{lon}, $points->[$k]->{lat})\n",
+		 "   directions = $d1, $d2\n");
             my $dir = averageAngles($d1, $d2);
-            my $loop = makeLoop(points=> [$points->[$i], $points->[($i + 1) % @$points]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
+            my $loop = makeLoop(points=> [$points->[$i], $points->[$j]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
             push @pNew, @$loop;
             $i ++;
-            push @pNew, $points->[$i];
           }
           $i ++;
         }
@@ -3466,7 +3555,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.24
+0.25
 
 =head1 DESCRIPTION
 
@@ -3593,14 +3682,14 @@ examples:
 
 Note this is not "heading", as it is relative to east.
 
-Direction is calculated for each point as the average of the directions
-ahead and behind.  The direction of the first or last points in a
-point-to-point course are calculated in only one direction.
-Directions for loop courses are calculated assuming the loop.  The
-direction never changes by more than +/- 180 degrees from one point to
-the next, so the direction has no limits: it can be positive,
-negative, and outside the range from -360 to +360 degrees.  For
-example, if a route started east (0) then lapped around
+Direction is calculated for each point as the average of the
+directions ahead and behind.  The direction of the first or last
+points in a point-to-point course are calculated in only one
+direction.  Directions for loop courses are calculated assuming the
+loop.  The direction never changes by more than +/- 180 degrees from
+one point to the next, so the direction has no limits: it can be
+positive, negative, and outside the range from -360 to +360 degrees.
+For example, if a route started east (0) then lapped around
 counterclockwise 10 times, the final direction would be approximately
 3600 degrees.
 
@@ -3665,6 +3754,13 @@ which has a 100 meter threshold, as this is written.
 
 Provide the author of the GPX, as a string.  The default will
 preserve the author of the source GPX.
+
+=item B<auto>
+
+This option automatically turns on options based on "best practices".
+It will not turn anything off, so can be used in conjunction with other
+options.  Altitude auto-smoothing is used if no value for -zsmooth is
+provided.
 
 =item B<autoSmoothZ> <scale factor>
 
@@ -3886,7 +3982,7 @@ may be useful for debugging or for checking the distance of a file,
 which is reported to standard error, and checking it for zig-zags
 and loops.
 
-=item B<ou> <filename>
+=item B<out> <filename>
 
 Instead of the default filename, which is the input file with
 F<_processed.gpx>, use this filename instead.  Make sure to specify
@@ -4238,6 +4334,17 @@ Synonym for -smoothz
 
 =head1 EXAMPLES
 
+=head2 -auto option
+
+The -auto option attempts to use "reasonable" parameters which may not
+be the best in each case, and which may require some fine-tuning, but should
+work fairly well:
+
+C<processGPX -auto GPXData.gpx>
+
+This will create an output file "GPXData_processed.gpx" with various options
+automatically chosen.
+
 =head2 criterium course
 
 The following example was from a criterium course:
@@ -4578,6 +4685,11 @@ C<-addGradientSigns -gradientThreshold 20 -gradientPower 2>
 =item B<-addGradientSigns>
 
 Tells the code to add waypoints where gradient signs should be placed.
+
+=item B<auto>
+
+This option will attempt to guess at some good settings based on the
+course.
 
 =item B<-gradientThreshold 20>
 

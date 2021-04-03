@@ -20,6 +20,7 @@
   <li><a href="#OPTIONS">OPTIONS</a></li>
   <li><a href="#EXAMPLES">EXAMPLES</a>
     <ul>
+      <li><a href="#Quick-start:--auto-option">Quick start: -auto option</a></li>
       <li><a href="#criterium-course">criterium course</a></li>
       <li><a href="#road-course-w-out-and-back">road course w/ out-and-back</a></li>
       <li><a href="#Multi-step-processing:-selective-smoothing">Multi-step processing: selective smoothing</a></li>
@@ -44,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.24</p>
+<p>0.25</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -167,6 +168,12 @@
 <dd>
 
 <p>Provide the author of the GPX, as a string. The default will preserve the author of the source GPX.</p>
+
+</dd>
+<dt id="auto"><b>auto</b></dt>
+<dd>
+
+<p>This option automatically turns on options based on &quot;best practices&quot;. It will not turn anything off, so can be used in conjunction with other options. Altitude auto-smoothing is used if no value for -zsmooth is provided.</p>
 
 </dd>
 <dt id="autoSmoothZ-scale-factor"><b>autoSmoothZ</b> &lt;scale factor&gt;</dt>
@@ -597,6 +604,14 @@
 
 <h1 id="EXAMPLES">EXAMPLES</h1>
 
+<h2 id="Quick-start:--auto-option">Quick start: -auto option</h2>
+
+<p>The -auto option attempts to use &quot;reasonable&quot; parameters which may not be the best in each case, and which may require some fine-tuning, but should work fairly well:</p>
+
+<p><code>processGPX -auto GPXData.gpx</code></p>
+
+<p>This will create an output file &quot;GPXData_processed.gpx&quot; with various options automatically chosen.</p>
+
 <h2 id="criterium-course">criterium course</h2>
 
 <p>The following example was from a criterium course:</p>
@@ -853,6 +868,12 @@
 <dd>
 
 <p>Tells the code to add waypoints where gradient signs should be placed.</p>
+
+</dd>
+<dt id="auto1"><b>auto</b></dt>
+<dd>
+
+<p>This option will attempt to guess at some good settings based on the course.</p>
 
 </dd>
 <dt id="gradientThreshold-20"><b>-gradientThreshold 20</b></dt>
