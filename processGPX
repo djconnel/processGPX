@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.25;             # make sure this matches pod value
+my $version = 0.26;             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -3255,15 +3255,17 @@ for my $file ( @files ) {
 	  while ($i <= $#$points) {
 	    push @pNew, $points->[$i];
 
+	    my $h = ($i - 1) % @$points;
+	    my $j = ($i + 1) % @$points;
+	    my $k = ($j + 1) % @$points;
+
 	    if (
 		($turnType == 3) &&
 		($isLoop || ($i < $#$points)) &&
-		UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[($i + 1) % @$points])
+		UTurnCheck($points->[$h], $points->[$i], $points->[$i], $points->[$j])
 	       ) {
-	      my $d1 = latlngDirection($points->[$i - 1], $points->[$i]);
-	      my $d2 = latlngDirection($points->[($i + 1) % @$points], $points->[$i]);
-	      my $h = ($i - 1) % @$points;
-	      my $j = ($i + 1) % @$points;
+	      my $d1 = latlngDirection($points->[$h], $points->[$i]);
+	      my $d2 = latlngDirection($points->[$j], $points->[$i]);
 	      note("3-point U-turn detected @\n",
 		   "   1: point ", $h + 1, " of ", scalar(@$points), " ($points->[$h]->{lon}, $points->[$h]->{lat})\n",
 		   "   2: point ", $i + 1, " of ", scalar(@$points), " ($points->[$i]->{lon}, $points->[$i]->{lat})\n",
@@ -3276,12 +3278,11 @@ for my $file ( @files ) {
 	    } elsif (
 		     ($turnType == 4) &&
 		     ($isLoop || (($i > 0) && ($i < $#$points - 1))) &&
-		     UTurnCheck($points->[$i - 1], $points->[$i], $points->[($i + 1) % @$points], $points->[($i + 2) % @$points]) &&
-		     (latlngDistance($points->[$i], $points->[($i + 1) % @$points]) < 10)
+		     UTurnCheck($points->[$h], $points->[$i], $points->[$j], $points->[$k]) &&
+		     (latlngDistance($points->[$i], $points->[$j]) < 10) &&
+		     (latlngDotProduct($points->[$h], $points->[$i], $points->[$i], $points->[$j]) < 0.9) &&
+		     (latlngDotProduct($points->[$i], $points->[$j], $points->[$j], $points->[$k]) < 0.9)
 		    ) {
-	      my $h = ($i - 1) % @$points;
-	      my $j = ($i + 1) % @$points;
-	      my $k = ($j + 1) % @$points;
 	      my $d1 = latlngDirection($points->[$h], $points->[$i]);
 	      my $d2 = latlngDirection($points->[$k], $points->[$j]);
 	      note("4-point U-turn detected @\n",
@@ -3564,7 +3565,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.25
+0.26
 
 =head1 DESCRIPTION
 
