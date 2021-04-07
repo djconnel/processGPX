@@ -45,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.26</p>
+<p>0.27</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -226,6 +226,12 @@
 <dd>
 
 <p>Points prior to this will be stripped, and if needed, a point will be interpolated to this position. This shifts the start position of the GPX route. See --cropMax for more discussion.</p>
+
+</dd>
+<dt id="crossingHeight-meters"><b>crossingHeight</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>If -fixCrossings is invoked, then the code will attempt to identify crossings and adjust the altitude at them. Typically crossings will be either level (same altitude each direction) or at some minimum height. That minumum height defaults to 2 meters, but can be adjusted with this parameter. If the GPX file has an altitude difference between zero and this number, it will force whichever is closer, and transition the altitude to either side, maintaining the same mean.</p>
 
 </dd>
 <dt id="csv"><b>csv</b></dt>

@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.26;             # make sure this matches pod value
+my $version = 0.27;             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -100,6 +100,7 @@ sub latlngDotProduct {
   my ($dx12, $dy12) = latlng2dxdy($p1, $p2);
   my ($dx34, $dy34) = latlng2dxdy($p3, $p4);
   my $denom = sqrt(($dx12 ** 2 + $dy12 ** 2) * ($dx34 ** 2 + $dy34 ** 2));
+  warn("zero denominator in dot product!!!\n") if ($denom == 0);
   return ( ($denom == 0) ? undef : ($dx12 * $dx34 + $dy12 * $dy34) / $denom );
 }
 
@@ -1517,6 +1518,7 @@ my $copyPoint = 0;              # whether to make sure first point and last poin
 my $copyright;                  # copyright field, for GPX
 my $cropMax;                    # maximum distance of retained data (distance calculated in original coordinates
 my $cropMin;                    # minimum distance of retained data (distance calculated in original coordinates)
+my $crossingHeight = 2;         # crossing should have same altitude, or at least this height
 my $csv = 0;                    # whether to use CSV instead of GPX
 my $description;                # description, for GPX metadata
 my $extend = 0;                 # apply to both append and prepend
@@ -1586,6 +1588,7 @@ GetOptions (
             "crop=f"        => \$cropMax,
             "cropMax=f"     => \$cropMax,
             "cropMin=f"     => \$cropMin,
+            "crossingHeight=f" => \$crossingHeight,
             "csv"           => \$csv,
             "description=s" => \$description,
             "addGradientSigns" => \$addGradientSigns,
@@ -2915,7 +2918,22 @@ for my $file ( @files ) {
                      ) {
                     # note("... found intercept on full course: points: segments $u and $v (intercepts = @gs)\n");
                     push @crossings, interpolatePoint($points->[$u], $points->[($u + 1) % @$points], $gs[0]);
+		    my $z1 = $crossings[-1]->{ele};
                     push @crossings, interpolatePoint($points->[$v], $points->[($v + 1) % @$points], $gs[1]);
+		    my $z2 = $crossings[-1]->{ele};
+		    my $zAvg = ($z1 + $z2) / 2;
+
+		    # adjust the altitude of the crossing points
+		    if (abs($z1 - $z2) < $crossingHeight / 2) {
+		      note("crossing @ $crossings[-2]->{distance} m and $crossings[-1]->{distance} m: setting level crossing altitude to $zAvg\n");
+		      $crossings[-2]->{ele} = $zAvg;
+		      $crossings[-1]->{ele} = $zAvg;
+		    } elsif (abs($z1 - $z2) < $crossingHeight) {
+		      $crossings[-2]->{ele} = $zAvg + ($z1 <=> $zAvg) * $crossingHeight / 2;
+		      $crossings[-1]->{ele} = $zAvg + ($z2 <=> $zAvg) * $crossingHeight / 2;
+		      note("crossing @ $crossings[-2]->{distance} m and $crossings[-1]->{distance} m: setting overpass altitudes to $crossings[-2]->{ele} and $crossings[-1]->{ele}\n");
+		    }
+
                     $crossingsFound ++;
                   }
                 }
@@ -2993,7 +3011,6 @@ for my $file ( @files ) {
             while (($j < @si) && ($s2 > $si[$j])) {
               if ( (abs($si[$j] - $s1) > 0.5) && (abs($si[$j] - $s2) > 0.5) ) {
                 my $f = ($si[$j] - $s1) / ($s2 - $s1);
-                note("point added @ ", $si[$j], " meters\n");
                 push @newPoints, interpolatePoint($points->[$i], $points->[$i + 1], $f);
               }
               $j ++;
@@ -3012,7 +3029,7 @@ for my $file ( @files ) {
         my $k = $pi / $dr;
 
         for my $p ( @$points ) {
-          my $sp = $p;
+          my $sp = $p->{distance};
           for my $c ( @crossings ) {
             my $sc = $c->{distance};
             my $ds = abs($sp - $sc);
@@ -3036,7 +3053,6 @@ for my $file ( @files ) {
       # if crops may have been specified with negative append or prepend...
       if ((! $isLoop) && (((! (defined $cropMax)) || ($cropMax <= 0)) && ($append < 0))) {
         $cropMax = calcCourseDistance(points=> $points, isLoop=> $isLoop) + $append;
-        warn("setting cropping to $cropMax for negative -append\n");
       }
       if ((! defined $cropMin) || ($cropMin <= 0) && ($prepend < 0)) {
         $cropMin = -$prepend;
@@ -3236,7 +3252,7 @@ for my $file ( @files ) {
         push @$points, @$rPoints;
       }
 
-      # for -cropExtend, crop it here:
+      # for -extendBack, crop it here:
       $points = cropPoints(points=> $points, max=> $cropBack)
         if ($cropBack > 0);
 
@@ -3245,6 +3261,10 @@ for my $file ( @files ) {
       #
       if ( (defined $rUTurn) && ($rUTurn > 0) ) {
         note("checking for U-turn loops...\n");
+
+	# get rid of duplicate point at end
+	my $pointPopped = pointsAreClose($points->[0], $points->[-1]);
+	pop @$points if ($pointPopped);
 
 	# two sweeps: one for 3-point turns, the next for 4-point turns.
 	for my $turnType (3, 4) {
@@ -3258,6 +3278,8 @@ for my $file ( @files ) {
 	    my $h = ($i - 1) % @$points;
 	    my $j = ($i + 1) % @$points;
 	    my $k = ($j + 1) % @$points;
+	    # warn(scalar(@$points), " points : h = $h, i = $i, j = $j, k = $k\n");
+	    # warn("point $i: $points->[$i]->{lat}, $points->[$i]->{lon}\n");
 
 	    if (
 		($turnType == 3) &&
@@ -3280,8 +3302,9 @@ for my $file ( @files ) {
 		     ($isLoop || (($i > 0) && ($i < $#$points - 1))) &&
 		     UTurnCheck($points->[$h], $points->[$i], $points->[$j], $points->[$k]) &&
 		     (latlngDistance($points->[$i], $points->[$j]) < 10) &&
-		     (latlngDotProduct($points->[$h], $points->[$i], $points->[$i], $points->[$j]) < 0.9) &&
-		     (latlngDotProduct($points->[$i], $points->[$j], $points->[$j], $points->[$k]) < 0.9)
+		     # (latlngDotProduct($points->[$h], $points->[$i], $points->[$i], $points->[$j]) < 0.9) &&
+		     # (latlngDotProduct($points->[$i], $points->[$j], $points->[$j], $points->[$k]) < 0.9) &&
+		     1
 		    ) {
 	      my $d1 = latlngDirection($points->[$h], $points->[$i]);
 	      my $d2 = latlngDirection($points->[$k], $points->[$j]);
@@ -3300,6 +3323,8 @@ for my $file ( @files ) {
 	  push @pNew, $points->[$i++] while ($i < $#$points);
 	  $points = \@pNew;
 	}
+
+	push @$points, \%{$points->[0]} if ($pointPopped);
       }
 
       #
@@ -3565,7 +3590,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.26
+0.27
 
 =head1 DESCRIPTION
 
@@ -3839,6 +3864,16 @@ of that section of road.
 Points prior to this will be stripped, and if needed, a point will be
 interpolated to this position.  This shifts the start position of the
 GPX route.  See --cropMax for more discussion.
+
+=item B<crossingHeight> <meters>
+
+If -fixCrossings is invoked, then the code will attempt to identify
+crossings and adjust the altitude at them.  Typically crossings will
+be either level (same altitude each direction) or at some minimum
+height.  That minumum height defaults to 2 meters, but can be adjusted
+with this parameter.  If the GPX file has an altitude difference
+between zero and this number, it will force whichever is closer, and
+transition the altitude to either side, maintaining the same mean.
 
 =item B<csv>
 
