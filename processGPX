@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.27;             # make sure this matches pod value
+my $version = 0.28;             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1726,6 +1726,9 @@ for my $file ( @files ) {
     my $segments = $track->{segments};
     for my $segment ( @$segments ) {
       my $points = $segment->{points};
+      deleteField(points=> $points, field=> "extensions");
+
+
       note("points in original GPX track = ", scalar(@$points), "\n");
 
       note("altitude quality score of original course = ", sprintf("%.4f", calcQualityScore(points=> $points, isLoop=> $isLoop)), "\n");
@@ -1748,6 +1751,7 @@ for my $file ( @files ) {
           my $segments2 = $track2->{segments};
           for my $segment2 ( @$segments2 ) {
             my $points2 = $segment2->{points};
+	    deleteField(points=> $points2, field=> "extensions");
             die("no course data found in first track, segment of file $join\n")
               unless ((defined $points2) && (@$points2 > 1));
 
@@ -3590,7 +3594,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.27
+0.28
 
 =head1 DESCRIPTION
 
