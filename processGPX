@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.28;             # make sure this matches pod value
+my $version = 0.29;             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1751,7 +1751,7 @@ for my $file ( @files ) {
           my $segments2 = $track2->{segments};
           for my $segment2 ( @$segments2 ) {
             my $points2 = $segment2->{points};
-	    deleteField(points=> $points2, field=> "extensions");
+            deleteField(points=> $points2, field=> "extensions");
             die("no course data found in first track, segment of file $join\n")
               unless ((defined $points2) && (@$points2 > 1));
 
@@ -1814,44 +1814,44 @@ for my $file ( @files ) {
         }
 
         # other options
-	if (! $autoSpacing) {
-	  note("setting -autospacing...\n");
-	  $autoSpacing = 1;
-	}
-	if (! defined $smoothAngle) {
-	  $smoothAngle = 20;
-	  note("setting -smoothAngle $smoothAngle ...\n");
-	}
-	$smoothRadians = $smoothAngle * $deg2rad;
+        if (! $autoSpacing) {
+          note("setting -autospacing...\n");
+          $autoSpacing = 1;
+        }
+        if (! defined $smoothAngle) {
+          $smoothAngle = 20;
+          note("setting -smoothAngle $smoothAngle ...\n");
+        }
+        $smoothRadians = $smoothAngle * $deg2rad;
 
-	if (! $prune) {
-	  note("setting -prune ...\n");
-	  $prune = 1;
-	}
+        if (! $prune) {
+          note("setting -prune ...\n");
+          $prune = 1;
+        }
         if ($zSmooth == 0) {
           $zSmooth = 15;
           note("setting altitude smoothing to $zSmooth meters\n");
         }
-	if (! $anchorSF) {
-	  $anchorSF = 1;
-	  note("setting -anchorSF ...\n");
-	}
-	if (! $fixCrossings) {
-	  note("setting -fixCrossings ...\n");
-	  $fixCrossings = 1;
-	}
-	if (! defined  $rUTurn) {
-	  $rUTurn = 5;
-	  note("setting -RUTurn 5 (meters) ...\n");
-	}
-	if ($snap == 0) {
-	  $snap = 1;
-	  note("setting -snap 1 ...\n");
-	}
-	if ($snapTransition <= 0) {
-	  $snapTransition = 10;
-	  note("setting -snapTransition $snapTransition (meters) ...\n");
-	}
+        if (! $anchorSF) {
+          $anchorSF = 1;
+          note("setting -anchorSF ...\n");
+        }
+        if (! $fixCrossings) {
+          note("setting -fixCrossings ...\n");
+          $fixCrossings = 1;
+        }
+        if (! defined  $rUTurn) {
+          $rUTurn = 5;
+          note("setting -RUTurn 5 (meters) ...\n");
+        }
+        if ($snap == 0) {
+          $snap = 1;
+          note("setting -snap 1 ...\n");
+        }
+        if ($snapTransition <= 0) {
+          $snapTransition = 10;
+          note("setting -snapTransition $snapTransition (meters) ...\n");
+        }
       }
 
 
@@ -2503,8 +2503,8 @@ for my $file ( @files ) {
                 my $a = latlngAngle($points->[$i1], $points->[$i], $points->[$i2]);
 
                 # add points if needed
-		die("ERROR: smoothRadians not defined (smoothAngle = $smoothAngle\n")
-		  unless(defined $smoothRadians);
+                die("ERROR: smoothRadians not defined (smoothAngle = $smoothAngle\n")
+                  unless(defined $smoothRadians);
                 if ( abs($a) > abs($smoothRadians) ) {
                   # refine distance -- need to exceed the smoothing length
                   my $dRefine = 3 * $lSmooth;
@@ -2818,31 +2818,39 @@ for my $file ( @files ) {
 
       #
       # flatten selected sections
-      # points come in sets of 4: altitude, start point, finish point, lambda
+      # points come in sets of 4: start point, altitude, finish point, altitude, lambda
       #
       if (@flatten) {
         note("flattening...\n");
         addDistanceField(points=> $points);
-        for (my $nf = 0; $nf < @flatten; $nf += 4) {
-          my $zFlatten     = $flatten[$nf];
-          my $flattenStart = $flatten[$nf + 1] if ($nf < $#flatten);
-          my $flattenStop  = $flatten[$nf + 2] if ($nf < $#flatten);
-          my $lambda       = $flatten[$nf + 3] if ($nf < $#flatten);
+        for (my $nf = 0; $nf < @flatten; $nf += 5) {
+          my $flattenStart = $flatten[$nf];
+          my $zFlatten1    = $flatten[$nf + 1] if ($nf < $#flatten);
+          my $flattenStop  = $flatten[$nf + 2] if ($nf + 1 < $#flatten);
+          my $zFlatten2    = $flatten[$nf + 3] if ($nf + 2 < $#flatten);
+          my $lambda       = $flatten[$nf + 4] if ($nf + 3 < $#flatten);
           $lambda //= 10 + sqrt($zSmooth ** 2 + $lSmooth ** 2);
-          note("flattening course from $flattenStart to $flattenStop to altitude $zFlatten\n");
+          $flattenStop //= ($points->[-1]->{distance} + 1000 * $lambda + 1000);
+          $zFlatten2   //= $zFlatten1;
+          note("flattening course from $flattenStart ($zFlatten1 meters) to $flattenStop ($zFlatten2 meters)\n");
           for my $i ( 0 .. $#$points ) {
-            if ( (! (defined $flattenStart)) || ($points->[$i]->{distance} > $flattenStart) ) {
-              if ( (! defined $flattenStop) || ($flattenStop > $points->[$i]->{distance}) ) {
+            my $s = $points->[$i]->{distance};
+            my $z = $points->[$i]->{ele};
+            if ($s >= $flattenStart) {
+              my $zFlatten = ( $zFlatten1 * ($flattenStop - $s) + $zFlatten2 * ($s - $flattenStart) ) / ($flattenStop - $flattenStart);
+              if ($flattenStop >= $s) {
                 $points->[$i]->{ele} = $zFlatten;
-                note("point $i: flattened to $zFlatten\n");
-              } elsif ($points->[$i]->{distance} < $flattenStop + $lambda) {
-                my $f = (1 + cos($pi * ($points->[$i]->{distance} - $flattenStop) / $lambda)) / 2;
-                # my $f = 1 - ($points->[$i]->{distance} - $flattenStop) / $lambda;
-                $points->[$i]->{ele} = $f * $zFlatten + (1 - $f) * $points->[$i]->{ele};
+                note("point $i: flattened to $points->[$i]->{ele}\n");
+              } elsif ($s < $flattenStop + $lambda) {
+                my $f = (1 + cos($pi * ($s - $flattenStop) / $lambda)) / 2;
+                warn("f = $f\n");
+                $points->[$i]->{ele} = $f * $zFlatten + (1 - $f) * $z;
               }
-            } elsif ($points->[$i]->{distance} > $flattenStart - $lambda) {
-              my $f = (1 + cos($pi * ($flattenStart - $points->[$i]->{distance}) / $lambda)) / 2;
-              $points->[$i]->{ele} = $f * $zFlatten + (1 - $f) * $points->[$i]->{ele};
+            } elsif ($s > $flattenStart - $lambda) {
+              my $zFlatten = ( $zFlatten1 * ($flattenStop - $s) + $zFlatten2 * ($s - $flattenStart) ) / ($flattenStop - $flattenStart);
+              my $f = (1 + cos($pi * ($flattenStart - $s) / $lambda)) / 2;
+              warn("f = $f\n");
+              $points->[$i]->{ele} = $f * $zFlatten + (1 - $f) * $z;
             }
           }
         }
@@ -2922,21 +2930,21 @@ for my $file ( @files ) {
                      ) {
                     # note("... found intercept on full course: points: segments $u and $v (intercepts = @gs)\n");
                     push @crossings, interpolatePoint($points->[$u], $points->[($u + 1) % @$points], $gs[0]);
-		    my $z1 = $crossings[-1]->{ele};
+                    my $z1 = $crossings[-1]->{ele};
                     push @crossings, interpolatePoint($points->[$v], $points->[($v + 1) % @$points], $gs[1]);
-		    my $z2 = $crossings[-1]->{ele};
-		    my $zAvg = ($z1 + $z2) / 2;
+                    my $z2 = $crossings[-1]->{ele};
+                    my $zAvg = ($z1 + $z2) / 2;
 
-		    # adjust the altitude of the crossing points
-		    if (abs($z1 - $z2) < $crossingHeight / 2) {
-		      note("crossing @ $crossings[-2]->{distance} m and $crossings[-1]->{distance} m: setting level crossing altitude to $zAvg\n");
-		      $crossings[-2]->{ele} = $zAvg;
-		      $crossings[-1]->{ele} = $zAvg;
-		    } elsif (abs($z1 - $z2) < $crossingHeight) {
-		      $crossings[-2]->{ele} = $zAvg + ($z1 <=> $zAvg) * $crossingHeight / 2;
-		      $crossings[-1]->{ele} = $zAvg + ($z2 <=> $zAvg) * $crossingHeight / 2;
-		      note("crossing @ $crossings[-2]->{distance} m and $crossings[-1]->{distance} m: setting overpass altitudes to $crossings[-2]->{ele} and $crossings[-1]->{ele}\n");
-		    }
+                    # adjust the altitude of the crossing points
+                    if (abs($z1 - $z2) < $crossingHeight / 2) {
+                      note("crossing @ $crossings[-2]->{distance} m and $crossings[-1]->{distance} m: setting level crossing altitude to $zAvg\n");
+                      $crossings[-2]->{ele} = $zAvg;
+                      $crossings[-1]->{ele} = $zAvg;
+                    } elsif (abs($z1 - $z2) < $crossingHeight) {
+                      $crossings[-2]->{ele} = $zAvg + ($z1 <=> $zAvg) * $crossingHeight / 2;
+                      $crossings[-1]->{ele} = $zAvg + ($z2 <=> $zAvg) * $crossingHeight / 2;
+                      note("crossing @ $crossings[-2]->{distance} m and $crossings[-1]->{distance} m: setting overpass altitudes to $crossings[-2]->{ele} and $crossings[-1]->{ele}\n");
+                    }
 
                     $crossingsFound ++;
                   }
@@ -3266,69 +3274,69 @@ for my $file ( @files ) {
       if ( (defined $rUTurn) && ($rUTurn > 0) ) {
         note("checking for U-turn loops...\n");
 
-	# get rid of duplicate point at end
-	my $pointPopped = pointsAreClose($points->[0], $points->[-1]);
-	pop @$points if ($pointPopped);
+        # get rid of duplicate point at end
+        my $pointPopped = pointsAreClose($points->[0], $points->[-1]);
+        pop @$points if ($pointPopped);
 
-	# two sweeps: one for 3-point turns, the next for 4-point turns.
-	for my $turnType (3, 4) {
-	  my @pNew = ();
-	  my $i = 0;
-	  push @pNew, $points->[$i++]
-	    if (! $isLoop);
-	  while ($i <= $#$points) {
-	    push @pNew, $points->[$i];
+        # two sweeps: one for 3-point turns, the next for 4-point turns.
+        for my $turnType (3, 4) {
+          my @pNew = ();
+          my $i = 0;
+          push @pNew, $points->[$i++]
+            if (! $isLoop);
+          while ($i <= $#$points) {
+            push @pNew, $points->[$i];
 
-	    my $h = ($i - 1) % @$points;
-	    my $j = ($i + 1) % @$points;
-	    my $k = ($j + 1) % @$points;
-	    # warn(scalar(@$points), " points : h = $h, i = $i, j = $j, k = $k\n");
-	    # warn("point $i: $points->[$i]->{lat}, $points->[$i]->{lon}\n");
+            my $h = ($i - 1) % @$points;
+            my $j = ($i + 1) % @$points;
+            my $k = ($j + 1) % @$points;
+            # warn(scalar(@$points), " points : h = $h, i = $i, j = $j, k = $k\n");
+            # warn("point $i: $points->[$i]->{lat}, $points->[$i]->{lon}\n");
 
-	    if (
-		($turnType == 3) &&
-		($isLoop || ($i < $#$points)) &&
-		UTurnCheck($points->[$h], $points->[$i], $points->[$i], $points->[$j])
-	       ) {
-	      my $d1 = latlngDirection($points->[$h], $points->[$i]);
-	      my $d2 = latlngDirection($points->[$j], $points->[$i]);
-	      note("3-point U-turn detected @\n",
-		   "   1: point ", $h + 1, " of ", scalar(@$points), " ($points->[$h]->{lon}, $points->[$h]->{lat})\n",
-		   "   2: point ", $i + 1, " of ", scalar(@$points), " ($points->[$i]->{lon}, $points->[$i]->{lat})\n",
-		   "   3: point ", $j + 1, " of ", scalar(@$points), " ($points->[$j]->{lon}, $points->[$j]->{lat})\n",
-		   "   directions = $d1, $d2\n");
-	      my $dir = averageAngles($d1, $d2);
-	      my $loop = makeLoop(points=> [$points->[$i], $points->[$i]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
-	      push @pNew, @$loop;
-	      push @pNew, \%{$points->[$i]}; # put a copy of the turn-around point here
-	    } elsif (
-		     ($turnType == 4) &&
-		     ($isLoop || (($i > 0) && ($i < $#$points - 1))) &&
-		     UTurnCheck($points->[$h], $points->[$i], $points->[$j], $points->[$k]) &&
-		     (latlngDistance($points->[$i], $points->[$j]) < 10) &&
-		     # (latlngDotProduct($points->[$h], $points->[$i], $points->[$i], $points->[$j]) < 0.9) &&
-		     # (latlngDotProduct($points->[$i], $points->[$j], $points->[$j], $points->[$k]) < 0.9) &&
-		     1
-		    ) {
-	      my $d1 = latlngDirection($points->[$h], $points->[$i]);
-	      my $d2 = latlngDirection($points->[$k], $points->[$j]);
-	      note("4-point U-turn detected @\n",
-		   "   1: point ", $h + 1, " of ", scalar(@$points), " ($points->[$h]->{lon}, $points->[$h]->{lat})\n",
-		   "   2: point ", $i + 1, " of ", scalar(@$points), " ($points->[$i]->{lon}, $points->[$i]->{lat})\n",
-		   "   3: point ", $j + 1, " of ", scalar(@$points), " ($points->[$j]->{lon}, $points->[$j]->{lat})\n",
-		   "   4: point ", $k + 1, " of ", scalar(@$points), " ($points->[$k]->{lon}, $points->[$k]->{lat})\n",
-		   "   directions = $d1, $d2\n");
-	      my $dir = averageAngles($d1, $d2);
-	      my $loop = makeLoop(points=> [$points->[$i], $points->[$j]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
-	      push @pNew, @$loop;
-	    }
-	    $i ++;
-	  }
-	  push @pNew, $points->[$i++] while ($i < $#$points);
-	  $points = \@pNew;
-	}
+            if (
+                ($turnType == 3) &&
+                ($isLoop || ($i < $#$points)) &&
+                UTurnCheck($points->[$h], $points->[$i], $points->[$i], $points->[$j])
+               ) {
+              my $d1 = latlngDirection($points->[$h], $points->[$i]);
+              my $d2 = latlngDirection($points->[$j], $points->[$i]);
+              note("3-point U-turn detected @\n",
+                   "   1: point ", $h + 1, " of ", scalar(@$points), " ($points->[$h]->{lon}, $points->[$h]->{lat})\n",
+                   "   2: point ", $i + 1, " of ", scalar(@$points), " ($points->[$i]->{lon}, $points->[$i]->{lat})\n",
+                   "   3: point ", $j + 1, " of ", scalar(@$points), " ($points->[$j]->{lon}, $points->[$j]->{lat})\n",
+                   "   directions = $d1, $d2\n");
+              my $dir = averageAngles($d1, $d2);
+              my $loop = makeLoop(points=> [$points->[$i], $points->[$i]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
+              push @pNew, @$loop;
+              push @pNew, \%{$points->[$i]}; # put a copy of the turn-around point here
+            } elsif (
+                     ($turnType == 4) &&
+                     ($isLoop || (($i > 0) && ($i < $#$points - 1))) &&
+                     UTurnCheck($points->[$h], $points->[$i], $points->[$j], $points->[$k]) &&
+                     (latlngDistance($points->[$i], $points->[$j]) < 10) &&
+                     # (latlngDotProduct($points->[$h], $points->[$i], $points->[$i], $points->[$j]) < 0.9) &&
+                     # (latlngDotProduct($points->[$i], $points->[$j], $points->[$j], $points->[$k]) < 0.9) &&
+                     1
+                    ) {
+              my $d1 = latlngDirection($points->[$h], $points->[$i]);
+              my $d2 = latlngDirection($points->[$k], $points->[$j]);
+              note("4-point U-turn detected @\n",
+                   "   1: point ", $h + 1, " of ", scalar(@$points), " ($points->[$h]->{lon}, $points->[$h]->{lat})\n",
+                   "   2: point ", $i + 1, " of ", scalar(@$points), " ($points->[$i]->{lon}, $points->[$i]->{lat})\n",
+                   "   3: point ", $j + 1, " of ", scalar(@$points), " ($points->[$j]->{lon}, $points->[$j]->{lat})\n",
+                   "   4: point ", $k + 1, " of ", scalar(@$points), " ($points->[$k]->{lon}, $points->[$k]->{lat})\n",
+                   "   directions = $d1, $d2\n");
+              my $dir = averageAngles($d1, $d2);
+              my $loop = makeLoop(points=> [$points->[$i], $points->[$j]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1));
+              push @pNew, @$loop;
+            }
+            $i ++;
+          }
+          push @pNew, $points->[$i++] while ($i < $#$points);
+          $points = \@pNew;
+        }
 
-	push @$points, \%{$points->[0]} if ($pointPopped);
+        push @$points, \%{$points->[0]} if ($pointPopped);
       }
 
       #
@@ -3594,7 +3602,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.28
+0.29
 
 =head1 DESCRIPTION
 
@@ -3933,7 +3941,7 @@ example, on the upward side the sloped road will appear to rise above
 the surface, while in reality the pavement would be leveled out to
 allow for the crossing.  This creates that leveling.
 
-=item B<flatten> <altitude-meters> <start-meters> <end-meters> <transition-meters> ...
+=item B<flatten> <start-meters> <altitude-meters> <end-meters> <altitude-meters> <transition-meters> ...
 
 This important option allows the route to be flattened over a
 specified coordinate range, with a specified transition length.  This
@@ -3941,20 +3949,20 @@ has been used where there are overpasses in a route, where it is
 important that the altitude difference between the upper and lower
 roadway be maintained, even with altitude smoothing.
 
-The transition length is used to describe a distance over which a cosine
-weighting term is used to transition between the fixed altitude, and the
-prior altitude for those points.  This should be made long enough to avoid
-excessive deviations in gradient, yet small enough to limit the extent
-of the influence of the command.
+You sepecify a starting distance, then the altitude at that point,
+then a finish distance, then (optionally) an altitude at the second
+point (default is the same altitude as the first point), then
+optionally a transition length (default is to calculate a reasonable
+one).
 
-Multiple sets of four numbers can be provided, in which case altitude
+The transition length is used to describe a distance over which a
+cosine weighting term is used to transition between the fixed
+altitude, and the prior altitude for those points.  This should be
+made long enough to avoid excessive deviations in gradient, yet small
+enough to limit the extent of the influence of the command.
+
+Multiple sets of five numbers can be provided, in which case altitude
 flattening is done over each of the specified segments.
-
-If an incomplete set of four numbers is provided, a default will be assumed.
-If just altitude is provided, the whole file will be set to that altitude.
-If two numbers are povided, then the whole activity starting at the specified
-distance will be set to that altitude.
-If three numbers are provided, a default transition length will be assumed.
 
 Distances are calculated i<after> smoothing but before cropping or extension.
 

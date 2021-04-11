@@ -45,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.28</p>
+<p>0.29</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -272,16 +272,16 @@
 <p>If a route contains crossings, for example a true figure 8, then it will flatten the road on either side of the crossing, and create a transition from the flattened profile back to the unaltered profile. The side of the flattening is determined by the &quot;-rCrossing&quot; option. An issue with RGT is that if a sloped road crosses a flat road, for example, on the upward side the sloped road will appear to rise above the surface, while in reality the pavement would be leveled out to allow for the crossing. This creates that leveling.</p>
 
 </dd>
-<dt id="flatten-altitude-meters-start-meters-end-meters-transition-meters"><b>flatten</b> &lt;altitude-meters&gt; &lt;start-meters&gt; &lt;end-meters&gt; &lt;transition-meters&gt; ...</dt>
+<dt id="flatten-start-meters-altitude-meters-end-meters-altitude-meters-transition-meters"><b>flatten</b> &lt;start-meters&gt; &lt;altitude-meters&gt; &lt;end-meters&gt; &lt;altitude-meters&gt; &lt;transition-meters&gt; ...</dt>
 <dd>
 
 <p>This important option allows the route to be flattened over a specified coordinate range, with a specified transition length. This has been used where there are overpasses in a route, where it is important that the altitude difference between the upper and lower roadway be maintained, even with altitude smoothing.</p>
 
+<p>You sepecify a starting distance, then the altitude at that point, then a finish distance, then (optionally) an altitude at the second point (default is the same altitude as the first point), then optionally a transition length (default is to calculate a reasonable one).</p>
+
 <p>The transition length is used to describe a distance over which a cosine weighting term is used to transition between the fixed altitude, and the prior altitude for those points. This should be made long enough to avoid excessive deviations in gradient, yet small enough to limit the extent of the influence of the command.</p>
 
-<p>Multiple sets of four numbers can be provided, in which case altitude flattening is done over each of the specified segments.</p>
-
-<p>If an incomplete set of four numbers is provided, a default will be assumed. If just altitude is provided, the whole file will be set to that altitude. If two numbers are povided, then the whole activity starting at the specified distance will be set to that altitude. If three numbers are provided, a default transition length will be assumed.</p>
+<p>Multiple sets of five numbers can be provided, in which case altitude flattening is done over each of the specified segments.</p>
 
 <p>Distances are calculated i&lt;after&gt; smoothing but before cropping or extension.</p>
 
