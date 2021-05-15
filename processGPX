@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.30;  # make sure this matches pod value
+my $version = 0.301;  # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -3014,7 +3014,7 @@ for my $file ( @files ) {
                 # the u0 point has already been set...
                 next
                   if ($u == $u0);
-                my $f = (1 + cos($pi * pointSeparation($points->[$u], $points->[$u0], $courseDistance, $isLoop) / $lambda)) / 2;
+                my $f = ( (1 + cos($pi * pointSeparation($points->[$u], $points->[$u0], $courseDistance, $isLoop) / $lambda)) / 2 ) ** 2;
                 my $shift = $a->[$u0] * $f;
 
                 # if there's an existing shift, then combine with that:
@@ -3765,7 +3765,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.30
+0.301
 
 =head1 DESCRIPTION
 
