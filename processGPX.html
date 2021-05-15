@@ -45,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.29</p>
+<p>0.30</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -120,6 +120,12 @@
 <p>Note this is not &quot;heading&quot;, as it is relative to east.</p>
 
 <p>Direction is calculated for each point as the average of the directions ahead and behind. The direction of the first or last points in a point-to-point course are calculated in only one direction. Directions for loop courses are calculated assuming the loop. The direction never changes by more than +/- 180 degrees from one point to the next, so the direction has no limits: it can be positive, negative, and outside the range from -360 to +360 degrees. For example, if a route started east (0) then lapped around counterclockwise 10 times, the final direction would be approximately 3600 degrees.</p>
+
+</dd>
+<dt id="addCurvature"><b>addCurvature</b></dt>
+<dd>
+
+<p>This option adds a &quot;curvature&quot; field (in meters) to the GPX file. Curvature is calculated as the ratio of the rate of change of angle with distance. Note for a unit circle (radius = 1) the rate of change of angle (in radians) with position (along the perimeter) is 1. In general this is the reciprical of the circle radius.</p>
 
 </dd>
 <dt id="addDistance"><b>addDistance</b></dt>
@@ -286,6 +292,18 @@
 <p>Distances are calculated i&lt;after&gt; smoothing but before cropping or extension.</p>
 
 </dd>
+<dt id="gradientPower"><b>gradientPower</b></dt>
+<dd>
+
+<p>For gradient signs, how much of a power to apply to gradient in determining where signs go. If 0, then all that matters is altitude: put the signs between peaks and valleys. If 1, then a climb which is double the altitude but half the altitude gained scores the same. The higher this number, the more likely a gradient sign is to go on a short steep pitch versus a longer, more gradual climb containing the short steep pitch.</p>
+
+</dd>
+<dt id="gradientThreshold"><b>gradientThreshold</b></dt>
+<dd>
+
+<p>This determines the threshold at which a gradient sign gets put in. The units are meters: a 10% climb needs to gain this much altitude to get a gradient sign. How much altitude steeper or less steep climbs need to be depends on gradientPower</p>
+
+</dd>
 <dt id="interpolate-meters"><b>interpolate</b> &lt;meters&gt;</dt>
 <dd>
 
@@ -326,16 +344,10 @@
 <p>The course is considered a loop course, or a circuit, and so smoothing and other operations can take place between the beginning and end of the loop.</p>
 
 </dd>
-<dt id="gradientPower"><b>gradientPower</b></dt>
+<dt id="minRadius-meters"><b>minRadius</b> &lt;meters&gt;</dt>
 <dd>
 
-<p>For gradient signs, how much of a power to apply to gradient in determining where signs go. If 0, then all that matters is altitude: put the signs between peaks and valleys. If 1, then a climb which is double the altitude but half the altitude gained scores the same. The higher this number, the more likely a gradient sign is to go on a short steep pitch versus a longer, more gradual climb containing the short steep pitch.</p>
-
-</dd>
-<dt id="gradientThreshold"><b>gradientThreshold</b></dt>
-<dd>
-
-<p>This determines the threshold at which a gradient sign gets put in. The units are meters: a 10% climb needs to gain this much altitude to get a gradient sign. How much altitude steeper or less steep climbs need to be depends on gradientPower</p>
+<p>The code will calculate an effective radius of turns, and if this is less than this value, it will shift the road to increase the radius. This is done prior to -laneShift, which may thus result in tighter turns. So if there is a tight switchback, for example, then applying this option will tend to shift the road outward, increasing the turn radius. There is a transition for this lane shift, so for tight S-turns, alternating left and right, or in very tight switchbacks, where the road snakes up a hill, results may be unsatisfactory. It works best with an isolated corner.</p>
 
 </dd>
 <dt id="name-string"><b>name</b> &lt;string&gt;</dt>
@@ -415,7 +427,7 @@
 <dt id="rTurnaround-meters"><b>rTurnaround</b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Create an out-and-back course, with a turn of this radius generated at the turn-around point. This may be done in conjunction with &quot;-laneShift&quot; to have the return road shifted from the outward road. If the distance is less than the laneShift value, then the loop will have 3 parts: for example a right, then a left, then another right to turn 180 degrees. The turn The main turn will be to the left if laneShift is negative (UK, for example), or to the right if laneShift is positive (US, for example) with a default (for no landShift) to the right.</p>
+<p>Create an out-and-back course, with a turn of this radius generated at the turn-around point. This may be done in conjunction with &quot;-laneShift&quot; to have the return road shifted from the outward road. If the distance is less than the laneShift value, then the loop will have 3 parts: for example a right, then a left, then another right to turn 180 degrees. The turn The main turn will be to the left if laneShift is negative (UK, for example), or to the right if laneShift is positive (US, for example) with a default (for no laneShift) to the right.</p>
 
 </dd>
 <dt id="rUTurn-meters"><b>rUTurn</b> &lt;meters&gt;</dt>

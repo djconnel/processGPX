@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.29;             # make sure this matches pod value
+my $version = 0.30;  # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -749,6 +749,74 @@ sub roadTest {
   return ( isPointOnRoadCorner($points->[$j], $points->[$k], $points->[$l], $points->[$m], $points->[$i]) );
 }
 
+sub applyLaneShift {
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $isLoop = $var{isLoop} // 0;
+
+  return $points unless (@$points);
+
+  my @pNew = ();
+
+  # create list of (x, y) coordinates
+  my @dxs = ();
+  my @dys = ();
+  my @dss = ();
+  my @ss  = (0);
+  my @dirs = ();
+
+  for my $i ( 0 .. $#$points ) {
+    push @ss, $ss[-1] + $dss[-1] if ($i > 0);
+    if ($isLoop || ($i < $#$points)) {
+      my ($dx, $dy) = latlng2dxdy($points->[$i], $points->[($i + 1) % @$points]);
+      push @dxs, $dx;
+      push @dys, $dy;
+      push @dss, sqrt($dx ** 2 + $dy ** 2);
+      push @dirs, atan2($dy, $dx);
+    }
+  }
+
+  # final point for point-to-point
+  if (! $isLoop) {
+    push @dxs, $dxs[-1];
+    push @dys, $dys[-1];
+    push @dss, $dss[-1];
+    push @dirs, $dirs[-1];
+  }
+
+  # lane shift: to right, which means adding pi/2 to the direction
+ shiftLoop: for my $i ( 0 .. $#$points ) {
+    my ($dir1, $dir2);
+    if (($i > 0) || $isLoop) {
+      $dir1 = $dirs[$i - 1];
+      $dir2 = $dir1 + reduceAngle($dirs[$i] - $dir1);
+    } else {
+      $dir1 = $dirs[$i];
+      $dir2 = $dirs[$i];
+    }
+
+    # for sharp turns repeat a point: there's no way to decide if it's an "inside" or "outside" sharp turn
+    if ( ($isLoop || (($i > 0) && ($i < $#$points))) && (abs($dir2 - $dir1) > 0.99 * $pi) ) {
+      my @pTurns = ();
+      for my $dir ( $dir1, $dir2 ) {
+        push @pTurns,
+          shiftPoint(point=> $points->[$i], direction=> $dir, distance=> $points->[$i]->{shift});
+      }
+      # check if there's a knot.. if not use the doubled points
+      my @fs = segmentIntercept( [$points->[$i - 1], $pTurns[0]], [$pTurns[1], $points->[($i + 1) % @$points]] );
+      if ( @fs == 0 ) {
+        push @pNew, @pTurns;
+        next shiftLoop;
+      }
+    }
+
+    push @pNew, shiftVertex(point=> $points->[$i], directions=> [$dir1, $dir2], distance=> $points->[$i]->{shift});
+  }
+
+  return \@pNew;
+}
+
+
 #
 # determines whether point p3 can be removed from segment p1 - p3 - p2
 # without affecting path or altitude profile
@@ -815,6 +883,20 @@ sub distanceDifference {
   my $d = $p2->{distance} - $p1->{distance};
   $d -= $courseDistance * floor($d / $courseDistance) if ($isLoop && ($courseDistance > 0)); # for loop courses
   return $d;
+}
+#
+# separation of 2 points in course distance.... similar to distance difference but either direction
+#
+sub pointSeparation {
+  my $p1 = shift;
+  my $p2 = shift;
+  my $courseDistance = shift;
+  my $isLoop = shift;
+  my $d = distanceDifference($p1, $p2, $courseDistance, $isLoop);
+  if ($isLoop) {
+    $d -= $courseDistance * floor(0.5 + $d / $courseDistance) if ($isLoop && ($courseDistance > 0)); # for loop courses
+  }
+  return abs($d);
 }
 
 #
@@ -1086,6 +1168,54 @@ sub addDirectionField {
     $d = $dPrev + reduceAngle($d - $dPrev) if (defined $dPrev);
     $dPrev = $d;
     $points->[$v]->{direction} = $d;
+    $v ++;
+  }
+}
+
+#
+# add curvature field to points
+# curvature = rate of change of direction / distance
+#
+sub addCurvatureField {
+  my %var =@_;
+  my $points = $var{points} // [];
+  return unless (@$points);
+  my $isLoop = $var{isLoop} // 0;
+  my $vMin = 0;
+  my $vMax = $#$points;
+  unless ($isLoop) {
+    $points->[$vMin ++]->{curvature} = 0;
+    $points->[$vMax --]->{curvature} = 0;
+  }
+  my $v = $vMin;
+  my $dPrev;
+  while ($v <= $vMax) {
+    my $u = ($v - 1) % @$points;
+    my $w = ($v + 1) % @$points;
+    while (pointsAreClose($points->[$u], $points->[$v])) {
+      if ($isLoop ? ((($u - 1) % @$points) != $w) : ($u > 0)) {
+        $u = ($u - 1) % @$points;
+      } else {
+        $u = $v;
+        last;
+      }
+    }
+    while (pointsAreClose($points->[$w], $points->[$v])) {
+      if ($isLoop ? ((($w + 1) % @$points) != $u) : ($w < $#$points)) {
+        $w = ($w + 1) % @$points;
+      } else {
+        $w = $v;
+        last;
+      }
+    }
+    if (($u == $v) || ($u == $w)) {
+      $points->[$v]->{curvature} = 0;
+      next;
+    }
+    $dPrev //= latlngDirection($points->[$u], $points->[$v]);
+    my $d = latlngDirection($points->[$v], $points->[$w]);
+    $points->[$v]->{curvature} = 2 * deltaAngle($dPrev, $d) / (latlngDistance($points->[$u], $points->[$v]) + latlngDistance($points->[$v], $points->[$w]));
+    $dPrev = $d;
     $v ++;
   }
 }
@@ -1505,6 +1635,7 @@ sub calcQualityScore {
 }
 
 
+my $addCurvature = 0;           # whether to not add a curvature field
 my $addDirection = 0;           # whether to not add a direction field
 my $addDistance = 0;            # whether to not add a distance field
 my $addGradient = 0;            # whether to not add a gradient field
@@ -1532,6 +1663,7 @@ my $lAutoSmooth = 0;            # auto-smoothing based on position
 my $lSmooth = 0;                # general smoothing, applies to positions and all other fields
 my $laneShift = 0;              # how much to shift lanes right (positive) or left (negative)
 my $linterpolate = 0;           # target point spacing: linear interpolate between existing points
+my $minRadius = 0;              # a minimum radius for corners: correct with lane shift
 my $needHelp = 0;               # print the pod
 my $newKeywords = "";           # new keywords for the GPX file
 my $noSave = 0;                 # skip saving the file
@@ -1572,6 +1704,7 @@ my @flatten;                    # points come in sets of 4: altitude, start poin
 my $auto = 0;                   # automatically set options based on the course (doesn't turn options off)
 
 GetOptions (
+            "addCurvature"  => \$addCurvature,
             "addDirection"  => \$addDirection,
             "addDistance"   => \$addDistance,
             "addGradient"   => \$addGradient,
@@ -1606,6 +1739,7 @@ GetOptions (
             "laneShift=f"   => \$laneShift,
             "lap"           => \$isLoop,
             "loop"          => \$isLoop,
+            "minRadius=f"   => \$minRadius,
             "name=s"        => \$title,
             "noSave"        => \$noSave,
             "out=s"         => \$outFile,
@@ -1824,6 +1958,10 @@ for my $file ( @files ) {
         }
         $smoothRadians = $smoothAngle * $deg2rad;
 
+        if ($minRadius == 0) {
+          $minRadius = 5;
+          note("setting minimum corner radius to $minRadius ...\n");
+        }
         if (! $prune) {
           note("setting -prune ...\n");
           $prune = 1;
@@ -2816,6 +2954,86 @@ for my $file ( @files ) {
         my $points = addSplines(points=> $points, splineRadians=> $splineRadians, splineMaxRadians=> $splineMaxRadians, isLoop=> $isLoop);
       }
 
+
+      #
+      # set maximum curvature
+      #
+      if ( $minRadius > 0 ) {
+        note("setting minimum radius to $minRadius...\n");
+        addCurvatureField(points=> $points, isLoop=> $isLoop);
+        addDistanceField(points=> $points, isLoop=> $isLoop);
+        my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+
+        # calculate a lane shift field
+        my $maxCurvature = 1 / $minRadius;
+        my $count = 0;
+        my @posShifts = map { 0 } @$points;
+        my @negShifts = map { 0 } @$points;
+        my $lambda = 16 * sqrt($minRadius);
+
+        for my $u ( 0 .. $#$points ) {
+          if ( abs($points->[$u]->{curvature}) > $maxCurvature ) {
+            my $s = $minRadius - abs(1 / $points->[$u]->{curvature});
+            my $a = ( $points->[$u]->{curvature} > 0 ) ? \@posShifts : \@negShifts;
+            $a->[$u] = $s if ($a->[$u] < $s);
+            $count ++;
+          }
+        }
+
+        if  ($count > 0) {
+          note("found $count points tighter than minimum radius $minRadius meters...\n");
+          for $a ( \@posShifts, \@negShifts ) {
+            my $u1 = 0;
+            my $u2 = 0;
+
+            if ( $isLoop ) {
+              $u1 --
+                while (
+                       ($u1 > -$#$points) &&
+                       (distanceDifference($points->[$u1 - 1], $points->[0], $courseDistance, $isLoop) < $lambda)
+                      );
+            }
+
+            my @newShifts = @$a;
+            for my $u0 ( 0 .. $#$points ) {
+              next if ($a->[$u0] == 0);
+
+              # u1 ... u0 ... u2
+              $u1 ++
+                while (
+                       ($u1 < $u0) &&
+                       (distanceDifference($points->[$u1], $points->[$u0], $courseDistance, $isLoop) > $lambda)
+                      );
+              $u2 = $u0 if ($u2 < $u0);
+              $u2 = ($u2 + 1) % @$points
+                while (
+                       ($isLoop ? ((($u2 + 1) % @$points) != $u1) : $u2 < $#$points) &&
+                       (distanceDifference($points->[$u0], $points->[($u2 + 1) % @$points], $courseDistance, $isLoop) < $lambda)
+                      );
+              for my $u ( $u1 .. $u2 ) {
+                # the u0 point has already been set...
+                next
+                  if ($u == $u0);
+                my $f = (1 + cos($pi * pointSeparation($points->[$u], $points->[$u0], $courseDistance, $isLoop) / $lambda)) / 2;
+                my $shift = $a->[$u0] * $f;
+
+                # if there's an existing shift, then combine with that:
+                # $newShifts[$u] = ($shift ** 4 + $newShifts[$u] ** 4) ** (1/4);
+                $newShifts[$u] = $shift if ($shift > $newShifts[$u]);
+              }
+            }
+            @$a = @newShifts;
+          }
+
+          # fill in shifts... sum of positive and negative shifts.
+          for my $u ( 0 .. $#$points ) {
+            $points->[$u]->{shift} += $posShifts[$u] - $negShifts[$u];
+          }
+          $points = applyLaneShift(points=> $points, isLoop=> $isLoop);
+          deleteField(points=> $points, field=> "shift");
+        }
+      }
+
       #
       # flatten selected sections
       # points come in sets of 4: start point, altitude, finish point, altitude, lambda
@@ -2843,13 +3061,11 @@ for my $file ( @files ) {
                 note("point $i: flattened to $points->[$i]->{ele}\n");
               } elsif ($s < $flattenStop + $lambda) {
                 my $f = (1 + cos($pi * ($s - $flattenStop) / $lambda)) / 2;
-                warn("f = $f\n");
                 $points->[$i]->{ele} = $f * $zFlatten + (1 - $f) * $z;
               }
             } elsif ($s > $flattenStart - $lambda) {
               my $zFlatten = ( $zFlatten1 * ($flattenStop - $s) + $zFlatten2 * ($s - $flattenStart) ) / ($flattenStop - $flattenStart);
               my $f = (1 + cos($pi * ($flattenStart - $s) / $lambda)) / 2;
-              warn("f = $f\n");
               $points->[$i]->{ele} = $f * $zFlatten + (1 - $f) * $z;
             }
           }
@@ -3146,74 +3362,11 @@ for my $file ( @files ) {
       # shift lanes to the right (positive) or left (negative)
       #
       if ( $laneShift != 0 ) {
-        my @pNews;
-        for my $ps ( $points, $rPoints ) {
-          unless (@$ps) {
-            push @pNews, [];
-            next;
-          }
-
-          my @pNew = ();
-
-          # create list of (x, y) coordinates
-          my @dxs = ();
-          my @dys = ();
-          my @dss = ();
-          my @ss  = (0);
-          my @dirs = ();
-
-          for my $i ( 0 .. $#$ps ) {
-            push @ss, $ss[-1] + $dss[-1] if ($i > 0);
-            if ($isLoop || ($i < $#$ps)) {
-              my ($dx, $dy) = latlng2dxdy($ps->[$i], $ps->[($i + 1) % @$ps]);
-              push @dxs, $dx;
-              push @dys, $dy;
-              push @dss, sqrt($dx ** 2 + $dy ** 2);
-              push @dirs, atan2($dy, $dx);
-            }
-          }
-
-          # final point for point-to-point
-          if (! $isLoop) {
-            push @dxs, $dxs[-1];
-            push @dys, $dys[-1];
-            push @dss, $dss[-1];
-            push @dirs, $dirs[-1];
-          }
-
-          # lane shift: to right, which means adding pi/2 to the direction
-        shiftLoop: for my $i ( 0 .. $#$ps ) {
-            my ($dir1, $dir2);
-            if (($i > 0) || $isLoop) {
-              $dir1 = $dirs[$i - 1];
-              $dir2 = $dir1 + reduceAngle($dirs[$i] - $dir1);
-            } else {
-              $dir1 = $dirs[$i];
-              $dir2 = $dirs[$i];
-            }
-
-            # for sharp turns repeat a point: there's no way to decide if it's an "inside" or "outside" sharp turn
-            if ( ($isLoop || (($i > 0) && ($i < $#$points))) && (abs($dir2 - $dir1) > 0.99 * $pi) ) {
-              my @pTurns = ();
-              for my $dir ( $dir1, $dir2 ) {
-                push @pTurns,
-                  shiftPoint(point=> $ps->[$i], direction=> $dir, distance=> $ps->[$i]->{shift});
-              }
-              # check if there's a knot.. if not use the doubled points
-              my @fs = segmentIntercept( [$ps->[$i - 1], $pTurns[0]], [$pTurns[1], $ps->[($i + 1) % @$points]] );
-              if ( @fs == 0 ) {
-                push @pNew, @pTurns;
-                next shiftLoop;
-              }
-            }
-
-            push @pNew, shiftVertex(point=> $ps->[$i], directions=> [$dir1, $dir2], distance=> $ps->[$i]->{shift});
-          }
-          push @pNews, \@pNew;
-        }
-        ($points, $rPoints) = @pNews;
+        $points  = applyLaneShift(points=> $points, isLoop=> $isLoop);
+        deleteField(points=> $points, field=> "shift");
+        $rPoints = applyLaneShift(points=> $rPoints, isLoop=> $isLoop);
+        deleteField(points=> $rPoints, field=> "shift");
       }
-
 
       # for extendback, we calculate the crop crop position here: the loop counts as part
       # of the extension distance
@@ -3499,6 +3652,16 @@ for my $file ( @files ) {
 
       $segment->{points} = $points;
 
+
+      #
+      # curvature
+      #
+      if ($addCurvature) {
+        note("checking curvature\n");
+        addCurvatureField(points=> $points, isLoop=> $isLoop);
+      }
+
+
       #
       # generate gradient signs
       #
@@ -3602,7 +3765,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.29
+0.30
 
 =head1 DESCRIPTION
 
@@ -3739,6 +3902,14 @@ positive, negative, and outside the range from -360 to +360 degrees.
 For example, if a route started east (0) then lapped around
 counterclockwise 10 times, the final direction would be approximately
 3600 degrees.
+
+=item B<addCurvature>
+
+This option adds a "curvature" field (in meters) to the GPX file.
+Curvature is calculated as the ratio of the rate of change of angle
+with distance.  Note for a unit circle (radius = 1) the rate of change
+of angle (in radians) with position (along the perimeter) is 1.
+In general this is the reciprical of the circle radius.
 
 =item B<addDistance>
 
@@ -3966,6 +4137,23 @@ flattening is done over each of the specified segments.
 
 Distances are calculated i<after> smoothing but before cropping or extension.
 
+=item B<gradientPower>
+
+For gradient signs, how much of a power to apply to gradient in
+determining where signs go.  If 0, then all that matters
+is altitude: put the signs between peaks and valleys.  If 1,
+then a climb which is double the altitude but half the altitude
+gained scores the same.  The higher this number, the more likely
+a gradient sign is to go on a short steep pitch versus a longer,
+more gradual climb containing the short steep pitch.
+
+=item B<gradientThreshold>
+
+This determines the threshold at which a gradient sign gets put in.
+The units are meters: a 10% climb needs to gain this much altitude
+to get a gradient sign.  How much altitude steeper or less
+steep climbs need to be depends on gradientPower
+
 =item B<interpolate> <meters>
 
 Synonym for "-spacing"
@@ -4010,22 +4198,17 @@ Synonym for "-loop"
 The course is considered a loop course, or a circuit, and so smoothing and other operations
 can take place between the beginning and end of the loop.
 
-=item B<gradientPower>
+=item B<minRadius> <meters>
 
-For gradient signs, how much of a power to apply to gradient in
-determining where signs go.  If 0, then all that matters
-is altitude: put the signs between peaks and valleys.  If 1,
-then a climb which is double the altitude but half the altitude
-gained scores the same.  The higher this number, the more likely
-a gradient sign is to go on a short steep pitch versus a longer,
-more gradual climb containing the short steep pitch.
-
-=item B<gradientThreshold>
-
-This determines the threshold at which a gradient sign gets put in.
-The units are meters: a 10% climb needs to gain this much altitude
-to get a gradient sign.  How much altitude steeper or less
-steep climbs need to be depends on gradientPower
+The code will calculate an effective radius of turns, and if this is
+less than this value, it will shift the road to increase the radius.
+This is done prior to -laneShift, which may thus result in tighter
+turns. So if there is a tight switchback, for example, then applying
+this option will tend to shift the road outward, increasing the turn
+radius.  There is a transition for this lane shift, so for tight
+S-turns, alternating left and right, or in very tight switchbacks,
+where the road snakes up a hill, results may be unsatisfactory.  It
+works best with an isolated corner.
 
 =item B<name> <string>
 
@@ -4133,7 +4316,7 @@ If the distance is less than the laneShift value, then the loop will
 have 3 parts: for example a right, then a left, then another right to
 turn 180 degrees.  The turn The main turn will be to the left if
 laneShift is negative (UK, for example), or to the right if laneShift
-is positive (US, for example) with a default (for no landShift) to the
+is positive (US, for example) with a default (for no laneShift) to the
 right.
 
 =item B<rUTurn> <meters>
