@@ -45,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.301</p>
+<p>0.31</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -350,6 +350,18 @@
 <p>The code will calculate an effective radius of turns, and if this is less than this value, it will shift the road to increase the radius. This is done prior to -laneShift, which may thus result in tighter turns. So if there is a tight switchback, for example, then applying this option will tend to shift the road outward, increasing the turn radius. There is a transition for this lane shift, so for tight S-turns, alternating left and right, or in very tight switchbacks, where the road snakes up a hill, results may be unsatisfactory. It works best with an isolated corner.</p>
 
 </dd>
+<dt id="minRadiusEnd-meters"><b>minRadiusEnd</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>If specified, where to stop applying minimum radius (-minRadius). If both -minRadiusStart and -minRadiusEnd are specified, and if the end is before the beginning, then the region between the points is excluded, and it is applied to the region after the start and the region before the end. To apply multiple radii in different regions of the course, this can be used for one region, but then the code should be re-run on the resulting GPX file to apply a subsequent region.</p>
+
+</dd>
+<dt id="minRadiusStart-meters"><b>minRadiusStart</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>If specified, where to start applying minimum radius (-minRadius). If both -minRadiusStart and -minRadiusEnd are specified, and if the end is before the beginning, then the region between the points is excluded, and it is applied to the region after the start and the region before the end. To apply multiple radii in different regions of the course, this can be used for one region, but then the code should be re-run on the resulting GPX file to apply a subsequent region.</p>
+
+</dd>
 <dt id="name-string"><b>name</b> &lt;string&gt;</dt>
 <dd>
 
@@ -548,13 +560,13 @@
 <p>As an early stage to processing, interpolate points on the route so that the spacing between points is no more than approximately this spacing. If -smoothing and/or -smoothingz are specified, then smoothing doesn&#39;t work over distances much smaller than this spacing. -autospacing is another option, in which case the code will selectively interpolate points near points where the direction is changing.</p>
 
 </dd>
-<dt id="splineDegs"><b>splineDegs</b></dt>
+<dt id="splineDegs-degrees"><b>splineDegs</b> &lt;degrees&gt;</dt>
 <dd>
 
 <p>If splines are desired, specifying this will cause spline interpolation to be done for corners turning at least this much, but less than the -splineMaxDegs option.</p>
 
 </dd>
-<dt id="splineMaxDegs"><b>splineMaxDegs</b></dt>
+<dt id="splineMaxDegs-degrees"><b>splineMaxDegs</b> &lt;degrees&gt;</dt>
 <dd>
 
 <p>If a -splineDegs option is specified, specifying this limit the maximum angle corner for which spline interpolation will be applied. Splines are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Splines have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted.</p>

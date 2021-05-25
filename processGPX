@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.301;  # make sure this matches pod value
+my $version = 0.31;  # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1664,6 +1664,8 @@ my $lSmooth = 0;                # general smoothing, applies to positions and al
 my $laneShift = 0;              # how much to shift lanes right (positive) or left (negative)
 my $linterpolate = 0;           # target point spacing: linear interpolate between existing points
 my $minRadius = 0;              # a minimum radius for corners: correct with lane shift
+my $minRadiusStart;             # where to begin applying minimum radius (meters)
+my $minRadiusEnd;               # where to end applying minimum radius (meters)
 my $needHelp = 0;               # print the pod
 my $newKeywords = "";           # new keywords for the GPX file
 my $noSave = 0;                 # skip saving the file
@@ -1740,6 +1742,8 @@ GetOptions (
             "lap"           => \$isLoop,
             "loop"          => \$isLoop,
             "minRadius=f"   => \$minRadius,
+            "minRadiusStart=f" => \$minRadiusStart,
+            "minRadiusEnd=f"   => \$minRadiusEnd,
             "name=s"        => \$title,
             "noSave"        => \$noSave,
             "out=s"         => \$outFile,
@@ -2972,9 +2976,18 @@ for my $file ( @files ) {
         my $lambda = 16 * sqrt($minRadius);
 
         for my $u ( 0 .. $#$points ) {
-          if ( abs($points->[$u]->{curvature}) > $maxCurvature ) {
-            my $s = $minRadius - abs(1 / $points->[$u]->{curvature});
-            my $a = ( $points->[$u]->{curvature} > 0 ) ? \@posShifts : \@negShifts;
+	  my $p = $points->[$u];
+          if (
+	      (
+	       ( (! defined $minRadiusStart) || ($p->{distance} >= $minRadiusStart) ) +
+	       ( (! defined $minRadiusEnd) || ($p->{distance} <= $minRadiusEnd) ) +
+	       ((defined $minRadiusEnd) && (defined $minRadiusStart) && ($minRadiusEnd < $minRadiusStart))
+	       == 2
+	       ) &&
+	      ( abs($p->{curvature}) > $maxCurvature )
+	     ) {
+            my $s = $minRadius - abs(1 / $p->{curvature});
+            my $a = ( $p->{curvature} > 0 ) ? \@posShifts : \@negShifts;
             $a->[$u] = $s if ($a->[$u] < $s);
             $count ++;
           }
@@ -3765,7 +3778,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.301
+0.31
 
 =head1 DESCRIPTION
 
@@ -4210,6 +4223,28 @@ S-turns, alternating left and right, or in very tight switchbacks,
 where the road snakes up a hill, results may be unsatisfactory.  It
 works best with an isolated corner.
 
+=item B<minRadiusEnd> <meters>
+
+If specified, where to stop applying minimum radius (-minRadius).
+If both -minRadiusStart and -minRadiusEnd are specified, and if
+the end is before the beginning, then the region between the points
+is excluded, and it is applied to the region after the start and
+the region before the end.  To apply multiple radii in different
+regions of the course, this can be used for one region, but then the
+code should be re-run on the resulting GPX file to apply a subsequent
+region.
+
+=item B<minRadiusStart> <meters>
+
+If specified, where to start applying minimum radius (-minRadius).
+If both -minRadiusStart and -minRadiusEnd are specified, and if
+the end is before the beginning, then the region between the points
+is excluded, and it is applied to the region after the start and
+the region before the end.  To apply multiple radii in different
+regions of the course, this can be used for one region, but then the
+code should be re-run on the resulting GPX file to apply a subsequent
+region.
+
 =item B<name> <string>
 
 Specify the name of the GPX route. The default is the name listed
@@ -4501,12 +4536,12 @@ smoothing doesn't work over distances much smaller than this spacing.
 selectively interpolate points near points where the direction is
 changing.
 
-=item B<splineDegs>
+=item B<splineDegs> <degrees>
 
 If splines are desired, specifying this will cause spline interpolation to be done for
 corners turning at least this much, but less than the -splineMaxDegs option.
 
-=item B<splineMaxDegs>
+=item B<splineMaxDegs> <degrees>
 
 If a -splineDegs option is specified, specifying this limit the
 maximum angle corner for which spline interpolation will be applied.
