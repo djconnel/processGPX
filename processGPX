@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.31;  # make sure this matches pod value
+my $version = 0.311;  # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1963,7 +1963,7 @@ for my $file ( @files ) {
         $smoothRadians = $smoothAngle * $deg2rad;
 
         if ($minRadius == 0) {
-          $minRadius = 5;
+          $minRadius = 5.5;
           note("setting minimum corner radius to $minRadius ...\n");
         }
         if (! $prune) {
@@ -3778,7 +3778,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.31
+0.311
 
 =head1 DESCRIPTION
 
