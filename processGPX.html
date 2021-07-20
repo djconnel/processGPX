@@ -45,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.311</p>
+<p>0.32</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -234,10 +234,22 @@
 <p>Points prior to this will be stripped, and if needed, a point will be interpolated to this position. This shifts the start position of the GPX route. See --cropMax for more discussion.</p>
 
 </dd>
+<dt id="crossingAngle-meters"><b>crossingAngle</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>If set, then this is the minimum degres by which segments need to intercept to be treated as crossings. If intercepting by less than this absolute angle, they are treated as separate. The default is 11.25. This can be increased since the default on twisty out-and-back sections might get marked as crossings otherwise.</p>
+
+</dd>
 <dt id="crossingHeight-meters"><b>crossingHeight</b> &lt;meters&gt;</dt>
 <dd>
 
 <p>If -fixCrossings is invoked, then the code will attempt to identify crossings and adjust the altitude at them. Typically crossings will be either level (same altitude each direction) or at some minimum height. That minumum height defaults to 2 meters, but can be adjusted with this parameter. If the GPX file has an altitude difference between zero and this number, it will force whichever is closer, and transition the altitude to either side, maintaining the same mean.</p>
+
+</dd>
+<dt id="crossingTransition-meters"><b>crossingTransition</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>If -fixCrossings is invoked, then the altitude at crossings will be flattened over a length rCrossings. This flattening will be transitioned back to the original altitude over a transition length which defaults to 3 times rCrossing. However, this may be too short, resulting in excessive gradients. This option allows explicitly setting this transition length, specified in meters</p>
 
 </dd>
 <dt id="csv"><b>csv</b></dt>
@@ -536,6 +548,12 @@
 <p>Sometimes one or the other will work better in a particular case, depending on whether an earlier or latter pass over a section of road has better definition.</p>
 
 </dd>
+<dt id="snapAltitude-meters"><b>snapAltitude</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Normally for snapping to identify two sections of road as being a repetition, they need to be within 1 meter altitude, to avoid &quot;snapping&quot; on very tight switchbacks, for example, where roads may be close on a map but at different elevations. But in cases where map data have elevation errors, this may prevent legitimate snapping. This parameter allows for the altitude tolerance to be increased from the default, relatively tight, 1 meter limit. Note there&#39;s an additional tolerance for the separation, using a 30% gradient, which is not adjustable.</p>
+
+</dd>
 <dt id="snapDistance-meters"><b>snapDistance</b> &lt;meters&gt;</dt>
 <dd>
 
@@ -552,6 +570,12 @@
 <p><b>WARNING</b>: this may be buggy. Check results carefully.</p>
 
 <p>This is an i&lt;experimental&gt; feature whereby points within this distance of a snap transition on partially syncronized in altitude, with a transition weighting depending on distance along the course. This is designed to avoid having divergent roads having different slopes while still overlapping, which can create &quot;ridges&quot; in the pavement which in real life would cause riders to crash. It&#39;s experimental, however, and there is no guarantee it will help rather than hurt, because of the way smoothing affects points near snap transitions, and snapping is almost always combined with smoothing to avoid abrupt jumps in position.</p>
+
+</dd>
+<dt id="snapZ-meters"><b>snapZ</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is a synonym for snapAltitude</p>
 
 </dd>
 <dt id="spacing-meters"><b>spacing</b> &lt;meters&gt;</dt>
@@ -616,6 +640,24 @@
 <dd>
 
 <p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. Use -zOffset for before scaling.</p>
+
+</dd>
+<dt id="zShift-meters1"><b>zShift</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. Use -zOffset for before scaling.</p>
+
+</dd>
+<dt id="zShiftEnd-meters"><b>zShiftEnd</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Distance on the route to end altitude shift. There will be a transition outside of this range.</p>
+
+</dd>
+<dt id="zShiftStart-meters"><b>zShiftStart</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Distance on the route to start altitude shift. There will be a transition outside of this range.</p>
 
 </dd>
 <dt id="zSmooth"><b>zSmooth</b></dt>

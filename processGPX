@@ -6,7 +6,7 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.311;  # make sure this matches pod value
+my $version = 0.32;  # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -78,8 +78,10 @@ sub latlngDistance {
 sub pointsAreClose {
   my $p1 = shift;
   my $p2 = shift;
+  my $sMax = shift // 0.05;
+  my $zMax = shift // 1;
   my $dz = ((defined $p1->{ele}) && (defined $p2->{ele})) ? ($p2->{ele} - $p1->{ele}) : 0;
-  return (abs($dz < 1) && (latlngDistance($p1, $p2) < 0.05));
+  return (abs($dz < $zMax) && (latlngDistance($p1, $p2) < $sMax));
 }
 
 sub dotProduct {
@@ -656,7 +658,7 @@ sub isPointOnRoad {
   my $p1 = shift();
   my $p2 = shift();
   my $px = shift();
-  my $dmax = shift() // 1;
+  my $dmax  = shift() // 1;
   # if point is "on" an endpoint (within 10 cm) then true
   return 1 if (pointsAreClose($p1, $px) || pointsAreClose($p2, $px));
   # else check if it is within the margin of the line
@@ -1649,7 +1651,9 @@ my $copyPoint = 0;              # whether to make sure first point and last poin
 my $copyright;                  # copyright field, for GPX
 my $cropMax;                    # maximum distance of retained data (distance calculated in original coordinates
 my $cropMin;                    # minimum distance of retained data (distance calculated in original coordinates)
+my $crossingAngle;              # crossings need to cross by at least this angle
 my $crossingHeight = 2;         # crossing should have same altitude, or at least this height
+my $crossingTransition;         # transition length for crossings
 my $csv = 0;                    # whether to use CSV instead of GPX
 my $description;                # description, for GPX metadata
 my $extend = 0;                 # apply to both append and prepend
@@ -1688,6 +1692,7 @@ my $smoothAngle;                # angle at which direction changes trigger point
 my $smoothStart;                # where to start smoothing (default: beginning)
 my $smoothEnd;                  # where to finish smoothing (default: end)
 my $snap = 0;                   # whether to check for near-coincident road segments, and make them exactly coincide: upward direction: 1 = up, 2 = down, 0 = none
+my $snapAltitude = 1;           # how close altitude needs to be for snapping
 my $snapDistance = 2;           # number of meters threshold for point snapping
 my $snapTransition = 0;         # whether to transition the altitude around snaps to match the source
 my $splineDegs = 0;             # maximum degrees use if we use spline interpolation
@@ -1699,6 +1704,8 @@ my $zAutoSmooth = 0;            # auto-smoothing based on altitude
 my $zOffset = 0;                # offset for altitude before scaling
 my $zScale = 1;                 # scale factor for altitude
 my $zShift = 0;                 # offset for altitude after scaling
+my $zShiftStart;                # where to start applying z shift
+my $zShiftEnd;                  # where to end applying z shift
 my $zSmooth = 0;                # smoothing applied additionally to altitude
 my @flatten;                    # points come in sets of 4: altitude, start point, finish point, lambda
 
@@ -1723,7 +1730,9 @@ GetOptions (
             "crop=f"        => \$cropMax,
             "cropMax=f"     => \$cropMax,
             "cropMin=f"     => \$cropMin,
+            "crossingAngle=f" => \$crossingAngle,
             "crossingHeight=f" => \$crossingHeight,
+            "crossingTransition=f" => \$crossingTransition,
             "csv"           => \$csv,
             "description=s" => \$description,
             "addGradientSigns" => \$addGradientSigns,
@@ -1771,6 +1780,8 @@ GetOptions (
             "snap=i"        => \$snap,
             "snapDistance=f" => \$snapDistance,
             "snapTransition=f" => \$snapTransition,
+            "snapAltitude=f" => \$snapAltitude,
+            "snapZ=f"       => \$snapAltitude,
             "spacing=f"     => \$linterpolate,
             "splineDegs=f"  => \$splineDegs,
             "splineMaxDegs=f" => \$splineMaxDegs,
@@ -1781,10 +1792,13 @@ GetOptions (
             "zOffset=f"     => \$zOffset,
             "zScale=f"      => \$zScale,
             "zShift=f"      => \$zShift,
+            "zShiftEnd=f"   => \$zShiftEnd,
+            "zShiftStart=f" => \$zShiftStart,
             "zSmooth=f"     => \$zSmooth,
             "zsigma=f"      => \$zSmooth,
            )
   or die("$0: ERROR processing command line options\n");
+
 
 if ($needHelp) {
   pod2usage(-exitval=>0, -verbose=>2);
@@ -1893,14 +1907,13 @@ for my $file ( @files ) {
             die("no course data found in first track, segment of file $join\n")
               unless ((defined $points2) && (@$points2 > 1));
 
-            warn("number of points in file $join = ", scalar(@$points2), "\n");
+            note("number of points in file $join = ", scalar(@$points2), "\n");
 
             # join points2 to points
-            warn("checking distance to joined file..\n");
+            note("checking distance to joined file..\n");
             my $d = latlngDistance($points->[-1], $points2->[0]);
-            warn("distance = $d\n");
+            note("distance = $d\n");
             my $dot = latlngDotProduct($points->[-2], $points->[-1], $points2->[0], $points2->[1]);
-            warn("dot = $dot\n");
 
             # routes must be within striking distance to join
             die("ERROR: trying to join files $file and $join, but points are too far apart (", sprintf("%.5f", $d / 1000), " km)\n")
@@ -2030,7 +2043,7 @@ for my $file ( @files ) {
             my $p2 = $points->[$U2];
 
             if ($p2->{distance} - $p1->{distance} < $dzigzag) {
-              warn("WARNING: zig-zag found on points (first point = 0) : ",
+              warn("WARNING: zig-zag found on points (0, 2, 3 ...) : ",
                    $U1, " and ", $U2, " : ",
                    sprintf("%.4f km: (%g, %g)", 0.001 * $p1->{distance}, $p1->{lon}, $p1->{lat}),
                    " to ",
@@ -2112,11 +2125,29 @@ for my $file ( @files ) {
       }
 
       # adjust altitudes if requested
-      if (($zOffset != 0) || ($zScale != 1) || ($zShift != 0)) {
+      if (($zOffset != 0) || ($zScale != 1)) {
         note("transforming altitude...\n");
         for my $p ( @$points ) {
-          $p->{ele} = ($p->{ele} + $zOffset) * $zScale + $zShift;
+          $p->{ele} = ($p->{ele} + $zOffset) * $zScale;
         }
+      }
+      if ( (defined $zShift) && ($zShift != 0) ) {
+	# transition set to change gradient by up to 5%
+	note("applying z shift = $zShift\n");
+	note("zShift start = $zShiftStart\n") if (defined $zShiftStart);
+	note("zShift end = $zShiftEnd\n") if (defined $zShiftEnd);
+	my $zShiftDistance = 20 * (1 + abs($zShift));
+        for my $p ( @$points ) {
+	  my $s = $p->{distance};
+	  my $dz = $zShift;
+	  if ( (defined $zShiftStart) && (defined $zShiftEnd) && ($zShiftEnd < $zShiftStart) ) {
+	    $dz *= (transition(($zShiftStart - $s) / $zShiftDistance) + transition(($s - $zShiftEnd) / $zShiftDistance));
+	  } else {
+	    $dz *= transition(($zShiftStart - $s) / $zShiftDistance) if (defined $zShiftStart);
+	    $dz *= transition(($s - $zShiftEnd) / $zShiftDistance)   if (defined $zShiftEnd);
+	  }
+	  $p->{ele} += $dz;
+	}
       }
 
       # reverse the points of the original course
@@ -2152,6 +2183,9 @@ for my $file ( @files ) {
         my $snapRange = ($linterpolate > 0) ? $snapStep * $linterpolate : 100;
         $snapRange  = 100 if ($snapRange > 100);
 
+	# threshold for checking if points are close for snapping
+	my $dsClose = $snapDistance / 2;
+
         # i is on the "earlier" segment, j on the "later" segment
         # note this excludes starting point and end point
       iLoop: for ( my $i = 0; $i < $#$points - 1; $i += $snapStep ) {
@@ -2184,7 +2218,7 @@ for my $file ( @files ) {
 
             # looking for j sufficiently close to i and connected with less than a 30% slope
             # slope requirement avoids snapping across tight switchbacks or a hypothetical "spiral"
-            while ((($d = latlngDistance( $p1, $points->[$j])) > $snapRange ) || (abs($p1->{ele} - $points->[$j]->{ele}) > 1 + 0.3 * $d)) {
+            while ((($d = latlngDistance( $p1, $points->[$j])) > $snapRange ) || (abs($p1->{ele} - $points->[$j]->{ele}) > $snapAltitude + 0.3 * $d)) {
               $j += $snapStep;
               next iLoop if ($j >= $#$points);
             }
@@ -2333,7 +2367,7 @@ for my $file ( @files ) {
                       );
 
               # as long as they are coincident, increase i1 and j1 together (short cut)
-              while ( ($i1 > 0) && ($j1 > $i2) && ($j1 < $#$points) && pointsAreClose($points->[$i1 - 1], $points->[$j1 - $sign]) ) {
+              while ( ($i1 > 0) && ($j1 > $i2) && ($j1 < $#$points) && pointsAreClose($points->[$i1 - 1], $points->[$j1 - $sign], $dsClose, $snapAltitude) ) {
                 $i1 --;
                 $j1 -= $sign;
               }
@@ -2354,7 +2388,7 @@ for my $file ( @files ) {
                       );
 
               # as long as they are coincident, increase i1 and j1 together (short cut)
-              while ( ($i2 < $j1) && ($j2 > $i2) && ($j2 < $#$points) && pointsAreClose($points->[$i2 + 1], $points->[$j2 + $sign]) ) {
+              while ( ($i2 < $j1) && ($j2 > $i2) && ($j2 < $#$points) && pointsAreClose($points->[$i2 + 1], $points->[$j2 + $sign], $dsClose, $snapAltitude) ) {
                 $i2 ++;
                 $j2 += $sign;
               }
@@ -2471,7 +2505,7 @@ for my $file ( @files ) {
               my $p1 = $points->[$j1];
               my $p2 = $points->[$i1];
               my $p3 = $points->[$i1 + 1];
-              last if (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9);
+              last if ((defined $p1) && (defined $p2) && (defined $p3) && (latlngDotProduct($p1, $p2, $p2, $p3) > -0.9));
               $i1 ++;
               if ($i1 >= $i2) {
                 $j += $snapStep;
@@ -2587,7 +2621,7 @@ for my $file ( @files ) {
             # jump to next ivalue outside of range if we did replacement
             # this isn't perfect, but note points in j range are changed, so
             # j indices are no longer valid: this is why need to jump to outer loop
-            $i =  $i2 if ($i2 > $i);
+            $i = $i2 if ($i2 > $i);
             next iLoop;
           }
         }
@@ -3094,6 +3128,9 @@ for my $file ( @files ) {
       if ( $fixCrossings ) {
         note("fixing crossings...\n");
 
+        # calculate a crossingX: minimum crossing X-product
+	my $crossingX = ((defined $crossingAngle) && ($crossingAngle >= 0)) ? abs(sin($crossingAngle * $deg2rad)) : sin($pi / 16);
+
         #
         # create a distance field
         #
@@ -3105,20 +3142,20 @@ for my $file ( @files ) {
         #
         my @simplified = (0, 1);
         die("course lacks at least two points... quitting\n") unless (@$points > 1);
-        my $aMax = $pi / 16;
+        my $simplifiedAngle = $pi / 24;
         for my $i ( 2 .. $#$points ) {
           my $angle = latlngAngle($points->[$i], $points->[$simplified[-1]], $points->[$simplified[-2]]);
           # add points which cause an angle change
           if (
               (defined $angle) &&
-              (abs($angle) > $aMax) &&
+              (abs($angle) > $simplifiedAngle) &&
               (($isLoop || ($i < $#$points)))
              ) {
             my $a1 = latlngAngle($points->[($i + 1) % @$points], $points->[$i], $points->[$simplified[-1]]);
             my $a2 = latlngAngle($points->[($i + 1) % @$points], $points->[$i], $points->[$i - 1]);
             if (
-                ((defined $a1) && (abs($a1) > $aMax)) ||
-                ((defined $a2) && (abs($a2) > $aMax))
+                ((defined $a1) && (abs($a1) > $simplifiedAngle)) ||
+                ((defined $a2) && (abs($a2) > $simplifiedAngle))
                ) {
               push @simplified, $i;
             }
@@ -3158,31 +3195,36 @@ for my $file ( @files ) {
                        ) == 2
                      ) {
                     # note("... found intercept on full course: points: segments $u and $v (intercepts = @gs)\n");
-                    push @crossings, interpolatePoint($points->[$u], $points->[($u + 1) % @$points], $gs[0]);
-                    my $z1 = $crossings[-1]->{ele};
-                    push @crossings, interpolatePoint($points->[$v], $points->[($v + 1) % @$points], $gs[1]);
-                    my $z2 = $crossings[-1]->{ele};
+		    my $up1 = ($u + 1) % @$points;
+		    my $vp1 = ($v + 1) % @$points;
+		    my @cNew;
+                    push @cNew, interpolatePoint($points->[$u], $points->[$up1], $gs[0]);
+                    my $z1 = $cNew[-1]->{ele};
+                    push @cNew, interpolatePoint($points->[$v], $points->[$vp1], $gs[1]);
+                    my $z2 = $cNew[-1]->{ele};
                     my $zAvg = ($z1 + $z2) / 2;
 
                     # adjust the altitude of the crossing points
-                    if (abs($z1 - $z2) < $crossingHeight / 2) {
-                      note("crossing @ $crossings[-2]->{distance} m and $crossings[-1]->{distance} m: setting level crossing altitude to $zAvg\n");
-                      $crossings[-2]->{ele} = $zAvg;
-                      $crossings[-1]->{ele} = $zAvg;
-                    } elsif (abs($z1 - $z2) < $crossingHeight) {
-                      $crossings[-2]->{ele} = $zAvg + ($z1 <=> $zAvg) * $crossingHeight / 2;
-                      $crossings[-1]->{ele} = $zAvg + ($z2 <=> $zAvg) * $crossingHeight / 2;
-                      note("crossing @ $crossings[-2]->{distance} m and $crossings[-1]->{distance} m: setting overpass altitudes to $crossings[-2]->{ele} and $crossings[-1]->{ele}\n");
-                    }
-
-                    $crossingsFound ++;
+		    if (abs(latlngCrossProduct($points->[$u], $points->[$up1], $points->[$v], $points->[$vp1])) > $crossingX) {
+		      if (abs($z1 - $z2) < $crossingHeight / 2) {
+			note("crossing @ $cNew[-2]->{distance} m and $cNew[-1]->{distance} m: setting level crossing altitude to $zAvg\n");
+			$cNew[-2]->{ele} = $zAvg;
+			$cNew[-1]->{ele} = $zAvg;
+		      } elsif (abs($z1 - $z2) < $crossingHeight) {
+			$cNew[-2]->{ele} = $zAvg + ($z1 <=> $zAvg) * $crossingHeight / 2;
+			$cNew[-1]->{ele} = $zAvg + ($z2 <=> $zAvg) * $crossingHeight / 2;
+			note("crossing @ $cNew[-2]->{distance} m and $cNew[-1]->{distance} m: setting overpass altitudes to $cNew[-2]->{ele} and $cNew[-1]->{ele}\n");
+		      }
+		      push @crossings, @cNew;
+		      $crossingsFound ++;
+		    }
                   }
                 }
               }
 
               # we didn't find any crossings...
-              warn("crossing detected from simplified route but not found on detailed route -- check crossings.\n")
-                unless ($crossingsFound);
+              # warn("crossing detected from simplified route but not found on detailed route -- check crossings.\n")
+              #   unless ($crossingsFound);
             }
           }
         }
@@ -3200,7 +3242,7 @@ for my $file ( @files ) {
 
         # crossing parameters
         my $r1 = $rCrossings;
-        my $r2 = 3 * $rCrossings;
+        my $r2 = $crossingTransition // 3 * $rCrossings;
         my $dr = $r2 - $r1;
         my $r3 = ($r1 + $r2) / 2;
         my $r4 = (3 * $r1 + $r2) / 4;
@@ -3778,7 +3820,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.311
+0.32
 
 =head1 DESCRIPTION
 
@@ -4061,6 +4103,14 @@ Points prior to this will be stripped, and if needed, a point will be
 interpolated to this position.  This shifts the start position of the
 GPX route.  See --cropMax for more discussion.
 
+=item B<crossingAngle> <meters>
+
+If set, then this is the minimum degres by which segments need to
+intercept to be treated as crossings.  If intercepting by less than
+this absolute angle, they are treated as separate.  The default is
+11.25.  This can be increased since the default on twisty out-and-back
+sections might get marked as crossings otherwise.
+
 =item B<crossingHeight> <meters>
 
 If -fixCrossings is invoked, then the code will attempt to identify
@@ -4070,6 +4120,15 @@ height.  That minumum height defaults to 2 meters, but can be adjusted
 with this parameter.  If the GPX file has an altitude difference
 between zero and this number, it will force whichever is closer, and
 transition the altitude to either side, maintaining the same mean.
+
+=item B<crossingTransition> <meters>
+
+If -fixCrossings is invoked, then the altitude at crossings will be
+flattened over a length rCrossings.  This flattening will be
+transitioned back to the original altitude over a transition length
+which defaults to 3 times rCrossing.  However, this may be too short,
+resulting in excessive gradients.  This option allows explicitly
+setting this transition length, specified in meters
 
 =item B<csv>
 
@@ -4498,6 +4557,18 @@ Sometimes one or the other will work better in a particular case,
 depending on whether an earlier or latter pass over a section of road
 has better definition.
 
+=item B<snapAltitude> <meters>
+
+Normally for snapping to identify two sections of road as being a
+repetition, they need to be within 1 meter altitude, to avoid
+"snapping" on very tight switchbacks, for example, where roads may be
+close on a map but at different elevations.  But in cases where map
+data have elevation errors, this may prevent legitimate snapping.
+This parameter allows for the altitude tolerance to be increased from
+the default, relatively tight, 1 meter limit.  Note there's an
+additional tolerance for the separation, using a 30% gradient, which
+is not adjustable.
+
 =item B<snapDistance> <meters>
 
 The distance in meters a road segment can deviate from another and
@@ -4525,6 +4596,10 @@ and there is no guarantee it will help rather than hurt, because of
 the way smoothing affects points near snap transitions, and snapping
 is almost always combined with smoothing to avoid abrupt jumps in
 position.
+
+=item B<snapZ> <meters>
+
+This is a synonym for snapAltitude
 
 =item B<spacing> <meters>
 
@@ -4596,6 +4671,23 @@ Add this to the altitudes in the original file.  This is useful for
 "fantasy courses", or where altiude is recorded by an improperly
 zeroed altimeter.  This is applied I<after scaling>.  Use -zOffset for
 before scaling.
+
+=item B<zShift> <meters>
+
+Add this to the altitudes in the original file.  This is useful for
+"fantasy courses", or where altiude is recorded by an improperly
+zeroed altimeter.  This is applied I<after scaling>.  Use -zOffset for
+before scaling.
+
+=item B<zShiftEnd> <meters>
+
+Distance on the route to end altitude shift.  There will be a transition
+outside of this range.
+
+=item B<zShiftStart> <meters>
+
+Distance on the route to start altitude shift.  There will be a transition
+outside of this range.
 
 =item B<zSmooth>
 
