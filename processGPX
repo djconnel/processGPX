@@ -6,7 +6,8 @@ use POSIX qw(floor);
 use Date::Parse;
 use Pod::Usage;
 
-my $version = 0.32;  # make sure this matches pod value
+# version 0.33: add start and finishing circuits
+my $version = 0.33;  # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1658,6 +1659,8 @@ my $csv = 0;                    # whether to use CSV instead of GPX
 my $description;                # description, for GPX metadata
 my $extend = 0;                 # apply to both append and prepend
 my $extendBack = 0;             # amount to extend the route with a loop.
+my $finishCircuits  = 0;        # number of finish circuits
+my $finishCircuitDistance = -1;   # km of finish circuit
 my $fixCrossings = 0;           # whether to flatten crossings
 my $join;                       # a GPS file to join to this one
 my $gradientPower = 2;          # power to raise gradient in evaluating segments for gradient signs
@@ -1697,6 +1700,8 @@ my $snapDistance = 2;           # number of meters threshold for point snapping
 my $snapTransition = 0;         # whether to transition the altitude around snaps to match the source
 my $splineDegs = 0;             # maximum degrees use if we use spline interpolation
 my $splineMaxDegs = 60;         # maximum turn angle for spline
+my $startCircuits  = 0;         # number of start circuits
+my $startCircuitDistance = -1;    # km of start circuit
 my $startTime;                  # start time for activity
 my $title;                      # title, for GPX file
 my $vFlag = 0;                  # print version
@@ -1738,9 +1743,11 @@ GetOptions (
             "addGradientSigns" => \$addGradientSigns,
             "extend=f"      => \$extend,
             "extendBack=f"  => \$extendBack,
-            "fixCrossings"  => \$fixCrossings,
+            "finishCircuits=i"  => \$finishCircuits,
+            "finishCircuitDistance=f" => \$finishCircuitDistance,
+            "fixCrossings"      => \$fixCrossings,
             "flatten=f{1,1000}" => \@flatten,
-            "gradientPower=f" => \$gradientPower,
+            "gradientPower=f"   => \$gradientPower,
             "gradientThreshold=f"  => \$gradientThreshold,
             "h"             => \$needHelp,
             "help"          => \$needHelp,
@@ -1785,6 +1792,8 @@ GetOptions (
             "spacing=f"     => \$linterpolate,
             "splineDegs=f"  => \$splineDegs,
             "splineMaxDegs=f" => \$splineMaxDegs,
+	    "startCircuits=i"  => \$startCircuits,
+            "startCircuitDistance=f" => \$startCircuitDistance,
             "startTime=s"   => \$startTime,
             "title=s"       => \$title,
             "version"       => \$vFlag,
@@ -2033,7 +2042,7 @@ for my $file ( @files ) {
             if (UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1], -0.9));
         }
 
-        addDistanceField(points=> $points);
+	addDistanceField(points=> $points);
         if (@UTurns) {
           my $zigzagCount = 0;
           while ( @UTurns > 1 ) {
@@ -2155,6 +2164,55 @@ for my $file ( @files ) {
         note("reversing course direction..\n");
         @$points = reverse @$points;
       }
+
+
+      # start and finish circuits
+      my $circuitsAdded = 0;
+      if ( ($startCircuits > 0) && ($startCircuitDistance >= 0) ) {
+	note("adding $startCircuits start circuits...\n");
+	# get start circuit points
+	my @circuitPoints = ();
+	addDistanceField(points=> $points) unless ( defined $points->[0]->{distance} );
+	my $i = 0;
+	while ($i <= $#$points) {
+	  if ($points->[$i]->{distance} <= $startCircuitDistance) {
+	    warn("adding point to circuit list...\n");
+	    push @circuitPoints, \%{$points->[$i]};
+	    $i ++;
+	  } else {
+	    last;
+	  }
+	}
+	if (@circuitPoints) {
+	  my @newPoints;
+	  for my $i (1 .. $startCircuits) {
+	    push @newPoints, @circuitPoints;
+	    warn("adding circuit point...\n");
+	    $circuitsAdded ++;
+	  }
+	  push @newPoints, @$points;
+	  $points = \@newPoints;
+	}
+      }
+      if ( ($finishCircuits > 0) && ($finishCircuitDistance >= 0) ) {
+	note("adding $finishCircuits finishing circuits...\n");
+	addDistanceField(points=> $points) unless ( defined $points->[0]->{distance} );
+	my @circuitPoints = ();
+	my $i = 0;
+	for my $p ( @$points ) {
+	  if ($p->{distance} < $finishCircuitDistance) {
+	    next;
+	  }
+	  push @circuitPoints, \%$p;
+	}
+	if (@circuitPoints) {
+	  for my $i (1 .. $finishCircuits) {
+	    push @$points, @circuitPoints;
+	    $circuitsAdded ++;
+	  }
+	}
+      }
+      addDistanceField(points=> $points) if ($circuitsAdded > 0);
 
       # check for snapping
       if ( ($snap > 0) && ($snapDistance >= 0) ) {
@@ -3820,7 +3878,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.32
+0.33
 
 =head1 DESCRIPTION
 
@@ -4172,6 +4230,33 @@ turn the route into a full out-and-back.  But typically the distance
 should be in the range of up to 140 meters or so.
 
 This disables -loop or -lap: it's meaningless with a lap course
+
+=item B<finishCircuitDistance> <meters>
+
+Often races end with finishing circuits after a lead-in.  To accomidate
+this, you can start with a GPX route which includes at least one lap
+of the finishing circuit, and add finishing loops.  This option
+allows specifying the start position where a lap of the finish circuit
+begins.  The circuit is assumed to extend to the end of the GPX file.
+The code will add a number of copies of these points specified by the
+B<-finishCircuits> option.
+
+So if the course goes from A to B, then completes 3 circuits of the
+loop B-C-D, then find the distance in meters to point B, then specify
+that distance as -finishCircuitDistance, and specify -finishCircuits 2.
+This will add two copies of the loop B-C-D to the end of the data.
+
+If the desired finish of the GPX is not at the same point as the end
+of the loop, then you'll need to specify a -cropMax value to remove
+some of the final circuit.
+
+=item B<finishCircuits> <meters>
+
+A finishing circuit starting at the position specified by the
+B<-finishCircuitDistance> option, in meters, will be appended
+to the initial data this number of times.  A value of 1 here
+implies adding one copy, which will result in two laps of the
+circuit.
 
 =item B<fixCrossings>
 
@@ -4625,6 +4710,27 @@ sharp corners, so an upper bound in the 60 degree range (which is the
 default) works generally well.  Splines have the advantage of rounding
 corners without "blunting" them, but sometimes they create "S" shapes
 where they are not wanted.
+
+=item B<startCircuitDistance> <meters>
+
+Sometimes races start with multiple circuits of a loop, before leaving
+the circuit for a remainder of the course.  This option allows you to
+repeat a beginning portion of the GPX file as a finishing circuit.
+To do this, you specify the distance to the end of the circuit, then
+an use the -startCircuits option to specify how many copies of this
+circuit should be prepended to the route at the beginning.
+
+If the start/end of the circuit lap is not the same place as the desired
+beginning of the route, then you'll need to specify a -cropMin value to remove
+some of the initial circuit
+
+=item B<startCircuits> <count>
+
+The number of copies of the starting circuit (from distance 0 to the
+value in meters specified with the -startCircuitDistance option) to be
+added to the beginning of the data.  So a value 1 means adding one
+copy, which implies two laps of the circuit, including the one defined
+in the original file.
 
 =item B<startTime> "<time string>"
 

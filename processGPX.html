@@ -4,7 +4,7 @@
 <head>
 <title></title>
 <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<link rev="made" href="mailto:buildbot@elcapitan.internal.macports.net" />
+<link rev="made" href="mailto:root@catalina.internal.macports.net" />
 </head>
 
 <body>
@@ -45,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.32</p>
+<p>0.33</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -282,6 +282,22 @@
 <p>It works by doing a normal turnaround, then cropping the course. So if there&#39;s not enough course to reach the specified distance, it will turn the route into a full out-and-back. But typically the distance should be in the range of up to 140 meters or so.</p>
 
 <p>This disables -loop or -lap: it&#39;s meaningless with a lap course</p>
+
+</dd>
+<dt id="finishCircuitDistance-meters"><b>finishCircuitDistance</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Often races end with finishing circuits after a lead-in. To accomidate this, you can start with a GPX route which includes at least one lap of the finishing circuit, and add finishing loops. This option allows specifying the start position where a lap of the finish circuit begins. The circuit is assumed to extend to the end of the GPX file. The code will add a number of copies of these points specified by the <b>-finishCircuits</b> option.</p>
+
+<p>So if the course goes from A to B, then completes 3 circuits of the loop B-C-D, then find the distance in meters to point B, then specify that distance as -finishCircuitDistance, and specify -finishCircuits 2. This will add two copies of the loop B-C-D to the end of the data.</p>
+
+<p>If the desired finish of the GPX is not at the same point as the end of the loop, then you&#39;ll need to specify a -cropMax value to remove some of the final circuit.</p>
+
+</dd>
+<dt id="finishCircuits-meters"><b>finishCircuits</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>A finishing circuit starting at the position specified by the <b>-finishCircuitDistance</b> option, in meters, will be appended to the initial data this number of times. A value of 1 here implies adding one copy, which will result in two laps of the circuit.</p>
 
 </dd>
 <dt id="fixCrossings"><b>fixCrossings</b></dt>
@@ -594,6 +610,20 @@
 <dd>
 
 <p>If a -splineDegs option is specified, specifying this limit the maximum angle corner for which spline interpolation will be applied. Splines are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Splines have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted.</p>
+
+</dd>
+<dt id="startCircuitDistance-meters"><b>startCircuitDistance</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Sometimes races start with multiple circuits of a loop, before leaving the circuit for a remainder of the course. This option allows you to repeat a beginning portion of the GPX file as a finishing circuit. To do this, you specify the distance to the end of the circuit, then an use the -startCircuits option to specify how many copies of this circuit should be prepended to the route at the beginning.</p>
+
+<p>If the start/end of the circuit lap is not the same place as the desired beginning of the route, then you&#39;ll need to specify a -cropMin value to remove some of the initial circuit</p>
+
+</dd>
+<dt id="startCircuits-count"><b>startCircuits</b> &lt;count&gt;</dt>
+<dd>
+
+<p>The number of copies of the starting circuit (from distance 0 to the value in meters specified with the -startCircuitDistance option) to be added to the beginning of the data. So a value 1 means adding one copy, which implies two laps of the circuit, including the one defined in the original file.</p>
 
 </dd>
 <dt id="startTime-time-string"><b>startTime</b> &quot;&lt;time string&gt;&quot;</dt>
