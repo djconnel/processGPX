@@ -45,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.33</p>
+<p>0.34</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -198,6 +198,20 @@
 <p>Specify that points will be interpolated based on an algorithm. The key parameter is&quot;smoothAngle&quot;, which determines where points are placed. This only makes sense if the a smoothing distance is also provided, via the &quot;-smooth&quot; option.</p>
 
 </dd>
+<dt id="circleEnd-meters"><b>circleEnd</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>See -circleStart</p>
+
+</dd>
+<dt id="circleStart-meters"><b>circleStart</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is an option which should be used with care. For the special case where a route includes circular sections, for example laps of the San Francisco Polo Fields, you can move points to a circle which passes thru the end-points of an interval, and a point approximately mid-way between the end-points. This should be followed up with a bit of smoothing over the interval to clean up the transitions to and from the circular arc. Be careful in defining the endpoints so the direction doesn&#39;t change suddenly -- for example, you don&#39;t want the circular arc to overshoot, requiring the direction to correct in the opposite direction. Consider only fitting the circlar arc to a center portion of the curve.</p>
+
+<p>The circular arc is fit between points starting at -circleStart and ending at -circleEnd from the start. If the -isLoop option is used, the start may come after the end in which case it wraps around. The circular arc is generated after point interpolation but before smoothing. If you want to generate multiple circular arcs (for example, the Polo fields have circular arcs at each end, separated by straight segments) then you need to run processGPX more than once. Note the circular arc will slightly change distances so you may want to do the corrections starting further from the start, progressing closer, for more stability in these distances.</p>
+
+</dd>
 <dt id="closed"><b>closed</b></dt>
 <dd>
 
@@ -210,7 +224,7 @@
 <p>For &quot;-loop&quot; courses, copy the first point to the end of the list of points, so the circuit is explicitly closed. This assures that RGT Cycling will recognize it as a loop course.</p>
 
 </dd>
-<dt id="copyright-strong"><b>copyright</b> &lt;strong&gt;</dt>
+<dt id="copyright-string"><b>copyright</b> &lt;string&gt;</dt>
 <dd>
 
 <p>If you want to specify a copyright field in the GPX, list it here. The default will preserve the copyright of the source GPX.</p>

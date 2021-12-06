@@ -7,7 +7,7 @@ use Date::Parse;
 use Pod::Usage;
 
 # version 0.33: add start and finishing circuits
-my $version = 0.33;  # make sure this matches pod value
+my $version = 0.34;  # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1034,6 +1034,154 @@ sub placeGradientSigns {
 
 
 #
+# circle procs:
+# fit a circle thru 3 points for replacing corners with circular sections
+# this is designed for tracks like the Polo fields in San Francisco
+#
+
+# 3-point fit: takes (x, y) points and returns the center and the radius
+# of a circle thru the points
+sub circle3PointFit {
+  my ($p1, $p2, $p3) = @_;
+
+  # reference to first point
+  my $x21 = $p2->[0] - $p1->[0];
+  my $x31 = $p3->[0] - $p1->[0];
+  my $y21 = $p2->[1] - $p1->[1];
+  my $y31 = $p3->[1] - $p1->[1];
+
+
+  # distances from first point
+  my $rs21 = $x21 ** 2 + $y21 ** 2;
+  my $rs31 = $x31 ** 2 + $y31 ** 2;
+
+  my $denom = 2 * ($y21 * $x31 - $y31 * $x21);
+
+  if ($denom == 0) {
+    # points are colinear
+    die("ERROR: tried to fit circle through colinear points\n");
+  }
+
+  my $f = ( $rs31 * $x21 - $rs21 * $x31 ) / $denom;
+  my $g = ( $rs21 * $y31 - $rs31 * $y21 ) / $denom;
+
+  my $r = sqrt($f ** 2 + $g ** 2);
+  my $x0 = $p1->[0] - $g;
+  my $y0 = $p1->[1] - $f;
+
+  my @p0;
+  $p0[0] = $x0;
+  $p0[1] = $y0;
+  return(\@p0, $r);
+}
+
+#
+# given a set of poins, fit a circle to those points
+#
+
+sub fitCircle{
+  my %var = @_;
+
+  # points are (x, y, s)
+  my $points = $var{points};
+
+  my $p0 = $points->[0];
+  my $pf = $points->[-1];
+  my $s0 = $p0->[2];
+  my $sf = $pf->[2];
+  my $sMid = ($s0 + $sf) / 2;
+  my $pMid;
+  my $p1;
+  for my $i ( 1 .. $#$points - 1 ) {
+    $p1 = $points->[$i];
+    last if ($points->[$i]->[2] > $sMid);
+  }
+  unless (defined $p1) {
+    warn("insufficient points to fit circle!\n");
+    return;
+  }
+
+  # fit analytic circle through points
+  return circle3PointFit($p0, $p1, $pf);
+}
+
+sub processCircle {
+  my %var = @_;
+
+  my $points = $var{points};
+  my $circleStart = $var{circleStart};
+  my $circleEnd = $var{circleEnd};
+  my $isLoop = $var{isLoop} // 0;
+
+  return if (
+	     (! ( (defined $circleStart) || (defined $circleEnd))) ||
+	     ((! $isLoop) && ($circleStart >= $circleEnd))
+	    );
+
+  addDistanceField(points=> $points);
+  # get points to be replace by circle
+  my $iStart;
+  if (defined $circleStart) {
+    my $i = 0;
+    while ($points->[$i]->{distance} < $circleStart) {
+      $i ++;
+      return if ($i > $#$points);
+    }
+    $iStart = $i;
+  } else {
+    $iStart = 0;
+  }
+  my $iEnd;
+  if (defined $circleEnd) {
+    my $i = 0;
+    while ($points->[$i + 1]->{distance} < $circleEnd) {
+      $i ++;
+      return if ($i > $#$points);
+    }
+    $iEnd = $i;
+  } else {
+    $iEnd = $#$points;
+  }
+
+  # if we wrap around, then use a negative number for te start index
+  $iStart -= @$points if ($iStart > $iEnd);
+
+
+  # reference coordinates to first point
+  my @xys = ( [0, 0, 0] );
+
+  # offset distance
+  my $d0 = $points->[$iStart]->{distance};
+
+  for my $i ( $iStart + 1 .. $iEnd ) {
+
+    # if we wrap around, adjust the distance offset
+    $d0 -= $points->[-1]->{distance} if ($i == 0);
+
+    my ($x, $y) = latlng2dxdy($points->[$iStart], $points->[$i]);
+    push @xys, [$x, $y, $points->[$i]->{distance} - $d0];
+  }
+
+  # now we have a list of points and distances... create the circle
+  my ($xyfit, $rCircle) = fitCircle(points=> \@xys);
+
+  # center is relative to first point.
+  my $pCenter = addVectorToPoint($points->[$iStart], $xyfit);
+
+  # for each point, adjust the radius to the center point to the fitted radius
+  for my $i ( $iStart .. $iEnd ) {
+    my $d = latlngDistance($points->[$i], $pCenter);
+    my $f = $rCircle / $d;
+    warn("f = $f\n");
+    my ($dx, $dy) = latlng2dxdy($pCenter, $points->[$i]);
+    my $pNew =  addVectorToPoint($pCenter, [$dx * $f, $dy * $f]);
+    $points->[$i]->{lat} = $pNew->{lat};
+    $points->[$i]->{lon} = $pNew->{lon};
+  }
+  addDirectionField(points=> $points) if (exists $points->[0]->{direction});
+}
+
+#
 #
 # shiftCircuit: shift a circuit to start at a particular point
 #
@@ -1648,6 +1796,8 @@ my $anchorSF = 0;               # whether to anchor the S/F
 my $append = 0;                 # distance to append on finish (140 meters allows room for finish): only for point-to-point
 my $autoSpacing;                # whether to do auto-spacing
 my $author;                     # author, for GPX
+my $circleStart;                # starting point for a circular corner (one per run)
+my $circleEnd;                  # ending point (meters) for a circular corner (one per run)
 my $copyPoint = 0;              # whether to make sure first point and last point in data coincide
 my $copyright;                  # copyright field, for GPX
 my $cropMax;                    # maximum distance of retained data (distance calculated in original coordinates
@@ -1729,12 +1879,16 @@ GetOptions (
             "auto"          => \$auto,
             "autoSmoothZ=f" => \$zAutoSmooth,
             "autoSpacing"   => \$autoSpacing,
+	    "circleStart=f" => \$circleStart,
+	    "circleEnd=f"   => \$circleEnd,
             "closed"        => \$copyPoint,
             "copyPoint"     => \$copyPoint,
             "copyright=s"   => \$copyright,
             "crop=f"        => \$cropMax,
+            "cropEnd=f"     => \$cropMax,
             "cropMax=f"     => \$cropMax,
             "cropMin=f"     => \$cropMin,
+            "cropStart=f"     => \$cropMin,
             "crossingAngle=f" => \$crossingAngle,
             "crossingHeight=f" => \$crossingHeight,
             "crossingTransition=f" => \$crossingTransition,
@@ -2830,6 +2984,14 @@ for my $file ( @files ) {
         $points = \@pNew;
       }
 
+      # circle processing
+      # if circular fits are required, those should be done before smoothing, so smoothing can
+      # reduce the anomalies.
+      if ((defined $circleStart) || (defined $circleEnd)) {
+	note("processing circular fit ", ((defined $circleStart) ? "from $circleStart " : ""), ((defined $circleEnd) ? "to $circleEnd " : ""), "\n");
+	processCircle(points=> $points, circleStart=> $circleStart, circleEnd=> $circleEnd, isLoop=> $isLoop);
+      }
+
       # various smoothing passes:
       # 1  : position
       # 2  : altitude
@@ -3772,8 +3934,9 @@ for my $file ( @files ) {
       if ($addCurvature) {
         note("checking curvature\n");
         addCurvatureField(points=> $points, isLoop=> $isLoop);
+      } else {
+        deleteField(points=> $points, field=> "curvature");
       }
-
 
       #
       # generate gradient signs
@@ -3878,7 +4041,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.33
+0.34
 
 =head1 DESCRIPTION
 
@@ -4122,6 +4285,34 @@ key parameter is"smoothAngle", which determines where points are
 placed.  This only makes sense if the a smoothing distance is also
 provided, via the "-smooth" option.
 
+=item B<circleEnd> <meters>
+
+See -circleStart
+
+=item B<circleStart> <meters>
+
+This is an option which should be used with care.  For the special case
+where a route includes circular sections, for example laps of the
+San Francisco Polo Fields, you can move points to a circle which passes
+thru the end-points of an interval, and a point approximately mid-way
+between the end-points.  This should be followed up with a bit of smoothing
+over the interval to clean up the transitions to and from the circular
+arc.  Be careful in defining the endpoints so the direction doesn't change
+suddenly -- for example, you don't want the circular arc to overshoot,
+requiring the direction to correct in the opposite direction.  Consider
+only fitting the circlar arc to a center portion of the curve.
+
+The circular arc is fit between points starting at -circleStart and
+ending at -circleEnd from the start.  If the -isLoop option is used,
+the start may come after the end in which case it wraps around.
+The circular arc is generated after point interpolation but before
+smoothing.  If you want to generate multiple circular arcs (for example,
+the Polo fields have circular arcs at each end, separated by straight
+segments) then you need to run processGPX more than once. Note the
+circular arc will slightly change distances so you may want to do the
+corrections starting further from the start, progressing closer, for
+more stability in these distances.
+
 =item B<closed>
 
 Synonym for "-copyPoint"
@@ -4132,7 +4323,7 @@ For "-loop" courses, copy the first point to the end of the list of
 points, so the circuit is explicitly closed.  This assures that RGT
 Cycling will recognize it as a loop course.
 
-=item B<copyright> <strong>
+=item B<copyright> <string>
 
 If you want to specify a copyright field in the GPX, list it here.
 The default will preserve the copyright of the source GPX.
