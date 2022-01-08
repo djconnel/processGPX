@@ -7,7 +7,9 @@ use Date::Parse;
 use Pod::Usage;
 
 # version 0.33: add start and finishing circuits
-my $version = 0.34;  # make sure this matches pod value
+# version 0.34: add circle fitting
+# version 0.35: add straight line fitting
+my $version = 0.35;  # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1078,7 +1080,6 @@ sub circle3PointFit {
 #
 # given a set of poins, fit a circle to those points
 #
-
 sub fitCircle{
   my %var = @_;
 
@@ -1109,76 +1110,200 @@ sub processCircle {
   my %var = @_;
 
   my $points = $var{points};
+  my $circle = $var{circle};
   my $circleStart = $var{circleStart};
   my $circleEnd = $var{circleEnd};
   my $isLoop = $var{isLoop} // 0;
 
-  return if (
-	     (! ( (defined $circleStart) || (defined $circleEnd))) ||
-	     ((! $isLoop) && ($circleStart >= $circleEnd))
-	    );
+  my @circles = ((defined $circle) ? @$circle : ());
 
-  addDistanceField(points=> $points);
-  # get points to be replace by circle
-  my $iStart;
-  if (defined $circleStart) {
-    my $i = 0;
-    while ($points->[$i]->{distance} < $circleStart) {
-      $i ++;
-      return if ($i > $#$points);
+  my @circleStarts = ();
+  my @circleEnds = ();
+
+  for (my $i = 0; $i < @circles;) {
+    push @circleStarts, $circles[$i];
+    $i ++;
+    push @circleEnds, ( ($i < @circles) ? $circles[$i] : undef );
+    $i ++;
+  }
+
+  my @a = (defined $circleStart) ? @$circleStart : ();
+  my @b = (defined $circleEnd) ?  @$circleEnd : ();
+  while (@a || @b) {
+    push @circleStarts, shift @a;
+    push @circleEnds, shift @b;
+  }
+
+  for my $iCircle ( 0 .. $#circleStarts ) {
+    addDistanceField(points=> $points) unless (exists $points->[0]->{distance});
+
+    note("fitting circle ", $iCircle + 1, " of ", scalar(@circleStarts), "\n");
+    my $cStart = $circleStarts[$iCircle];
+    my $cEnd = $circleEnds[$iCircle];
+    next if (
+	     (! ( (defined $cStart) || (defined $cEnd) ) ) ||
+	     ((! $isLoop) && ($cStart >= $cEnd))
+	     );
+
+    # get points to be replaced by circle
+    my $iStart;
+    if (defined $cStart) {
+      my $i = 0;
+      while ($points->[$i]->{distance} < $cStart) {
+	$i ++;
+	return if ($i > $#$points);
+      }
+      $iStart = $i;
+    } else {
+      $iStart = 0;
     }
-    $iStart = $i;
-  } else {
-    $iStart = 0;
-  }
-  my $iEnd;
-  if (defined $circleEnd) {
-    my $i = 0;
-    while ($points->[$i + 1]->{distance} < $circleEnd) {
-      $i ++;
-      return if ($i > $#$points);
+    my $iEnd;
+    if (defined $cEnd) {
+      my $i = 0;
+      while ($points->[$i + 1]->{distance} < $cEnd) {
+	$i ++;
+	return if ($i > $#$points);
+      }
+      $iEnd = $i;
+    } else {
+      $iEnd = $#$points;
     }
-    $iEnd = $i;
-  } else {
-    $iEnd = $#$points;
+
+    # if we wrap around, then use a negative number for te start index
+    $iStart -= @$points if ($iStart > $iEnd);
+
+
+    # reference coordinates to first point
+    my @xys = ( [0, 0, 0] );
+
+    # offset distance
+    my $d0 = $points->[$iStart]->{distance};
+
+    for my $i ( $iStart + 1 .. $iEnd ) {
+
+      # if we wrap around, adjust the distance offset
+      $d0 -= $points->[-1]->{distance} if ($i == 0);
+
+      my ($x, $y) = latlng2dxdy($points->[$iStart], $points->[$i]);
+      push @xys, [$x, $y, $points->[$i]->{distance} - $d0];
+    }
+
+    # now we have a list of points and distances... create the circle
+    my ($xyfit, $rCircle) = fitCircle(points=> \@xys);
+
+    # center is relative to first point.
+    my $pCenter = addVectorToPoint($points->[$iStart], $xyfit);
+
+    # for each point, adjust the radius to the center point to the fitted radius
+    for my $i ( $iStart .. $iEnd ) {
+      my $d = latlngDistance($points->[$i], $pCenter);
+      my $f = $rCircle / $d;
+      my ($dx, $dy) = latlng2dxdy($pCenter, $points->[$i]);
+      my $pNew =  addVectorToPoint($pCenter, [$dx * $f, $dy * $f]);
+      $points->[$i]->{lat} = $pNew->{lat};
+      $points->[$i]->{lon} = $pNew->{lon};
+      note("updating point $i ...\n");
+    }
+    # these fields are now invalid
+    deleteField(points=> $points, field=> "distance");
+    deleteField(points=> $points, field=> "direction") if (exists $points->[0]->{direction});
+  }
+}
+
+sub processStraight {
+  my %var = @_;
+
+  my $points = $var{points};
+  my $straight = $var{straight};
+  my $straightStart = $var{straightStart};
+  my $straightEnd = $var{straightEnd};
+  my $isLoop = $var{isLoop} // 0;
+
+  my @straights = ((defined $straight) ? @$straight : ());
+
+  my @straightStarts = ();
+  my @straightEnds = ();
+
+  for (my $i = 0; $i < @straights;) {
+    push @straightStarts, $straights[$i];
+    $i ++;
+    push @straightEnds, ( ($i < @straights) ? $straights[$i] : undef );
+    $i ++;
   }
 
-  # if we wrap around, then use a negative number for te start index
-  $iStart -= @$points if ($iStart > $iEnd);
-
-
-  # reference coordinates to first point
-  my @xys = ( [0, 0, 0] );
-
-  # offset distance
-  my $d0 = $points->[$iStart]->{distance};
-
-  for my $i ( $iStart + 1 .. $iEnd ) {
-
-    # if we wrap around, adjust the distance offset
-    $d0 -= $points->[-1]->{distance} if ($i == 0);
-
-    my ($x, $y) = latlng2dxdy($points->[$iStart], $points->[$i]);
-    push @xys, [$x, $y, $points->[$i]->{distance} - $d0];
+  my @a = (defined $straightStart) ? @$straightStart : ();
+  my @b = (defined $straightEnd) ?  @$straightEnd : ();
+  while (@a || @b) {
+    push @straightStarts, shift @a;
+    push @straightEnds, shift @b;
   }
 
-  # now we have a list of points and distances... create the circle
-  my ($xyfit, $rCircle) = fitCircle(points=> \@xys);
+  for my $iStraight ( 0 .. $#straightStarts ) {
+    addDistanceField(points=> $points) unless (exists $points->[0]->{distance});
 
-  # center is relative to first point.
-  my $pCenter = addVectorToPoint($points->[$iStart], $xyfit);
+    note("fitting straight ", $iStraight + 1, " of ", scalar(@straightStarts), "\n");
+    my $sStart = $straightStarts[$iStraight];
+    my $sEnd = $straightEnds[$iStraight];
+    next if (
+	     (! ( (defined $sStart) || (defined $sEnd) ) ) ||
+	     ((! $isLoop) && ($sStart >= $sEnd))
+	     );
 
-  # for each point, adjust the radius to the center point to the fitted radius
-  for my $i ( $iStart .. $iEnd ) {
-    my $d = latlngDistance($points->[$i], $pCenter);
-    my $f = $rCircle / $d;
-    warn("f = $f\n");
-    my ($dx, $dy) = latlng2dxdy($pCenter, $points->[$i]);
-    my $pNew =  addVectorToPoint($pCenter, [$dx * $f, $dy * $f]);
-    $points->[$i]->{lat} = $pNew->{lat};
-    $points->[$i]->{lon} = $pNew->{lon};
+    # get points to be replaced by straight
+    my $iStart;
+    if (defined $sStart) {
+      my $i = 0;
+      while ($points->[$i]->{distance} < $sStart) {
+	$i ++;
+	return if ($i > $#$points);
+      }
+      $iStart = $i;
+    } else {
+      $iStart = 0;
+    }
+    my $iEnd;
+    if (defined $sEnd) {
+      my $i = 0;
+      while ($points->[$i + 1]->{distance} < $sEnd) {
+	$i ++;
+	return if ($i > $#$points);
+      }
+      $iEnd = $i;
+    } else {
+      $iEnd = $#$points;
+    }
+
+    # if we wrap around, then use a negative number for te start index
+    $iStart -= @$points if ($iStart > $iEnd);
+
+
+    # reference coordinates to first point
+    my @xys = ( [0, 0, 0] );
+
+    # offset distance
+    my $d0 = $points->[$iStart]->{distance};
+
+    my ($rx, $ry) = latlng2dxdy($points->[$iStart], $points->[$iEnd]);
+
+    # if neither rx nor ry is nonzero, do nothing
+    next if (($rx == 0) && ($ry == 0));
+    my $r2 = $rx ** 2 + $ry ** 2;
+
+    # for each point, find the projection of the point on the segment
+    for my $i ( $iStart + 1 .. $iEnd - 1 ) {
+      my ($dx, $dy) = latlng2dxdy($points->[$iStart], $points->[$i]);
+      # find the projection onto the line
+      # projection: r dot rLine / r
+      my $f = ($dx * $rx + $dy * $ry) / $r2;
+      my $pNew =  addVectorToPoint($points->[$iStart], [$rx * $f, $ry * $f]);
+      $points->[$i]->{lat} = $pNew->{lat};
+      $points->[$i]->{lon} = $pNew->{lon};
+      note("updating point $i ...\n");
+    }
+    # these fields are now invalid
+    deleteField(points=> $points, field=> "distance");
+    deleteField(points=> $points, field=> "direction") if (exists $points->[0]->{direction});
   }
-  addDirectionField(points=> $points) if (exists $points->[0]->{direction});
 }
 
 #
@@ -1796,8 +1921,6 @@ my $anchorSF = 0;               # whether to anchor the S/F
 my $append = 0;                 # distance to append on finish (140 meters allows room for finish): only for point-to-point
 my $autoSpacing;                # whether to do auto-spacing
 my $author;                     # author, for GPX
-my $circleStart;                # starting point for a circular corner (one per run)
-my $circleEnd;                  # ending point (meters) for a circular corner (one per run)
 my $copyPoint = 0;              # whether to make sure first point and last point in data coincide
 my $copyright;                  # copyright field, for GPX
 my $cropMax;                    # maximum distance of retained data (distance calculated in original coordinates
@@ -1862,7 +1985,14 @@ my $zShift = 0;                 # offset for altitude after scaling
 my $zShiftStart;                # where to start applying z shift
 my $zShiftEnd;                  # where to end applying z shift
 my $zSmooth = 0;                # smoothing applied additionally to altitude
+
+my @circle;                     # points for circle substitution
+my @circleStart;                # starting point for a circular corner (one per run)
+my @circleEnd;                  # ending point (meters) for a circular corner (one per run)
 my @flatten;                    # points come in sets of 4: altitude, start point, finish point, lambda
+my @straight;                   # points for straight substitution
+my @straightStart;              # starting point for a circular corner (one per run)
+my @straightEnd;                # ending point (meters) for a circular corner (one per run)
 
 # shortcut options:
 my $auto = 0;                   # automatically set options based on the course (doesn't turn options off)
@@ -1879,8 +2009,10 @@ GetOptions (
             "auto"          => \$auto,
             "autoSmoothZ=f" => \$zAutoSmooth,
             "autoSpacing"   => \$autoSpacing,
-	    "circleStart=f" => \$circleStart,
-	    "circleEnd=f"   => \$circleEnd,
+	    "circleStart=f{1,1000}" => \@circleStart,
+	    "circleEnd=f{1,1000}" => \@circleEnd,
+	    "circleStop=f{1,1000}" => \@circleEnd,
+	    "circle=f{1,1000}" => \@circle,
             "closed"        => \$copyPoint,
             "copyPoint"     => \$copyPoint,
             "copyright=s"   => \$copyright,
@@ -1949,6 +2081,10 @@ GetOptions (
 	    "startCircuits=i"  => \$startCircuits,
             "startCircuitDistance=f" => \$startCircuitDistance,
             "startTime=s"   => \$startTime,
+            "straight=f{1,1000}" => \@straight,
+	    "straightStart=f{1,1000}" => \@straightStart,
+	    "straightEnd=f{1,1000}" => \@straightEnd,
+	    "straightStop=f{1,1000}" => \@straightEnd,
             "title=s"       => \$title,
             "version"       => \$vFlag,
             "v"             => \$vFlag,
@@ -2984,12 +3120,20 @@ for my $file ( @files ) {
         $points = \@pNew;
       }
 
-      # circle processing
+      # straight processing
       # if circular fits are required, those should be done before smoothing, so smoothing can
       # reduce the anomalies.
-      if ((defined $circleStart) || (defined $circleEnd)) {
-	note("processing circular fit ", ((defined $circleStart) ? "from $circleStart " : ""), ((defined $circleEnd) ? "to $circleEnd " : ""), "\n");
-	processCircle(points=> $points, circleStart=> $circleStart, circleEnd=> $circleEnd, isLoop=> $isLoop);
+      if (@straight || (@straightStart) || (@straightEnd)) {
+	note("processing straight fit(s)...\n");
+	processStraight(points=> $points, straight=> \@straight, straightStart=> \@straightStart, straightEnd=> \@straightEnd, isLoop=> $isLoop);
+      }
+
+      # straight processing
+      # if circular fits are required, those should be done before smoothing, so smoothing can
+      # reduce the anomalies.
+      if (@circle || (@circleStart) || (@circleEnd)) {
+	note("processing circular fit(s)\n");
+	processCircle(points=> $points, circle=> \@circle, circleStart=> \@circleStart, circleEnd=> \@circleEnd, isLoop=> $isLoop);
       }
 
       # various smoothing passes:
@@ -3097,8 +3241,6 @@ for my $file ( @files ) {
                 $s += latlngDistance( $points->[$k % @$points], $points->[($k + 1) % @$points] );
                 $k ++;
               }
-
-              my $p0 = $points->[$i];
 
               # create list of separations
               $s = 0;
@@ -4041,7 +4183,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.34
+0.35
 
 =head1 DESCRIPTION
 
@@ -4284,12 +4426,30 @@ Specify that points will be interpolated based on an algorithm.  The
 key parameter is"smoothAngle", which determines where points are
 placed.  This only makes sense if the a smoothing distance is also
 provided, via the "-smooth" option.
+=item B<closed>
 
-=item B<circleEnd> <meters>
+Synonym for "-copyPoint"
+
+=item B<circle> <meters> (1 or more)
+
+Provide segments to be fit with circles, alternating start distance
+from start of GPX, and finish distance from start of GPX.  This is an
+alternative to providing values via -circleStart and/or -circleEnd.
+IF both methods are used, these will be processed first.  So for
+example, -circle 400 500 100 200 will fit circles for points between
+400 and 500 meters from the start, then between 100 and 200 meters from
+the start.  Not ethe further points are listed first so the fit of a
+circle to these points does not affect the distance to the nearer points.
+
+=item B<circleEnd> <meters> (1 or more)
+
+Set one or more distances for circle fitting.
 
 See -circleStart
 
-=item B<circleStart> <meters>
+=item B<circleStart> <meters> (1 or more)
+
+Set one or more start distances for circle fitting.
 
 This is an option which should be used with care.  For the special case
 where a route includes circular sections, for example laps of the
@@ -4313,9 +4473,11 @@ circular arc will slightly change distances so you may want to do the
 corrections starting further from the start, progressing closer, for
 more stability in these distances.
 
-=item B<closed>
-
-Synonym for "-copyPoint"
+If multiple values are listed, then multiple sections will be replaced.
+Distances will be updated after each circular segment replacement.
+So if you want to do multiple circular replacements, either list them
+from further to closer relative to the start to avoid the distances
+for later fits being affected by earlier fits.
 
 =item B<copyPoint>
 
@@ -4441,7 +4603,7 @@ If the desired finish of the GPX is not at the same point as the end
 of the loop, then you'll need to specify a -cropMax value to remove
 some of the final circuit.
 
-=item B<finishCircuits> <meters>
+=item B<finishCircuits> count
 
 A finishing circuit starting at the position specified by the
 B<-finishCircuitDistance> option, in meters, will be appended
@@ -4934,6 +5096,49 @@ zone.  This is useful for uploading a GPX route to "Relive", a website
 which generates animations of routes, and requires a time field.  The
 time is generated using a heureistic formula which has rider speed
 depend on the road grade.
+
+=item B<straight> <meters> (1 or more)
+
+Provide segments to be fit with straights, alternating start distance
+from start of GPX, and finish distance from start of GPX.  This is an
+alternative to providing values via -straightStart and/or -straightEnd.
+IF both methods are used, these will be processed first.  So for
+example, -straight 400 500 100 200 will fit straights for points between
+400 and 500 meters from the start, then between 100 and 200 meters from
+the start.  Not ethe further points are listed first so the fit of a
+straight to these points does not affect the distance to the nearer points.
+
+=item B<straightEnd> <meters> (1 or more)
+
+Set one or more distances for straight fitting.
+
+See -straightStart
+
+=item B<straightStart> <meters> (1 or more)
+
+Set one or more start distances for straight fitting.
+
+Straight fitting is done by finding the endpoints of the straight segment
+using the provided distances.  Only existing points will be used: no point
+interpolation will be done. Then for points between these endpoints, a projection
+operator is used to map the new point onto the segment connecting the two endpoints.
+The original data should be close to straight so this projection operation does
+not result in any retrograde motion.  This would result in 180 degree turns.
+So if the points are nearly straight, and the end points are good, this can
+help straighten out sections of road which should be perfectly straight.
+The points are moved onto the projected position on the line segment, but 
+the elevations (or other parameters) are not changed.  So the assumption is that
+moving onto the staight line is perpendicular to any altitude gradients.
+This could result in a road with a constant gradient but following a curvy
+path ending up with a non-constant gradient.  So check altitudes with care.
+One possible approach is to use the -flatten option to interpolate the altitudes,
+after doing the straight-line fit.
+
+If multiple values are listed, then multiple sections will be replaced.
+Distances will be updated after each circular segment replacement.
+So if you want to do multiple circular replacements, either list them
+from further to closer relative to the start to avoid the distances
+for later fits being affected by earlier fits.
 
 =item B<title> <string>
 

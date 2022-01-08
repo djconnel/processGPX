@@ -45,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.34</p>
+<p>0.35</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -195,27 +195,35 @@
 <dt id="autoSpacing"><b>autoSpacing</b></dt>
 <dd>
 
-<p>Specify that points will be interpolated based on an algorithm. The key parameter is&quot;smoothAngle&quot;, which determines where points are placed. This only makes sense if the a smoothing distance is also provided, via the &quot;-smooth&quot; option.</p>
+<p>Specify that points will be interpolated based on an algorithm. The key parameter is&quot;smoothAngle&quot;, which determines where points are placed. This only makes sense if the a smoothing distance is also provided, via the &quot;-smooth&quot; option. =item <b>closed</b></p>
+
+<p>Synonym for &quot;-copyPoint&quot;</p>
 
 </dd>
-<dt id="circleEnd-meters"><b>circleEnd</b> &lt;meters&gt;</dt>
+<dt id="circle-meters-1-or-more"><b>circle</b> &lt;meters&gt; (1 or more)</dt>
 <dd>
+
+<p>Provide segments to be fit with circles, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via -circleStart and/or -circleEnd. IF both methods are used, these will be processed first. So for example, -circle 400 500 100 200 will fit circles for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Not ethe further points are listed first so the fit of a circle to these points does not affect the distance to the nearer points.</p>
+
+</dd>
+<dt id="circleEnd-meters-1-or-more"><b>circleEnd</b> &lt;meters&gt; (1 or more)</dt>
+<dd>
+
+<p>Set one or more distances for circle fitting.</p>
 
 <p>See -circleStart</p>
 
 </dd>
-<dt id="circleStart-meters"><b>circleStart</b> &lt;meters&gt;</dt>
+<dt id="circleStart-meters-1-or-more"><b>circleStart</b> &lt;meters&gt; (1 or more)</dt>
 <dd>
+
+<p>Set one or more start distances for circle fitting.</p>
 
 <p>This is an option which should be used with care. For the special case where a route includes circular sections, for example laps of the San Francisco Polo Fields, you can move points to a circle which passes thru the end-points of an interval, and a point approximately mid-way between the end-points. This should be followed up with a bit of smoothing over the interval to clean up the transitions to and from the circular arc. Be careful in defining the endpoints so the direction doesn&#39;t change suddenly -- for example, you don&#39;t want the circular arc to overshoot, requiring the direction to correct in the opposite direction. Consider only fitting the circlar arc to a center portion of the curve.</p>
 
 <p>The circular arc is fit between points starting at -circleStart and ending at -circleEnd from the start. If the -isLoop option is used, the start may come after the end in which case it wraps around. The circular arc is generated after point interpolation but before smoothing. If you want to generate multiple circular arcs (for example, the Polo fields have circular arcs at each end, separated by straight segments) then you need to run processGPX more than once. Note the circular arc will slightly change distances so you may want to do the corrections starting further from the start, progressing closer, for more stability in these distances.</p>
 
-</dd>
-<dt id="closed"><b>closed</b></dt>
-<dd>
-
-<p>Synonym for &quot;-copyPoint&quot;</p>
+<p>If multiple values are listed, then multiple sections will be replaced. Distances will be updated after each circular segment replacement. So if you want to do multiple circular replacements, either list them from further to closer relative to the start to avoid the distances for later fits being affected by earlier fits.</p>
 
 </dd>
 <dt id="copyPoint"><b>copyPoint</b></dt>
@@ -308,7 +316,7 @@
 <p>If the desired finish of the GPX is not at the same point as the end of the loop, then you&#39;ll need to specify a -cropMax value to remove some of the final circuit.</p>
 
 </dd>
-<dt id="finishCircuits-meters"><b>finishCircuits</b> &lt;meters&gt;</dt>
+<dt id="finishCircuits-count"><b>finishCircuits</b> count</dt>
 <dd>
 
 <p>A finishing circuit starting at the position specified by the <b>-finishCircuitDistance</b> option, in meters, will be appended to the initial data this number of times. A value of 1 here implies adding one copy, which will result in two laps of the circuit.</p>
@@ -648,6 +656,30 @@
 <p>processGPX -startTime &quot;15 Feb 2021 08:00&quot;</p>
 
 <p>would generate a time field beginning at that time, in the local time zone. This is useful for uploading a GPX route to &quot;Relive&quot;, a website which generates animations of routes, and requires a time field. The time is generated using a heureistic formula which has rider speed depend on the road grade.</p>
+
+</dd>
+<dt id="straight-meters-1-or-more"><b>straight</b> &lt;meters&gt; (1 or more)</dt>
+<dd>
+
+<p>Provide segments to be fit with straights, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via -straightStart and/or -straightEnd. IF both methods are used, these will be processed first. So for example, -straight 400 500 100 200 will fit straights for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Not ethe further points are listed first so the fit of a straight to these points does not affect the distance to the nearer points.</p>
+
+</dd>
+<dt id="straightEnd-meters-1-or-more"><b>straightEnd</b> &lt;meters&gt; (1 or more)</dt>
+<dd>
+
+<p>Set one or more distances for straight fitting.</p>
+
+<p>See -straightStart</p>
+
+</dd>
+<dt id="straightStart-meters-1-or-more"><b>straightStart</b> &lt;meters&gt; (1 or more)</dt>
+<dd>
+
+<p>Set one or more start distances for straight fitting.</p>
+
+<p>Straight fitting is done by finding the endpoints of the straight segment using the provided distances. Only existing points will be used: no point interpolation will be done. Then for points between these endpoints, a projection operator is used to map the new point onto the segment connecting the two endpoints. The original data should be close to straight so this projection operation does not result in any retrograde motion. This would result in 180 degree turns. So if the points are nearly straight, and the end points are good, this can help straighten out sections of road which should be perfectly straight. The points are moved onto the projected position on the line segment, but the elevations (or other parameters) are not changed. So the assumption is that moving onto the staight line is perpendicular to any altitude gradients. This could result in a road with a constant gradient but following a curvy path ending up with a non-constant gradient. So check altitudes with care. One possible approach is to use the -flatten option to interpolate the altitudes, after doing the straight-line fit.</p>
+
+<p>If multiple values are listed, then multiple sections will be replaced. Distances will be updated after each circular segment replacement. So if you want to do multiple circular replacements, either list them from further to closer relative to the start to avoid the distances for later fits being affected by earlier fits.</p>
 
 </dd>
 <dt id="title-string"><b>title</b> &lt;string&gt;</dt>
