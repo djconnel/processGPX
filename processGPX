@@ -5481,7 +5481,7 @@ run the program twice.  This is an example:
 
 C<processGPX -loop -copyPoint -shiftSF -50 -snapDistance 3 -spacing 2 -snap 1 -smoothz 10  -lap CritRGT.gpx -out Crit_step1.gpx>
 
-C<processGPX -loop -copyPoint -shiftSF 0 -snapSistance 1 -snapTransition 20 -prune -snap 1 -smooth 10 CritRGT_step1.gpx -out Crit_processed_v1.gpx>
+C<processGPX -loop -copyPoint -shiftSF 0 -snapDistance 1 -snapTransition 20 -prune -snap 1 -smooth 10 CritRGT_step1.gpx -out Crit_processed_v1.gpx>
 
 Here the first pass does a first pass of snapping, and afterwards it
 adds points to a very fine spacing of 2 meters, It shifts the start of
@@ -5615,15 +5615,6 @@ testing is needed.
 =item B<-snapTransition is suspect.>
 
 This option needs more debugging.
-
-=item B<No way to add turn-around loops in the middle of a route>
-
-Ideally I'd be able to add turn-around loops not just at the beginning
-and/or end of a GPX file, but at abrupt turnarounds in the middle of
-the route.  This is not presently supported.  It it was supported,
-the code would look for turns close to 180 degrees (or two turns
-close 90 degrees each, on adjacent points) and createa loop of a
-specified radius there.
 
 =item B<RGT ignores gradient signs, and puts in its own>
 

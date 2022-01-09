@@ -976,7 +976,7 @@
 
 <p><code>processGPX -loop -copyPoint -shiftSF -50 -snapDistance 3 -spacing 2 -snap 1 -smoothz 10 -lap CritRGT.gpx -out Crit_step1.gpx</code></p>
 
-<p><code>processGPX -loop -copyPoint -shiftSF 0 -snapSistance 1 -snapTransition 20 -prune -snap 1 -smooth 10 CritRGT_step1.gpx -out Crit_processed_v1.gpx</code></p>
+<p><code>processGPX -loop -copyPoint -shiftSF 0 -snapDistance 1 -snapTransition 20 -prune -snap 1 -smooth 10 CritRGT_step1.gpx -out Crit_processed_v1.gpx</code></p>
 
 <p>Here the first pass does a first pass of snapping, and afterwards it adds points to a very fine spacing of 2 meters, It shifts the start of the GPX back 50 meters. The goal here is to do the first crude point snapping on the low-resolution data,then reduce the point spacing for a second snap pass which will be done next, since the code snaps only before adding points. The result of the first pass is the file <i>Crit_step1.gpx</i>.</p>
 
@@ -1066,12 +1066,6 @@
 <dd>
 
 <p>This option needs more debugging.</p>
-
-</dd>
-<dt id="No-way-to-add-turn-around-loops-in-the-middle-of-a-route"><b>No way to add turn-around loops in the middle of a route</b></dt>
-<dd>
-
-<p>Ideally I&#39;d be able to add turn-around loops not just at the beginning and/or end of a GPX file, but at abrupt turnarounds in the middle of the route. This is not presently supported. It it was supported, the code would look for turns close to 180 degrees (or two turns close 90 degrees each, on adjacent points) and createa loop of a specified radius there.</p>
 
 </dd>
 <dt id="RGT-ignores-gradient-signs-and-puts-in-its-own"><b>RGT ignores gradient signs, and puts in its own</b></dt>
