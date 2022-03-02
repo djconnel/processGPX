@@ -9,7 +9,8 @@ use Pod::Usage;
 # version 0.33: add start and finishing circuits
 # version 0.34: add circle fitting
 # version 0.35: add straight line fitting
-my $version = 0.35;  # make sure this matches pod value
+# version 0.36: shifted turn-arounds to after min radius
+my $version = 0.36;  # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1598,6 +1599,13 @@ sub makeLoop {
   my $direction = $var{direction};
   my $sign = $var{defaultSign} // 1;
   my $radius = $var{radius} // 4;
+
+  # if radius is negative, swap the direction
+  if ($radius < 0) {
+    $radius = -$radius;
+    $sign = -$sign;
+  }
+
   die("makeLoop requires a reference to a list of two points.\n")
     unless ((defined $points) && ((ref $points) eq "ARRAY") && (@$points > 1));
   die("makeLoop requires a direction parameter\n")
@@ -1610,7 +1618,7 @@ sub makeLoop {
   # loop points
   my @pLoop = ();
 
-  #  loop eventually goes from point1 to point2
+  # loop eventually goes from point1 to point2
   # but this may require a shear
 
   #
@@ -1655,7 +1663,7 @@ sub makeLoop {
     $stretch = 1;
   }
 
-  my $dThetaMax = $twopi / (16 * (1 +sqrt$radius / 4));
+  my $dThetaMax = $twopi / (16 * (1 +sqrt( abs($radius / 4) )));
 
   # arc going into the circle
   # first point (delta, 0)
@@ -2275,7 +2283,7 @@ for my $file ( @files ) {
         $smoothRadians = $smoothAngle * $deg2rad;
 
         if ($minRadius == 0) {
-          $minRadius = 5.5;
+          $minRadius = 6;
           note("setting minimum corner radius to $minRadius ...\n");
         }
         if (! $prune) {
@@ -3354,95 +3362,6 @@ for my $file ( @files ) {
         my $points = addSplines(points=> $points, splineRadians=> $splineRadians, splineMaxRadians=> $splineMaxRadians, isLoop=> $isLoop);
       }
 
-
-      #
-      # set maximum curvature
-      #
-      if ( $minRadius > 0 ) {
-        note("setting minimum radius to $minRadius...\n");
-        addCurvatureField(points=> $points, isLoop=> $isLoop);
-        addDistanceField(points=> $points, isLoop=> $isLoop);
-        my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
-
-        # calculate a lane shift field
-        my $maxCurvature = 1 / $minRadius;
-        my $count = 0;
-        my @posShifts = map { 0 } @$points;
-        my @negShifts = map { 0 } @$points;
-        my $lambda = 16 * sqrt($minRadius);
-
-        for my $u ( 0 .. $#$points ) {
-	  my $p = $points->[$u];
-          if (
-	      (
-	       ( (! defined $minRadiusStart) || ($p->{distance} >= $minRadiusStart) ) +
-	       ( (! defined $minRadiusEnd) || ($p->{distance} <= $minRadiusEnd) ) +
-	       ((defined $minRadiusEnd) && (defined $minRadiusStart) && ($minRadiusEnd < $minRadiusStart))
-	       == 2
-	       ) &&
-	      ( abs($p->{curvature}) > $maxCurvature )
-	     ) {
-            my $s = $minRadius - abs(1 / $p->{curvature});
-            my $a = ( $p->{curvature} > 0 ) ? \@posShifts : \@negShifts;
-            $a->[$u] = $s if ($a->[$u] < $s);
-            $count ++;
-          }
-        }
-
-        if  ($count > 0) {
-          note("found $count points tighter than minimum radius $minRadius meters...\n");
-          for $a ( \@posShifts, \@negShifts ) {
-            my $u1 = 0;
-            my $u2 = 0;
-
-            if ( $isLoop ) {
-              $u1 --
-                while (
-                       ($u1 > -$#$points) &&
-                       (distanceDifference($points->[$u1 - 1], $points->[0], $courseDistance, $isLoop) < $lambda)
-                      );
-            }
-
-            my @newShifts = @$a;
-            for my $u0 ( 0 .. $#$points ) {
-              next if ($a->[$u0] == 0);
-
-              # u1 ... u0 ... u2
-              $u1 ++
-                while (
-                       ($u1 < $u0) &&
-                       (distanceDifference($points->[$u1], $points->[$u0], $courseDistance, $isLoop) > $lambda)
-                      );
-              $u2 = $u0 if ($u2 < $u0);
-              $u2 = ($u2 + 1) % @$points
-                while (
-                       ($isLoop ? ((($u2 + 1) % @$points) != $u1) : $u2 < $#$points) &&
-                       (distanceDifference($points->[$u0], $points->[($u2 + 1) % @$points], $courseDistance, $isLoop) < $lambda)
-                      );
-              for my $u ( $u1 .. $u2 ) {
-                # the u0 point has already been set...
-                next
-                  if ($u == $u0);
-                my $f = ( (1 + cos($pi * pointSeparation($points->[$u], $points->[$u0], $courseDistance, $isLoop) / $lambda)) / 2 ) ** 2;
-                my $shift = $a->[$u0] * $f;
-
-                # if there's an existing shift, then combine with that:
-                # $newShifts[$u] = ($shift ** 4 + $newShifts[$u] ** 4) ** (1/4);
-                $newShifts[$u] = $shift if ($shift > $newShifts[$u]);
-              }
-            }
-            @$a = @newShifts;
-          }
-
-          # fill in shifts... sum of positive and negative shifts.
-          for my $u ( 0 .. $#$points ) {
-            $points->[$u]->{shift} += $posShifts[$u] - $negShifts[$u];
-          }
-          $points = applyLaneShift(points=> $points, isLoop=> $isLoop);
-          deleteField(points=> $points, field=> "shift");
-        }
-      }
-
       #
       # flatten selected sections
       # points come in sets of 4: start point, altitude, finish point, altitude, lambda
@@ -3841,7 +3760,7 @@ for my $file ( @files ) {
       #
       # turn-around loops within the course, if requested
       #
-      if ( (defined $rUTurn) && ($rUTurn > 0) ) {
+      if ( (defined $rUTurn) && (abs($rUTurn) > 1) ) {
         note("checking for U-turn loops...\n");
 
         # get rid of duplicate point at end
@@ -3907,6 +3826,96 @@ for my $file ( @files ) {
         }
 
         push @$points, \%{$points->[0]} if ($pointPopped);
+      }
+
+
+      #
+      # set maximum curvature
+      # note this needs to happen AFTER turn-around loops
+      #
+      if ( $minRadius > 0 ) {
+        note("setting minimum radius to $minRadius...\n");
+        addCurvatureField(points=> $points, isLoop=> $isLoop);
+        addDistanceField(points=> $points, isLoop=> $isLoop);
+        my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+
+        # calculate a lane shift field
+        my $maxCurvature = 1 / $minRadius;
+        my $count = 0;
+        my @posShifts = map { 0 } @$points;
+        my @negShifts = map { 0 } @$points;
+        my $lambda = 16 * sqrt($minRadius);
+
+        for my $u ( 0 .. $#$points ) {
+	  my $p = $points->[$u];
+          if (
+	      (
+	       ( (! defined $minRadiusStart) || ($p->{distance} >= $minRadiusStart) ) +
+	       ( (! defined $minRadiusEnd) || ($p->{distance} <= $minRadiusEnd) ) +
+	       ((defined $minRadiusEnd) && (defined $minRadiusStart) && ($minRadiusEnd < $minRadiusStart))
+	       == 2
+	       ) &&
+	      ( abs($p->{curvature}) > $maxCurvature )
+	     ) {
+            my $s = $minRadius - abs(1 / $p->{curvature});
+            my $a = ( $p->{curvature} > 0 ) ? \@posShifts : \@negShifts;
+            $a->[$u] = $s if ($a->[$u] < $s);
+            $count ++;
+          }
+        }
+
+        if  ($count > 0) {
+          note("found $count points tighter than minimum radius $minRadius meters...\n");
+          for $a ( \@posShifts, \@negShifts ) {
+            my $u1 = 0;
+            my $u2 = 0;
+
+            if ( $isLoop ) {
+              $u1 --
+                while (
+                       ($u1 > -$#$points) &&
+                       (distanceDifference($points->[$u1 - 1], $points->[0], $courseDistance, $isLoop) < $lambda)
+                      );
+            }
+
+            my @newShifts = @$a;
+            for my $u0 ( 0 .. $#$points ) {
+              next if ($a->[$u0] == 0);
+
+              # u1 ... u0 ... u2
+              $u1 ++
+                while (
+                       ($u1 < $u0) &&
+                       (distanceDifference($points->[$u1], $points->[$u0], $courseDistance, $isLoop) > $lambda)
+                      );
+              $u2 = $u0 if ($u2 < $u0);
+              $u2 = ($u2 + 1) % @$points
+                while (
+                       ($isLoop ? ((($u2 + 1) % @$points) != $u1) : $u2 < $#$points) &&
+                       (distanceDifference($points->[$u0], $points->[($u2 + 1) % @$points], $courseDistance, $isLoop) < $lambda)
+                      );
+              for my $u ( $u1 .. $u2 ) {
+                # the u0 point has already been set...
+                next
+                  if ($u == $u0);
+                my $f = ( (1 + cos($pi * pointSeparation($points->[$u], $points->[$u0], $courseDistance, $isLoop) / $lambda)) / 2 ) ** 2;
+                my $shift = $a->[$u0] * $f;
+
+                # if there's an existing shift, then combine with that:
+                # $newShifts[$u] = ($shift ** 4 + $newShifts[$u] ** 4) ** (1/4);
+                $newShifts[$u] = $shift if ($shift > $newShifts[$u]);
+              }
+            }
+            @$a = @newShifts;
+          }
+
+          # fill in shifts... sum of positive and negative shifts.
+          for my $u ( 0 .. $#$points ) {
+            $points->[$u]->{shift} += $posShifts[$u] - $negShifts[$u];
+          }
+          $points = applyLaneShift(points=> $points, isLoop=> $isLoop);
+          deleteField(points=> $points, field=> "shift");
+        }
       }
 
       #
@@ -4183,7 +4192,7 @@ smoothGPX [options] <input files>
 
 =head1 VERSION
 
-0.35
+0.36
 
 =head1 DESCRIPTION
 
@@ -4740,7 +4749,7 @@ is excluded, and it is applied to the region after the start and
 the region before the end.  To apply multiple radii in different
 regions of the course, this can be used for one region, but then the
 code should be re-run on the resulting GPX file to apply a subsequent
-region.
+region.  This is done very late, for example after -rUTurn.
 
 =item B<name> <string>
 
@@ -4858,7 +4867,8 @@ are added with this radius.
 
 This is done late in the process, in particular after lane
 shifting, so the U-turns can properly connect the land-shifted
-roads (with the "-laneShift" option).
+roads (with the "-laneShift" option).  It is done before
+minRadius, however.
 
 =item B<shiftEnd> <meters>
 

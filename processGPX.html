@@ -45,7 +45,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.35</p>
+<p>0.36</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -409,7 +409,7 @@
 <dt id="minRadiusStart-meters"><b>minRadiusStart</b> &lt;meters&gt;</dt>
 <dd>
 
-<p>If specified, where to start applying minimum radius (-minRadius). If both -minRadiusStart and -minRadiusEnd are specified, and if the end is before the beginning, then the region between the points is excluded, and it is applied to the region after the start and the region before the end. To apply multiple radii in different regions of the course, this can be used for one region, but then the code should be re-run on the resulting GPX file to apply a subsequent region.</p>
+<p>If specified, where to start applying minimum radius (-minRadius). If both -minRadiusStart and -minRadiusEnd are specified, and if the end is before the beginning, then the region between the points is excluded, and it is applied to the region after the start and the region before the end. To apply multiple radii in different regions of the course, this can be used for one region, but then the code should be re-run on the resulting GPX file to apply a subsequent region. This is done very late, for example after -rUTurn.</p>
 
 </dd>
 <dt id="name-string"><b>name</b> &lt;string&gt;</dt>
@@ -497,7 +497,7 @@
 
 <p>If any 180-degree turns are identified in the course, loops are added with this radius.</p>
 
-<p>This is done late in the process, in particular after lane shifting, so the U-turns can properly connect the land-shifted roads (with the &quot;-laneShift&quot; option).</p>
+<p>This is done late in the process, in particular after lane shifting, so the U-turns can properly connect the land-shifted roads (with the &quot;-laneShift&quot; option). It is done before minRadius, however.</p>
 
 </dd>
 <dt id="shiftEnd-meters"><b>shiftEnd</b> &lt;meters&gt;</dt>
