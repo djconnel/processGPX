@@ -397,7 +397,7 @@ sub segmentIntercept {
   my $a = ( ($dx12 ** 2 + $dy12 ** 2) * ($dx34 ** 2 + $dy34 ** 2) ) ** (1/2);
 
   # lines are parallel
-  if (abs($denom) < 0.01 * $a) {
+  if (($a == 0) || (abs($denom) < 0.01 * $a)) {
     return ();
   }
 
