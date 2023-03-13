@@ -2,9 +2,9 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-<title></title>
+<title>processGPX</title>
 <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<link rev="made" href="mailto:root@catalina.internal.macports.net" />
+<link rev="made" href="mailto:root@montereyx.internal.macports.net" />
 </head>
 
 <body>
@@ -18,6 +18,7 @@
   <li><a href="#DESCRIPTION">DESCRIPTION</a></li>
   <li><a href="#DEPENDENCIES">DEPENDENCIES</a></li>
   <li><a href="#OPTIONS">OPTIONS</a></li>
+  <li><a href="#SEGMENTS">SEGMENTS</a></li>
   <li><a href="#EXAMPLES">EXAMPLES</a>
     <ul>
       <li><a href="#auto-option">-auto option</a></li>
@@ -25,6 +26,7 @@
       <li><a href="#road-course-w-out-and-back">road course w/ out-and-back</a></li>
       <li><a href="#Multi-step-processing:-selective-smoothing">Multi-step processing: selective smoothing</a></li>
       <li><a href="#Multi-step-processing:-snapping-after-spacing">Multi-step processing: snapping after spacing</a></li>
+      <li><a href="#segment-generation">segment generation</a></li>
       <li><a href="#adding-time-to-an-activity">adding time to an activity</a></li>
       <li><a href="#adding-gradient-signs">adding gradient signs</a></li>
       <li><a href="#specifying-metadata">specifying metadata</a></li>
@@ -45,7 +47,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.36</p>
+<p>0.39</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -73,15 +75,18 @@
 
 <p>The program will calculate a &quot;altitude quality score&quot; of both the original GPX file, and of the result of processing, which is based on how much the grade changes point-to-point -- it is basically the ratio of the root-mean-squared change in gradient to the root-mean-squared average gradient for each point in the course. The goal is to only have abrupt gradient changes where they actually exist in the real-life course. A score of 1 on this metric is poor: it means there are many abrupt gradient changes. A score of 0.1 is smooth: gradients typically change around 10% from segment-to-segment. This quality score can provide guidance to if altitude smoothing and point density are sufficient. This doesn&#39;t address the issue of whether the &quot;top-down&quot; view of the course is optimally smoothed. For this careful examination of the resulting GPX on GPX Visualizer, or simular, with &quot;aerial view&quot; is a good idea.</p>
 
+<p>This program has been enhanced with the ability to process &quot;named segments&quot;, which RGT interprets as sections of a course which should be separately timed. A typical application of these is for climbs, and the program allows the auto-generation of segments using the detection of distinct, non-overlapping climbs in the route.</p>
+
 <h1 id="DEPENDENCIES">DEPENDENCIES</h1>
 
 <p>This code uses the following Perl modules, which must be installed, for example with the &quot;cpan&quot; command-line tool:</p>
 
-<pre><code> Getopt::Long : used for processing comamnd-line options
- Geo::Gpx     : parsing and generating GPX files
- POSIX        : floor function
- Date::Parse  : for parsing time, with the -startTime option
- Pod::Usage   : for the -help option</code></pre>
+<pre><code>Getopt::Long : used for processing comamnd-line options
+Geo::Gpx     : parsing and generating GPX files
+XML::Descent : processing XML (required by Geo::Gpx, as well)
+POSIX        : floor function
+Date::Parse  : for parsing time, with the -startTime option
+Pod::Usage   : for the -help option</code></pre>
 
 <h1 id="OPTIONS">OPTIONS</h1>
 
@@ -182,6 +187,36 @@
 <p>This option automatically turns on options based on &quot;best practices&quot;. It will not turn anything off, so can be used in conjunction with other options. Altitude auto-smoothing is used if no value for -zsmooth is provided.</p>
 
 </dd>
+<dt id="autoSegments-threshold-optional-power"><b>autoSegments</b> &lt;threshold&gt; &lt;optional power&gt;</dt>
+<dd>
+
+<p>Whether to automatically generate segments for the climb. The threshold is the vertical meters of a 10% gradient climb, where climbs at alternate gradients are adjusted by a term (gradient / 10%)^power, where the default power is 0.5. The names can be set with &quot;autoSegmentNames&quot;, with a generic default.</p>
+
+</dd>
+<dt id="autoSegmentNames-list-of-names"><b>autoSegmentNames</b> &lt;list of names&gt;</dt>
+<dd>
+
+<p>A list of names for automatically generated segments, separated by commas or semicolons. The default is &quot;climb&quot; followed by a number. If there are more segments than names, the default will be used for the additional climbs.</p>
+
+</dd>
+<dt id="autoSegmentMargin-meters"><b>autoSegmentMargin</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>A minimum buffer between auto-generated segments and either the start or finish banners, or other auto-segments.</p>
+
+</dd>
+<dt id="autoSegmentPower-number"><b>autoSegmentPower</b> &lt;number&gt;</dt>
+<dd>
+
+<p>If the gradient power for autosegments is not provided in the -autoSegments option as a second value, then use this value. The default is 0.5. Decent numbers are from 0.25 to 2, depending on how much focus you want to put on steepness in defining and rating climbs.</p>
+
+</dd>
+<dt id="autoSegmentStretch-relative-amount"><b>autoSegmentStretch</b> &lt;relative amount&gt;</dt>
+<dd>
+
+<p>The amount of distance increase one is willing to extend an auto-segment to reach a true peak or valley. This is applied to each side, so a value of 0.05 will result in up to a 10% increase in the total length of an automatically generated segment. The increase will not be applied if it would result in the loss of mandated margin (by -autoSegmentMargin) to an adjacent segment or to a start or finish banner.</p>
+
+</dd>
 <dt id="autoSmoothZ-scale-factor"><b>autoSmoothZ</b> &lt;scale factor&gt;</dt>
 <dd>
 
@@ -195,7 +230,7 @@
 <dt id="autoSpacing"><b>autoSpacing</b></dt>
 <dd>
 
-<p>Specify that points will be interpolated based on an algorithm. The key parameter is&quot;smoothAngle&quot;, which determines where points are placed. This only makes sense if the a smoothing distance is also provided, via the &quot;-smooth&quot; option. =item <b>closed</b></p>
+<p>Specify that points will be interpolated based on an algorithm. The key parameter is&quot;smoothAngle&quot;, which determines where points are placed. This only makes sense if the a smoothing distance or a minRadius is also provided, via the &quot;-smooth&quot; or &quot;-minRadius&quot; options. =item <b>closed</b></p>
 
 <p>Synonym for &quot;-copyPoint&quot;</p>
 
@@ -286,6 +321,14 @@
 <p>List a description for the GPX metadata. Since the description will likely contain spaces, remember to enclose the string in &quot;quotes&quot;, or however else your command-line shell delimits spaces.</p>
 
 </dd>
+<dt id="disableElevationFixes-0-or-1-item-disableAdvancedSmoothing-0-or-1-item-enableElevationFixes-item-enableAdvancedSmoothing"><b>disableElevationFixes</b> &lt;0 or 1&gt; =item <b>disableAdvancedSmoothing</b> &lt;0 or 1&gt; =item <b>enableElevationFixes</b> =item <b>enableAdvancedSmoothing</b></dt>
+<dd>
+
+<p>These options specify whether to explicity turn off or explicitly turn on various RGT post-processing options. These functions are provided by RGT, not this program, which simply places the appropriate tags in the GPX output. Note the &quot;disable&quot; options take a number as an argument: 0 or 1. the &quot;enable&quot; options do not take a number argument. So this provides two ways of specifying whether you want these features. Enabling supercedes disabling.</p>
+
+<p>The default is to disable both.</p>
+
+</dd>
 <dt id="extend-meters"><b>extend</b> &lt;meters&gt;</dt>
 <dd>
 
@@ -309,9 +352,9 @@
 <dt id="finishCircuitDistance-meters"><b>finishCircuitDistance</b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Often races end with finishing circuits after a lead-in. To accomidate this, you can start with a GPX route which includes at least one lap of the finishing circuit, and add finishing loops. This option allows specifying the start position where a lap of the finish circuit begins. The circuit is assumed to extend to the end of the GPX file. The code will add a number of copies of these points specified by the <b>-finishCircuits</b> option.</p>
+<p>Often races end with finishing circuits after a lead-in. To accomodate this, you can start with a GPX route which includes at least one lap of the finishing circuit, and add finishing loops. This option allows specifying the start position where a lap of the finish circuit begins. The circuit is assumed to extend to the end of the GPX file. The code will add a number of copies of these points specified by the <b>-finishCircuits</b> option.</p>
 
-<p>So if the course goes from A to B, then completes 3 circuits of the loop B-C-D, then find the distance in meters to point B, then specify that distance as -finishCircuitDistance, and specify -finishCircuits 2. This will add two copies of the loop B-C-D to the end of the data.</p>
+<p>So if the course goes from A to B, then completes 3 circuits of the loop B-C-D, then find the distance in meters to point B, then specify that distance as -finishCircuitDistance, and specify -finishCircuits 2. This will add two cop`ies of the loop B-C-D to the end of the data.</p>
 
 <p>If the desired finish of the GPX is not at the same point as the end of the loop, then you&#39;ll need to specify a -cropMax value to remove some of the final circuit.</p>
 
@@ -360,10 +403,10 @@
 <p>Synonym for &quot;-spacing&quot;</p>
 
 </dd>
-<dt id="join-filename"><b>join</b> &lt;filename&gt;</dt>
+<dt id="join-filenames"><b>join</b> &lt;filenames&gt;</dt>
 <dd>
 
-<p>Add the points from the first track, segment found in this file and append them to the first track, segment in the original file.</p>
+<p>Add the points from the first track, segment found in these files and append them to the first track, segment in the original file. The files must reasonably match up end-to-end.</p>
 
 </dd>
 <dt id="keywords-meters"><b>keywords</b> &lt;meters&gt;</dt>
@@ -392,6 +435,12 @@
 <dd>
 
 <p>The course is considered a loop course, or a circuit, and so smoothing and other operations can take place between the beginning and end of the loop.</p>
+
+</dd>
+<dt id="maxSlope"><b>maxSlope</b> &lt;%&gt;</dt>
+<dd>
+
+<p>RGT supports a &quot;maximum slope&quot; option for magic roads. This option allows that to be changed from a default. It is specified in percent. If you specify a number &lt; 1, then that will be assumed to not have been converted into percent, so the number will be multiplied by 100.</p>
 
 </dd>
 <dt id="minRadius-meters"><b>minRadius</b> &lt;meters&gt;</dt>
@@ -500,6 +549,14 @@
 <p>This is done late in the process, in particular after lane shifting, so the U-turns can properly connect the land-shifted roads (with the &quot;-laneShift&quot; option). It is done before minRadius, however.</p>
 
 </dd>
+<dt id="segment-start-end-name"><b>segment</b> &lt;start&gt;,&lt;end&gt;,&lt;name&gt; ...</dt>
+<dd>
+
+<p>Define one or more non-overlapping named segments for the route. These are defined immediately before the shiftSF option is applied. segments are specified with groups of 3 options separated by commas: a first coordinate specifying the starting distance in meters or &quot;start&quot;, a second ccoordinate specifying the ending distance in meters or &quot;end&quot;, and a name. The starting coordinate instead be &quot;start&quot; to begin at the course start, and the ending coordinate can instead be &quot;end&quot; to end at the course end. It is not recommended to use these options with a loop course, since for loops, the course will not start or finish at the GPX end. In any case, RGT requires that segments start a sufficient distance from the beginning of the route, and end a sufficient distance from the end of the route, and also be separated by a sufficient distance. However, this code only checks that they not overlap. There is no way to define segments which overlap the S/F of a lapped course. Segments already defined in the GPX file, for example from GPX Magic or previous runs of this code, are honored, and so new segments may not overlap previously defined segments. Points are interpolated to get an essentially exact match to the specified coordinates.</p>
+
+<p>If you want multiple named segments, then split them with colons (&quot;:&quot;), so for example &quot;-segments &quot;1000,2000,segment 1;3000,4000,segment 2&quot;</p>
+
+</dd>
 <dt id="shiftEnd-meters"><b>shiftEnd</b> &lt;meters&gt;</dt>
 <dd>
 
@@ -585,6 +642,8 @@
 
 <p>Sometimes one or the other will work better in a particular case, depending on whether an earlier or latter pass over a section of road has better definition.</p>
 
+<p>If there are existing segments, snapping will try to map segments from the old points to the new points, but it&#39;s more precise to define segments after snapping. If you define segments within the same run of processGPS, they will be done after possible snapping.</p>
+
 </dd>
 <dt id="snapAltitude-meters"><b>snapAltitude</b> &lt;meters&gt;</dt>
 <dd>
@@ -625,13 +684,13 @@
 <dt id="splineDegs-degrees"><b>splineDegs</b> &lt;degrees&gt;</dt>
 <dd>
 
-<p>If splines are desired, specifying this will cause spline interpolation to be done for corners turning at least this much, but less than the -splineMaxDegs option.</p>
+<p>If splines are desired, specifying this will cause spline interpolation to be done for corners turning at least this much, but less than the -splineMaxDegs option. A typical value is 5 degrees. This angle is the angle between course points, not an angle of a total turn: the algorithm only looks at points ahead of and behind a given point.</p>
 
 </dd>
 <dt id="splineMaxDegs-degrees"><b>splineMaxDegs</b> &lt;degrees&gt;</dt>
 <dd>
 
-<p>If a -splineDegs option is specified, specifying this limit the maximum angle corner for which spline interpolation will be applied. Splines are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Splines have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted.</p>
+<p>If a -splineDegs option is specified, specifying this limit the maximum angle corner for which spline interpolation will be applied. Splines are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Splines have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using spline interpolation: verty strange results can occur if the corner is too sharp.</p>
 
 </dd>
 <dt id="startCircuitDistance-meters"><b>startCircuitDistance</b> &lt;meters&gt;</dt>
@@ -680,6 +739,12 @@
 <p>Straight fitting is done by finding the endpoints of the straight segment using the provided distances. Only existing points will be used: no point interpolation will be done. Then for points between these endpoints, a projection operator is used to map the new point onto the segment connecting the two endpoints. The original data should be close to straight so this projection operation does not result in any retrograde motion. This would result in 180 degree turns. So if the points are nearly straight, and the end points are good, this can help straighten out sections of road which should be perfectly straight. The points are moved onto the projected position on the line segment, but the elevations (or other parameters) are not changed. So the assumption is that moving onto the staight line is perpendicular to any altitude gradients. This could result in a road with a constant gradient but following a curvy path ending up with a non-constant gradient. So check altitudes with care. One possible approach is to use the -flatten option to interpolate the altitudes, after doing the straight-line fit.</p>
 
 <p>If multiple values are listed, then multiple sections will be replaced. Distances will be updated after each circular segment replacement. So if you want to do multiple circular replacements, either list them from further to closer relative to the start to avoid the distances for later fits being affected by earlier fits.</p>
+
+</dd>
+<dt id="stripSegments"><b>stripSegments</b></dt>
+<dd>
+
+<p>if specified, this results in existing segment definitions on input files (including those specified with -join) being stripped before processing. This would typically be used if -autoSegments is specified.</p>
 
 </dd>
 <dt id="title-string"><b>title</b> &lt;string&gt;</dt>
@@ -750,6 +815,24 @@
 </dd>
 </dl>
 
+<h1 id="SEGMENTS">SEGMENTS</h1>
+
+<p>The code has been enhanced to handle &quot;named segments&quot; as interpreted by RGT. Segments are defined in the GPX standard such that a &quot;track&quot; consists of a series of &quot;segments&quot;, and a &quot;segment&quot; consists of a series of &quot;trackpoints&quot;. In RGT, segments are assumed to be contiguous, such that a route is defined as the first segment, connected to the second segment, connected to the third segment, etc.</p>
+
+<p>Segments can be either named or unnamed. Named segments are intepreted by RGT to be timed separately, similar to Strava segments, where times it takes riders to go from the beginning to end of the segment are recorded. This program interacts with segments in several ways:</p>
+
+<ul>
+
+<p>1. if the input file has segments defined in the manner required by RGT, then these segments will be retained, unless the -stripSegments option is used. If there are gaps between segments, then these gaps will be filled with additional segments, such that there is no ambiguity about whether a gap belongs to the prior or following segment.</p>
+
+<p>2. Adjacent unnamed segments will be merged, so for example the artificial segments assigned to gaps between segments will be assigned to adjacent unnamed segment(s).</p>
+
+<p>3. You can define your own segments using the -segments option. This is followed by a comma-delimited list of a start position, a finish position, and a name, followed optionally by more of these three items. So it can be followed by a number of comma-delimited elements divisible by three. For each triplet, a segment is formed between the first coordinate and the second coordinate and assigned the name of the third element (if non-blank). For example, -segment 1000,2000,&quot;timed km&quot; creates a segment from 1000 meters into the route, up to 2000 meters into the route, and named the segment &quot;timed km&quot;. These coordinates are of course affected by other operations performed by this code so order of these operations is important. The segments are evaluated after most operations such as smoothing, but before cropping, so the coordinates do not take into account potential crops.</p>
+
+<p>4. A more powerful way to create segments is to do so automatically. This uses an algorithm which examines the route profile and identifies what it considers to be &quot;climbs&quot;. The default is for no automatic segments to be generated, so to request this, the -autoSegments option is used. It&#39;s followed by two numbers. The first is the threshold for a climb: small bumps in the road are not assigned for timing. The number is vertical meters at a reference 10% grade. The second number is a power which describes how much weight is put on steepness for defining a climb. A typical range is 0.3 to 1.0, with 0.5 to 0.7 working fairly well in many cases. A lower number will tend to create longer segments rather than focusing on steep sections, and will tend to combine sections which are separated by plateaus or brief descents. A larger number will tent to split these segmented climbs into individual climbs, so for example if a road is 10% for 1 km, then flat for 500 meters, then 8% for the next km, that might be considered one climb or two. Additionally automatic segments need to be separated from each other and from the start or finish banners. The amount of this separation is specified with the -autoSegmentMargin option (default is 100). If climbs would be too close to each other, the lower rated one is ignored, as are climbs which would be too close to the start and/or finish. So if you&#39;re designing a route for a hillclimbing competition, unless the finish is sufficiently past the start of the climb and the start is suffiently separate from the start of the climb, there will not be a segment defined for the climb.</p>
+
+</ul>
+
 <h1 id="EXAMPLES">EXAMPLES</h1>
 
 <h2 id="auto-option">-auto option</h2>
@@ -764,7 +847,7 @@
 
 <p>The following example was from a criterium course:</p>
 
-<p><code>processGPX -laneShift -4 -shiftStart 740 -shiftEnd 1390 -spacing 3 \ -prune -smooth 7 -snapDistance 2 -snap 1 -copyPoint -lap CherryPieCritRGT.gpx</code></p>
+<p><code>processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3 -minRadius 6 \ -prune -smooth 7 -snapDistance 2 -snap 1 -copyPoint -lap CherryPieCritRGT.gpx</code></p>
 
 <p>The course has an out-and-back section ending in a loop. In the actual race, the out-and-back is separated by cones. However, for RGT cycling, riders use the full road width of 8 meters, so the out and back portions needed to be separated.</p>
 
@@ -772,10 +855,12 @@
 
 <dl>
 
-<dt id="laneshift--4"><b>-laneshift -4</b></dt>
+<dt id="laneshift--6"><b>-laneshift -6</b></dt>
 <dd>
 
 <p>Riders remain to the left left on the out-and-back portion, so each direction is shifted 4 meters to the left. The negative number implies left, a positive number implies right.</p>
+
+<p>At one time a lane shift of 4 meters was adequate, but with changes to &quot;asset&quot; placement, a larger lane shift is now needed. This example uses 7 meters to the left (UK, perhaps).</p>
 
 </dd>
 <dt id="shiftStart-740--shiftEnd-1390"><b>-shiftStart 740 -shiftEnd 1390</b></dt>
@@ -790,6 +875,12 @@
 <dd>
 
 <p>This is a short criterium course with a lot of tight corners, so the initial spacing between points is set to 3 meters. This works for the 1.6 km criterium, but would perhaps be too many points for a 75 km point-to-point course, for example. But for longer routes, sharp corners are probably less of a factor. Note this number should probably be no greater than the &quot;-smooth&quot; parameter, unless &quot;-autospacing&quot; is used, in which case corners will set with finer spacing.</p>
+
+</dd>
+<dt id="minRadius-6"><b>-minRadius 6</b></dt>
+<dd>
+
+<p>If a corner turns out sharper than 6 meters, RGT will try to increase the radius of the turn by extending the road outward, with a smooth transition into and out of the correction.</p>
 
 </dd>
 <dt id="prune1"><b>-prune</b></dt>
@@ -828,7 +919,7 @@
 
 <p>This is from a road course with an out-and-back section:</p>
 
-<p><code>processGPX -crop 38730 -anchor -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothz 20 -snapDistance 5 -snap 1 NoonRide.gpx</code></p>
+<p><code>processGPX -crop 38730 -anchor -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothz 20 -snapDistance 5 -snap 1 -minRadius 6 NoonRide.gpx</code></p>
 
 <dl>
 
@@ -886,6 +977,12 @@
 <p>The course is a &quot;lollypop&quot;, meaning it heads out, does a big loop, then returns (part way). To make sure the return is well-aligned with the out, snapping is used. &quot;-snap 1&quot; means align the return to the out (rather than the reverse). &quot;-snapDistance 5&quot; means to snap points which are as much as 5 meters apart. 5 meters is a lot, and the result needs to be checked afterwards to make sure this doesn&#39;t result in transitions are too abrupt, but a large snapdistance can help make sure corners get snapped together.</p>
 
 </dd>
+<dt id="minRadius-61"><b>-minRadius 6</b></dt>
+<dd>
+
+<p>If a corner turns out sharper than 6 meters, RGT will try to increase the radius of the turn by extending the road outward, with a smooth transition into and out of the correction.</p>
+
+</dd>
 <dt id="NoonRide.gpx"><b>NoonRide.gpx</b></dt>
 <dd>
 
@@ -898,7 +995,7 @@
 
 <p>Here is an example where an urban route with reasonably sharp corners, except it followed an oval path around a park. The oval path came out of Strava Route Editor slightly ragged, so I wanted enough smoothing there to make it smooth, but the rest of the route, I wanted less smoothing. For this I used -smoothStart and -smoothEnd, to isolate the oval, but then to get smoothing on the rest of the loop as well, I needed to run the code twice:</p>
 
-<p><code>processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -copyPoint -lap -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -out processed.gpx</code></p>
+<p><code>processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -copyPoint -lap -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -minRadius 6 -out processed.gpx</code></p>
 
 <p>This uses a shell &quot;pipe&quot;, which is a way to run the program twice on the same data without saving to an intermediate file. although the intermediate file would be useful for debugging.</p>
 
@@ -946,7 +1043,7 @@
 <p>This tells the code to write the resulting GPX to &quot;the standard output&quot;.</p>
 
 </dd>
-<dt id="processGPX"><b>| processGPX -</b></dt>
+<dt id="processGPX"><b>| processGPX -</b>&quot;</dt>
 <dd>
 
 <p>This tells the command line shell to &quot;send the standard output to the standard input of the next program&quot;, which is a sepearate call to processGPX. It&#39;s called a &quot;pipe&quot;. The &quot;-&quot; tells the code that this call takes its input from the pipe. So think of it as a virtual file, a direct line of communication from one call of the code to the next.</p>
@@ -962,6 +1059,12 @@
 <dd>
 
 <p>Apply 15 meter smoothing this time, except start it at 1540 meters into the course, and end it as 270 meters into the course. The smoothing domain wraps around, because it starts after it finishes. So the end of the loop, and the beginning of the loop, will be additionally smoothed, while the rest will be kept unaltered, with a transitional range applied to avoid abrupt changes.</p>
+
+</dd>
+<dt id="minRadius-62"><b>-minRadius 6</b></dt>
+<dd>
+
+<p>This sets the minimum radius of corners to 6 meters. This is done in the second step here to include effects from processing in both steps.</p>
 
 </dd>
 <dt id="out-processed.gpx"><b>-out processed.gpx</b></dt>
@@ -983,6 +1086,58 @@
 <p>The second pass is not going to shift the start of the GPX any further: that was already done the first pass. Gross snapping was done the first pass, so a smaller snap distance is used here, since with the finer spacing of points after pass 1, some additional snapping may be needed here. The experimental &quot;-snapTransition&quot; option is used here. It makes sure points entering or leaving snap regions are aligned in altitude. This was a reason for the very fine point spacing used here: this course has a lot of repeated sections, and the goal is to keep the roads at similar altitude as they converge or diverge to avoid ridges in the asphault. Smoothing is done this step, with a 10 nm smoothing length. Note the snap transition was twice this value: we don&#39;t want smoothing to compromise our synchronization of altitude. The resulting file is <i>Crit_processed_v1.gpx</i>.</p>
 
 <p>Some experimentation is needed with these options, but it helps to have an idea of what the requirements are of each specific course. The course shown here was special in taking multiple passes over the same roads (actually paths) and having a complicated altitude profile. This situation is particularly challenging with Magic Roads if you want the transitions to look good.</p>
+
+<h2 id="segment-generation">segment generation</h2>
+
+<p><code>processGPX -stripSegments -autoSegments 100 0.5 -segments 1500,2000,&quot;bonus segment&quot; input.gpx -out output.gpx</code></p>
+
+<dl>
+
+<dt id="stripSegments1"><b>-stripSegments</b></dt>
+<dd>
+
+<p>If the input file has segments already defined, this will ignore those.</p>
+
+</dd>
+<dt id="autoSegments-20-0.5"><b>-autoSegments 20 0.5</b></dt>
+<dd>
+
+<p>This tells the code that automatic segments should be generated for climbs gaining at least 20 meters if they average 10% gradient. Shallower climbs need to gain more, steeper climbs don&#39;t need to gain as much. The power assigned to gradient is 0.5, so for example if the gradient is 5% instead of 10%, then since the square root of 5/10 = 0.71, this climb would need to gain at least 28.2 meters instead of 20 meters to be considered as a timed segment.</p>
+
+</dd>
+<dt id="segments-1500-2000-bonus-segment"><b>-segments 1500,2000,&quot;bonus segment&quot;</b></dt>
+<dd>
+
+<p>This adds an additional segment to the route. between 1500 and 2000 meters from the start of the route. This is defined before any automatic segments are generated, so care should be taken that this segment is not overlapping anything which will be considered to be a climb.</p>
+
+</dd>
+</dl>
+
+<p><code>processGPX -stripSegments -autoSegmentMargin 400 -autoSegmentStretch 1 -autoSegments 5 1 input.gpx -out output.gpx</code></p>
+
+<p>This example uses a gradient power of 1, placing a large emphasis on local gradient, but then increases the auto-segment stretch factor from its default to 1. This might be useful if I had a long climb with intermediate descents along the way, and I wanted separate climb segments for each climbing portion rather than the net climb, but I wanted the endpoints of these segments to be on flat road if that was at all possible within the constraints of he margin, which is set to 400 meters.</p>
+
+<dl>
+
+<dt id="autoSegmentMargin-400"><b>-autoSegmentMargin 400</b></dt>
+<dd>
+
+<p>The minimum spacing between auto-segments is set to 400 meters. This will also be applied to the spacing between auto-segments and the start or finish banner.</p>
+
+</dd>
+<dt id="autoSegmentStretch-1"><b>-autoSegmentStretch 1</b></dt>
+<dd>
+
+<p>Be willing to increase auto-segment lengths up to their original length in order to either reach a flat portion for the start or a flat portion for the finish,</p>
+
+</dd>
+<dt id="autoSegments-5-1"><b>-autoSegments 5 1</b></dt>
+<dd>
+
+<p>The climb threshold is set to a relatively low value of 5 meters, meaning I want to pick up even small steps in the larger climb, and the gradient factor is set to 1, putting an emphasis on isolating individual climbing portions.</p>
+
+</dd>
+</dl>
 
 <h2 id="adding-time-to-an-activity">adding time to an activity</h2>
 
@@ -1072,6 +1227,18 @@
 <dd>
 
 <p>This isn&#39;t the fault of this code: complain to RGT.</p>
+
+</dd>
+<dt id="segment-limitations"><b>segment limitations</b></dt>
+<dd>
+
+<p>RGT has restrictions on how close segments can be to each other, or to the start or finish of a route. Officially this margin is 400 meters, but it allows for smaller margins than this. The exact limit is uncertain so some experimentation is needed. With automatic segment generation the -autoSegmentMargin option can be used, for example -autoSegmentMargin 400 would adhere to the official RGT guideline.</p>
+
+</dd>
+<dt id="snapping-and-segments"><b>snapping and segments</b></dt>
+<dd>
+
+<p>If segments are defined before snapping, the code will try to assign the appropriate segment to each snapped point, but this is imperfect. It is better to define segments after snapping points.</p>
 
 </dd>
 </dl>
