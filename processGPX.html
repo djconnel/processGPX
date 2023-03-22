@@ -47,7 +47,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.39</p>
+<p>0.40</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -202,7 +202,19 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="autoSegmentMargin-meters"><b>autoSegmentMargin</b> &lt;meters&gt;</dt>
 <dd>
 
-<p>A minimum buffer between auto-generated segments and either the start or finish banners, or other auto-segments.</p>
+<p>A minimum buffer between auto-generated segments. The default is 400 meters, based on experiments with creating magic roads with different gaps.</p>
+
+</dd>
+<dt id="autoSegmentFinishMargin-meters"><b>autoSegmentFinishMargin</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>A minimum buffer between an auto-generated segment and the finish banner. This defaults to 50 meters to allow room for riders to see a finish banner after passing the segment banner.</p>
+
+</dd>
+<dt id="autoSegmentStartMargin-meters"><b>autoSegmentStartMargin</b> &lt;meters&gt;</dt>
+<dd>
+
+<p>A minimum buffer between the start banner and the first segment. This defaults to 340 meters, based on experiments. Note this results in a 400 meter distance from the start of the GPX file.</p>
 
 </dd>
 <dt id="autoSegmentPower-number"><b>autoSegmentPower</b> &lt;number&gt;</dt>
@@ -214,7 +226,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="autoSegmentStretch-relative-amount"><b>autoSegmentStretch</b> &lt;relative amount&gt;</dt>
 <dd>
 
-<p>The amount of distance increase one is willing to extend an auto-segment to reach a true peak or valley. This is applied to each side, so a value of 0.05 will result in up to a 10% increase in the total length of an automatically generated segment. The increase will not be applied if it would result in the loss of mandated margin (by -autoSegmentMargin) to an adjacent segment or to a start or finish banner.</p>
+<p>The amount of distance increase one is willing to extend an auto-segment to reach a true peak or valley. This is applied to each side, so a value of 0.05 will result in up to a 10% increase in the total length of an automatically generated segment. The increase will not be applied if it would result in the loss of mandated margin (by -autoSegmentMargin) to an adjacent segment, or too close to the start (-autoSegmentStartMargin) or finish (-autoSegmentFinishMargin)</p>
 
 </dd>
 <dt id="autoSmoothZ-scale-factor"><b>autoSmoothZ</b> &lt;scale factor&gt;</dt>
@@ -829,7 +841,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>3. You can define your own segments using the -segments option. This is followed by a comma-delimited list of a start position, a finish position, and a name, followed optionally by more of these three items. So it can be followed by a number of comma-delimited elements divisible by three. For each triplet, a segment is formed between the first coordinate and the second coordinate and assigned the name of the third element (if non-blank). For example, -segment 1000,2000,&quot;timed km&quot; creates a segment from 1000 meters into the route, up to 2000 meters into the route, and named the segment &quot;timed km&quot;. These coordinates are of course affected by other operations performed by this code so order of these operations is important. The segments are evaluated after most operations such as smoothing, but before cropping, so the coordinates do not take into account potential crops.</p>
 
-<p>4. A more powerful way to create segments is to do so automatically. This uses an algorithm which examines the route profile and identifies what it considers to be &quot;climbs&quot;. The default is for no automatic segments to be generated, so to request this, the -autoSegments option is used. It&#39;s followed by two numbers. The first is the threshold for a climb: small bumps in the road are not assigned for timing. The number is vertical meters at a reference 10% grade. The second number is a power which describes how much weight is put on steepness for defining a climb. A typical range is 0.3 to 1.0, with 0.5 to 0.7 working fairly well in many cases. A lower number will tend to create longer segments rather than focusing on steep sections, and will tend to combine sections which are separated by plateaus or brief descents. A larger number will tent to split these segmented climbs into individual climbs, so for example if a road is 10% for 1 km, then flat for 500 meters, then 8% for the next km, that might be considered one climb or two. Additionally automatic segments need to be separated from each other and from the start or finish banners. The amount of this separation is specified with the -autoSegmentMargin option (default is 100). If climbs would be too close to each other, the lower rated one is ignored, as are climbs which would be too close to the start and/or finish. So if you&#39;re designing a route for a hillclimbing competition, unless the finish is sufficiently past the start of the climb and the start is suffiently separate from the start of the climb, there will not be a segment defined for the climb.</p>
+<p>4. A more powerful way to create segments is to do so automatically. This uses an algorithm which examines the route profile and identifies what it considers to be &quot;climbs&quot;. The default is for no automatic segments to be generated, so to request this, the -autoSegments option is used. It&#39;s followed by two numbers. The first is the threshold for a climb: small bumps in the road are not assigned for timing. The number is vertical meters at a reference 10% grade. The second number is a power which describes how much weight is put on steepness for defining a climb. A typical range is 0.3 to 1.0, with 0.5 to 0.7 working fairly well in many cases. A lower number will tend to create longer segments rather than focusing on steep sections, and will tend to combine sections which are separated by plateaus or brief descents. A larger number will tent to split these segmented climbs into individual climbs, so for example if a road is 10% for 1 km, then flat for 500 meters, then 8% for the next km, that might be considered one climb or two. Additionally automatic segments need to be separated from each other. The amount of this separation is specified with the -autoSegmentMargin option (default is 400). There&#39;s also minimum spacings to the start (-autoSegmentStartMargin) and finish (-autoSegmentFinishMargin) lines. If climbs would be too close to each other, the lower rated one is ignored, as are climbs which would be too close to the start and/or finish. So if you&#39;re designing a route for a hillclimbing competition, unless the finish is sufficiently past the start of the climb and the start is suffiently separate from the start of the climb, there will not be a segment defined for the climb.</p>
 
 </ul>
 
@@ -1113,16 +1125,16 @@ Pod::Usage   : for the -help option</code></pre>
 </dd>
 </dl>
 
-<p><code>processGPX -stripSegments -autoSegmentMargin 400 -autoSegmentStretch 1 -autoSegments 5 1 input.gpx -out output.gpx</code></p>
+<p><code>processGPX -stripSegments -autoSegmentMargin 1000-autoSegmentStretch 1 -autoSegments 5 1 input.gpx -out output.gpx</code></p>
 
 <p>This example uses a gradient power of 1, placing a large emphasis on local gradient, but then increases the auto-segment stretch factor from its default to 1. This might be useful if I had a long climb with intermediate descents along the way, and I wanted separate climb segments for each climbing portion rather than the net climb, but I wanted the endpoints of these segments to be on flat road if that was at all possible within the constraints of he margin, which is set to 400 meters.</p>
 
 <dl>
 
-<dt id="autoSegmentMargin-400"><b>-autoSegmentMargin 400</b></dt>
+<dt id="autoSegmentMargin-1000"><b>-autoSegmentMargin 1000</b></dt>
 <dd>
 
-<p>The minimum spacing between auto-segments is set to 400 meters. This will also be applied to the spacing between auto-segments and the start or finish banner.</p>
+<p>The minimum spacing between auto-segments is set to 1000 meters. The minimum spacing to the start line would be set with -autoSegmentStartMargin, and for the finish, -autoSegmentFinishMargin.</p>
 
 </dd>
 <dt id="autoSegmentStretch-1"><b>-autoSegmentStretch 1</b></dt>
@@ -1227,12 +1239,6 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>This isn&#39;t the fault of this code: complain to RGT.</p>
-
-</dd>
-<dt id="segment-limitations"><b>segment limitations</b></dt>
-<dd>
-
-<p>RGT has restrictions on how close segments can be to each other, or to the start or finish of a route. Officially this margin is 400 meters, but it allows for smaller margins than this. The exact limit is uncertain so some experimentation is needed. With automatic segment generation the -autoSegmentMargin option can be used, for example -autoSegmentMargin 400 would adhere to the official RGT guideline.</p>
 
 </dd>
 <dt id="snapping-and-segments"><b>snapping and segments</b></dt>
