@@ -23,9 +23,10 @@
     <ul>
       <li><a href="#auto-option">-auto option</a></li>
       <li><a href="#criterium-course">criterium course</a></li>
+      <li><a href="#out-and-back-course">out-and-back course</a></li>
+      <li><a href="#out-and-back-circuit">out-and-back circuit</a></li>
       <li><a href="#road-course-w-out-and-back">road course w/ out-and-back</a></li>
       <li><a href="#Multi-step-processing:-selective-smoothing">Multi-step processing: selective smoothing</a></li>
-      <li><a href="#Multi-step-processing:-snapping-after-spacing">Multi-step processing: snapping after spacing</a></li>
       <li><a href="#segment-generation">segment generation</a></li>
       <li><a href="#adding-time-to-an-activity">adding time to an activity</a></li>
       <li><a href="#adding-gradient-signs">adding gradient signs</a></li>
@@ -43,21 +44,21 @@
 
 <h1 id="SYNOPSIS">SYNOPSIS</h1>
 
-<p>smoothGPX [options] &lt;input files&gt;</p>
+<p><b><code>processGPX</code></b> [options] &lt;input files&gt;</p>
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.40</p>
+<p>0.41</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
-<p>smoothGPX is a series of algorithms to improve and create GPX files, in particular for cycling emulation platforms like RGT Cycling.</p>
+<p>processGPX is a series of algorithms to improve and create GPX files, in particular for cycling emulation platforms like RGT Cycling.</p>
 
 <p>At the time of this writing, RGT Cycling has a &quot;Magic Roads&quot; functionality whereby a GPX file can be submitted for conversion into a virtual envirment. The GPX file can be initially generate by on-line mapping tools, among which one excellent option is Strava Route Editor, which exports GPX. However, these tools tend to produce GPX files with too low resolution in position, and small errors in altitude, so that corners are not sufficiently round, and the gradient between points can have anomalously large magnitude. Additionally, RGT requires the route to be specified continuously from start to finish, rather than allowing arbitrary navigation over a network of roads, and so sometimes the same section of road needs to be repeated, either in the same or in the opposite direction. Also, RGT at present allows cyclists to use the full width of the roadway, even if there is an out-and-back section where there may be oncoming riders. So it is useful to allow the generation of out-and-back courses where the return route is shifted to the right or too the left, to avoid the possibility of virtual collisions.</p>
 
 <p>These are just some examples of the sort of processing which can be done to improve the quality and functionality of Magic Roads in RGT, and presumibly other cycling emulators as well. There exist online tools such as GPX Magic, which is excellent, but requires extensive user interaction, and a command-line tool able to process an entire file at once has benefit.</p>
 
-<p>The file takes GPX files on the command line, and generates a file with a suffix &quot;_processed&quot; for each, unless the &quot;-out&quot; option is used, in which case that is used as the output (this works for only one input file). So for example, if I type:</p>
+<p>The file takes GPX files on the command line, and generates a file with a suffix &quot;_processed&quot; for each, unless the <code>-out</code> option is used, in which case that is used as the output (this works for only one input file). So for example, if I type:</p>
 
 <p><code>processGPX myFavoriteRoute.gpx</code></p>
 
@@ -67,13 +68,17 @@
 
 <p>This file will be essentially equivalent to the input file, in the absence of any comment line options, although if there are any &quot;zig-zags&quot; identified, those will be removed. The file will also be checked for &quot;loops&quot;, where the direction spins around within 100 meters, which might be from a poorly placed control point with mapping software.</p>
 
-<p>If an alternate filename were desired for the output, that could be specified with the &quot;-out&quot; option:</p>
+<p>If an alternate filename were desired for the output, that could be specified with the <code>-out</code> option:</p>
 
 <p><code>processGPX myFavoriteRoute.gpx -out MyFavoriteRouteCopy.gpx</code></p>
 
 <p>where the order of command line options does not matter, except that the same option listed more than once will result in parameters specified last being used.</p>
 
-<p>The program will calculate a &quot;altitude quality score&quot; of both the original GPX file, and of the result of processing, which is based on how much the grade changes point-to-point -- it is basically the ratio of the root-mean-squared change in gradient to the root-mean-squared average gradient for each point in the course. The goal is to only have abrupt gradient changes where they actually exist in the real-life course. A score of 1 on this metric is poor: it means there are many abrupt gradient changes. A score of 0.1 is smooth: gradients typically change around 10% from segment-to-segment. This quality score can provide guidance to if altitude smoothing and point density are sufficient. This doesn&#39;t address the issue of whether the &quot;top-down&quot; view of the course is optimally smoothed. For this careful examination of the resulting GPX on GPX Visualizer, or simular, with &quot;aerial view&quot; is a good idea.</p>
+<p>Typically GPX file contain a single &quot;track&quot;, each of which contains multiple &quot;segments&quot;, each of which contains multiple connected &quot;points&quot;. RGT assumes segments are connected as well as points within the segments. However, GPX file may also contain multiple tracks. processGPX is set up to process one track at a time within a GPX file. By default, this is the first track, or track #1 counting 1, 2, 3 ... If you want to specify a track other than 1, then use either the <code>-track</code> option (followed by a number 1, 2, 3...), or put the number after a &quot;:&quot; at the end of a filename. So for example, if I wanted track #2 in a file file.gpx, I could specify either &quot;-track 2&quot;, or &quot;file.gpx:2&quot;. For the -join option only the filename suffix works, so &quot;-join file.gpx:2&quot;.</p>
+
+<p>The program will calculate a &quot;altitude quality score&quot; of both the original GPX file, and of the result of processing, which is based on how much the grade changes point-to-point -- it is basically the ratio of the root-mean-squared change in gradient to the root-mean-squared average gradient for each point in the course. The goal is to only have abrupt gradient changes where they actually exist in the real-life course. A score of 1 on this metric is poor: it means there are many abrupt gradient changes. A score of 0.1 is smooth: gradients typically change around 10% from segment-to-segment. This quality score can provide guidance to if altitude smoothing and point density are sufficient. This doesn&#39;t address the issue of whether the &quot;top-down&quot; view of the course is optimally smoothed. For this careful examination of the resulting GPX on GPX Visualizer, or similar, with &quot;aerial view&quot; is a good idea.</p>
+
+<p>It also reports the length of the course, calculated treating the earth as a sphere of a given radius. The calculation in RGT may differ slightly, so distances may differ by a few meters.</p>
 
 <p>This program has been enhanced with the ability to process &quot;named segments&quot;, which RGT interprets as sections of a course which should be separately timed. A typical application of these is for climbs, and the program allows the auto-generation of segments using the detection of distinct, non-overlapping climbs in the route.</p>
 
@@ -92,30 +97,33 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>The program is generally invoked:</p>
 
-<p>processGPX [option] &lt;inputfilename&gt; ...</p>
+<p><code>processGPX</code> [options] &lt;inputfilename&gt; ...</p>
 
 <p>where multiple input file names may be specified, and zero or more options may be specified.</p>
 
 <p>Options are case-insensitive and come in three varieties:</p>
 
-<ul>
+<dl>
 
-<li><p><b>flags</b>: specifying the option by itself invokes the option. For example, -nosave suppresses saving of the resulting GPX in an output file.</p>
+<dt id="flags:-specifying-the-option-by-itself-invokes-the-option.-For-example--nosave-suppresses-saving-of-the-resulting-GPX-in-an-output-file"><b>flags</b>: specifying the option by itself invokes the option. For example, <code>-nosave</code> suppresses saving of the resulting GPX in an output file.</dt>
+<dd>
 
-</li>
-<li><p><b>values</b>: the option specification is followed by a value. This may simultaneously invoke an option. For example, &quot;-spacing 10&quot; sets the spacing for point interpolation to 10 meters, and additionally turns on point interpolation.</p>
+</dd>
+<dt id="values:-the-option-specification-is-followed-by-a-value.-This-may-simultaneously-invoke-an-option.-For-example--spacing-10-sets-the-spacing-for-point-interpolation-to-10-meters-and-additionally-turns-on-point-interpolation"><b>values</b>: the option specification is followed by a value. This may simultaneously invoke an option. For example, <code>-spacing 10</code> sets the spacing for point interpolation to 10 meters, and additionally turns on point interpolation.</dt>
+<dd>
 
-</li>
-<li><p><b>lists</b>: the &quot;-fixed&quot; option is followed by a list of one or more numbers. This will be explained in the section for that option.</p>
+</dd>
+<dt id="lists:-Some-options-allow-for-multiple-values-for-example--flatten-or--autoSegments.-See-details-in-the-description-of-the-specific-option"><b>lists</b>: Some options allow for multiple values, for example <code>-flatten</code> or <code>-autoSegments</code>. See details in the description of the specific option.</dt>
+<dd>
 
-</li>
-</ul>
+</dd>
+</dl>
 
 <p>The options are the following:</p>
 
 <dl>
 
-<dt id="addDirection"><b>addDirection</b></dt>
+<dt id="addDirection"><b><code>-addDirection</code></b></dt>
 <dd>
 
 <p>This option adds a &quot;direction&quot; field relative to east (in degrees) to the GPX file.</p>
@@ -127,213 +135,267 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Direction is calculated for each point as the average of the directions ahead and behind. The direction of the first or last points in a point-to-point course are calculated in only one direction. Directions for loop courses are calculated assuming the loop. The direction never changes by more than +/- 180 degrees from one point to the next, so the direction has no limits: it can be positive, negative, and outside the range from -360 to +360 degrees. For example, if a route started east (0) then lapped around counterclockwise 10 times, the final direction would be approximately 3600 degrees.</p>
 
 </dd>
-<dt id="addCurvature"><b>addCurvature</b></dt>
+<dt id="addCurvature"><b><code>-addCurvature</code></b></dt>
 <dd>
 
 <p>This option adds a &quot;curvature&quot; field (in meters) to the GPX file. Curvature is calculated as the ratio of the rate of change of angle with distance. Note for a unit circle (radius = 1) the rate of change of angle (in radians) with position (along the perimeter) is 1. In general this is the reciprical of the circle radius.</p>
 
 </dd>
-<dt id="addDistance"><b>addDistance</b></dt>
+<dt id="addDistance"><b><code>-addDistance</code></b></dt>
 <dd>
 
 <p>This option adds a &quot;distance&quot; field (in meters) to the GPX file. Distance is calculated after all other operations, for example cropping, extending, and shifting. At present it&#39;s the horizontal distance, so scaling a vertical cliff would count as zero.</p>
 
 </dd>
-<dt id="addGradient"><b>addGradient</b></dt>
+<dt id="addGradient"><b><code>-addGradient</code></b></dt>
 <dd>
 
 <p>This option adds a forward &quot;gradient&quot; field, which is calculated for each point as the ratio of the altitude change to the horizontal distance to the next point. With RGT, this is useful for checking whether altitude smoothing is sufficient.</p>
 
 </dd>
-<dt id="addGradientSigns"><b>addGradientSigns</b></dt>
+<dt id="addGradientSigns"><b><code>-addGradientSigns</code></b></dt>
 <dd>
 
 <p>This flag is an i&lt;experimental&gt; option to calculate regions of exceptional gradient and place &quot;gradient signs&quot; in the GPX as waypoints. RGT Cycling at present ignores waypoints, but perhaps support will be provided in the future, in which case this feature will need to be tuned to the appropriate specification.</p>
 
 </dd>
-<dt id="addSigma"><b>addSigma</b></dt>
+<dt id="addSigma"><b><code>-addSigma</code></b></dt>
 <dd>
 
-<p>This writes the autosmoothing &quot;sigma&quot; to the GPX file as a field, but only if &quot;-autosmoothingZ&quot; is positive. It is useful for tuning the autosmoothing scale length.</p>
+<p>This writes the autosmoothing &quot;sigma&quot; to the GPX file as a field, but only if <code>-autosmoothingZ</code> is positive. It is useful for tuning the autosmoothing scale length.</p>
 
 </dd>
-<dt id="anchorSF"><b>anchorSF</b></dt>
+<dt id="anchorSF"><b><code>-anchorSF</code></b></dt>
 <dd>
 
 <p>For point-to-point routes, this specifies that the start and finish points should be anchored. Smoothing would otherwise cause these points to shift somewhat.</p>
 
 </dd>
-<dt id="append-meters"><b>append</b> &lt;meters&gt;</dt>
+<dt id="append-meters"><b><code>-append</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>A distance in meters which should be added to point-to-point courses. In RGT, the finish line is typically places 140 meters prior to the end of a point-to-point course, so if for example you design a course to be exactly 10 miles, (a typical UK time trial distance), then to put the finish line at the end of those 10 miles, the option &quot;-append 140&quot; would add 140 meters. This buffer is needed by RGT because riders group along the road-side after crossing the finish. Note the start line would also need to be extended, via -prepend, by 60 meters, in this case.</p>
+<p>A distance in meters which should be added to point-to-point courses. In RGT, the finish line is typically places 140 meters prior to the end of a point-to-point course, so if for example you design a course to be exactly 10 miles, (a typical UK time trial distance), then to put the finish line at the end of those 10 miles, the option &quot;-append 140&quot; would add 140 meters. This buffer is needed by RGT because riders group along the road-side after crossing the finish. Note the start line would also need to be extended, via <code>-prepend</code>, by 60 meters, in this case.</p>
 
 <p>Extended points will be set to the altitude of the final point.</p>
 
-<p>Since RGT tends to create loop courses when start and finish points are close, the code may put a bend in the road it creates with this command, if both &quot;-append&quot; and &quot;-prepend&quot; are specified (perhaps via &quot;-extend&quot;).</p>
+<p>Since RGT tends to create loop courses when start and finish points are close, the code may put a bend in the road it creates with this command, if both <code>-append</code> and <code>-prepend</code> are specified (perhaps via <code>-extend</code>).</p>
 
 <p>Negative values crop the course by the negative distance. So &quot;-append -100&quot; will move the finish line back 100 meters. This is useful for preventing RGT from connecting the finish and start points, which has a 100 meter threshold, as this is written.</p>
 
 </dd>
-<dt id="author-string"><b>author</b> &lt;string&gt;</dt>
+<dt id="author-string"><b><code>-author</code></b> &lt;string&gt;</dt>
 <dd>
 
 <p>Provide the author of the GPX, as a string. The default will preserve the author of the source GPX.</p>
 
 </dd>
-<dt id="auto"><b>auto</b></dt>
+<dt id="auto"><b><code>-auto</code></b></dt>
 <dd>
 
-<p>This option automatically turns on options based on &quot;best practices&quot;. It will not turn anything off, so can be used in conjunction with other options. Altitude auto-smoothing is used if no value for -zsmooth is provided.</p>
+<p>This option automatically turns on options based on &quot;best practices&quot;. It will not turn anything off, so can be used in conjunction with other options. Altitude auto-smoothing is used if no value for <code>-zsmooth</code> is provided.</p>
 
 </dd>
-<dt id="autoSegments-threshold-optional-power"><b>autoSegments</b> &lt;threshold&gt; &lt;optional power&gt;</dt>
+<dt id="autoSegments-threshold-optional-power"><b><code>-autoSegments</code></b> &lt;threshold&gt; &lt;optional power&gt;</dt>
 <dd>
 
 <p>Whether to automatically generate segments for the climb. The threshold is the vertical meters of a 10% gradient climb, where climbs at alternate gradients are adjusted by a term (gradient / 10%)^power, where the default power is 0.5. The names can be set with &quot;autoSegmentNames&quot;, with a generic default.</p>
 
 </dd>
-<dt id="autoSegmentNames-list-of-names"><b>autoSegmentNames</b> &lt;list of names&gt;</dt>
+<dt id="autoSegmentFinishMargin-meters"><b><code>-autoSegmentFinishMargin</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>A list of names for automatically generated segments, separated by commas or semicolons. The default is &quot;climb&quot; followed by a number. If there are more segments than names, the default will be used for the additional climbs.</p>
+<p>A minimum buffer between an auto-generated segment and the finish banner. This defaults to 20 meters to allow room for riders to see a finish banner after passing the segment banner.</p>
 
 </dd>
-<dt id="autoSegmentMargin-meters"><b>autoSegmentMargin</b> &lt;meters&gt;</dt>
+<dt id="autoSegmentMargin-meters"><b><code>-autoSegmentMargin</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>A minimum buffer between auto-generated segments. The default is 400 meters, based on experiments with creating magic roads with different gaps.</p>
 
 </dd>
-<dt id="autoSegmentFinishMargin-meters"><b>autoSegmentFinishMargin</b> &lt;meters&gt;</dt>
+<dt id="autoSegmentNames-list-of-names"><b><code>-autoSegmentNames</code></b> &lt;list of names&gt;</dt>
 <dd>
 
-<p>A minimum buffer between an auto-generated segment and the finish banner. This defaults to 50 meters to allow room for riders to see a finish banner after passing the segment banner.</p>
+<p>A list of names for automatically generated segments, separated by commas or semicolons. The default is &quot;climb&quot; followed by a number. If there are more segments than names, the default will be used for the additional climbs.</p>
 
 </dd>
-<dt id="autoSegmentStartMargin-meters"><b>autoSegmentStartMargin</b> &lt;meters&gt;</dt>
+<dt id="autoSegmentPower-number"><b><code>-autoSegmentPower</code></b> &lt;number&gt;</dt>
+<dd>
+
+<p>If the gradient power for autosegments is not provided in the -autoSegments option as a second value, then use this value. The default is 0.5. Decent numbers are from 0.25 to 3, depending on how much focus you want to put on steepness in defining and rating climbs.</p>
+
+</dd>
+<dt id="autoSegmentStartMargin-meters"><b><code>-autoSegmentStartMargin</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>A minimum buffer between the start banner and the first segment. This defaults to 340 meters, based on experiments. Note this results in a 400 meter distance from the start of the GPX file.</p>
 
 </dd>
-<dt id="autoSegmentPower-number"><b>autoSegmentPower</b> &lt;number&gt;</dt>
-<dd>
-
-<p>If the gradient power for autosegments is not provided in the -autoSegments option as a second value, then use this value. The default is 0.5. Decent numbers are from 0.25 to 2, depending on how much focus you want to put on steepness in defining and rating climbs.</p>
-
-</dd>
-<dt id="autoSegmentStretch-relative-amount"><b>autoSegmentStretch</b> &lt;relative amount&gt;</dt>
+<dt id="autoSegmentStretch-relative-amount"><b><code>-autoSegmentStretch</code></b> &lt;relative amount&gt;</dt>
 <dd>
 
 <p>The amount of distance increase one is willing to extend an auto-segment to reach a true peak or valley. This is applied to each side, so a value of 0.05 will result in up to a 10% increase in the total length of an automatically generated segment. The increase will not be applied if it would result in the loss of mandated margin (by -autoSegmentMargin) to an adjacent segment, or too close to the start (-autoSegmentStartMargin) or finish (-autoSegmentFinishMargin)</p>
 
 </dd>
-<dt id="autoSmoothZ-scale-factor"><b>autoSmoothZ</b> &lt;scale factor&gt;</dt>
+<dt id="autoSmoothZ-scale-factor"><b><code>-autoSmoothZ</code></b> &lt;scale factor&gt;</dt>
 <dd>
 
-<p>This invokes an auto-smoothing algorithm whereby more altitude smoothing is applied where gradient changes rapidly point-to-point, less altitude smoothing where gradient changes slowly. This is done after the conventional position and altitude smoothing specified with &quot;-smooth&quot; and/or &quot;-smoothz&quot;. So it allows the use of less of these fixed smoothings, and apply an additional smoothing where it is most needed. An application of this would be a course where the altitude is low quality on a subset of the total course, and one thus wants more averaging averaging focused on that subset.</p>
+<p>This invokes an auto-smoothing algorithm whereby more altitude smoothing is applied where gradient changes rapidly point-to-point, less altitude smoothing where gradient changes slowly. This is done after the conventional position and altitude smoothing specified with <code>-smooth</code> and/or <code>-smoothz</code>. So it allows the use of less of these fixed smoothings, and apply an additional smoothing where it is most needed. An application of this would be a course where the altitude is low quality on a subset of the total course, and one thus wants more averaging averaging focused on that subset.</p>
 
 <p>The scale factor controls how much smoothing is applied. It is roughly calibrated so &quot;1&quot; works well, but you can try reducing that to 0.5, for example, and see if the results are still satisfactory, or increasing it to 2 if the gradient is still too spiky.</p>
 
-<p>Consider using &quot;-sigmaz&quot; instead unless you think there&#39;s a reason the quality of the data is worse in some areas than in others: that applies uniform smoothing over the whole course. Or the two can be combined.</p>
+<p>Consider using <code>-sigmaz</code> instead unless you think there&#39;s a reason the quality of the data is worse in some areas than in others: that applies uniform smoothing over the whole course. Or the two can be combined.</p>
 
 </dd>
-<dt id="autoSpacing"><b>autoSpacing</b></dt>
+<dt id="autoSpacing"><b><code>-autoSpacing</code></b></dt>
 <dd>
 
-<p>Specify that points will be interpolated based on an algorithm. The key parameter is&quot;smoothAngle&quot;, which determines where points are placed. This only makes sense if the a smoothing distance or a minRadius is also provided, via the &quot;-smooth&quot; or &quot;-minRadius&quot; options. =item <b>closed</b></p>
+<p>Specify that points will be interpolated based on an algorithm. The key parameter is&quot;smoothAngle&quot;, which determines where points are placed. This only makes sense if the a smoothing distance or a minRadius is also provided, via the <code>-smooth</code> or <code>-minRadius</code> options.</p>
 
-<p>Synonym for &quot;-copyPoint&quot;</p>
+<p>This option is highly recommended (either explicitly or implicitly via -auto or <code>-outAndBack</code>): it greatly improves the smoothness of corners.</p>
 
 </dd>
-<dt id="circle-meters-1-or-more"><b>circle</b> &lt;meters&gt; (1 or more)</dt>
+<dt id="autoSplits-number"><b><code>-autoSplits</code></b> &lt;number&gt;</dt>
 <dd>
 
-<p>Provide segments to be fit with circles, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via -circleStart and/or -circleEnd. IF both methods are used, these will be processed first. So for example, -circle 400 500 100 200 will fit circles for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Not ethe further points are listed first so the fit of a circle to these points does not affect the distance to the nearer points.</p>
+<p>Number of files into which the original should be automatically splot. So 1 here will do nothing. 2 would divide the original into two equal length routes. The routes will overlap by 200 meters, which is what RGT uses for the start (60 meters) and finish (140 meters) line.</p>
+
+<p>These splits are in addition to splits generated by the <code>-splitAt</code> option. If you want to precisely place the split points, then the -splitAt option is better.</p>
+
+<p>If you specify an output file and do not specify a specific split number with the <code>-splitNumber</code> option, then the output files will have a suffix of _split followed by a split number (1, 2, 3 ...).</p>
 
 </dd>
-<dt id="circleEnd-meters-1-or-more"><b>circleEnd</b> &lt;meters&gt; (1 or more)</dt>
+<dt id="autoStraighten-max-deviation-min-length"><b><code>-autoStraighten</code></b> &lt;max deviation&gt; &lt;min length&gt;</dt>
+<dd>
+
+<p>This specifies the auto-straightening algorithm should be run. It looks for sections of road, at least the minimum length long, where the road deviates laterally no more than the listed amount, each in meters. This is done before any other smoothing.</p>
+
+<p>This may have mixed results. If a minimum deviation is too large, you&#39;ll potentially lose details of the route. 2 meter is a decent number. 4 meters is relatively aggressive.</p>
+
+<p>This is in particular designed for routes generated from bike computer data, where rider position will move back and forth across the road, even for straight sections of road. However, if the road doesn&#39;t have long straight sections, then this will likely only decrease accuracy.</p>
+
+<p>it should likely be used in conjunction with some smoothing, for example by additionally providing the <code>-auto</code> option.</p>
+
+</dd>
+<dt id="autoStraightenDeviation-meters"><b><code>-autoStraightenDeviation</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is an alternative approach to specifying the maximum deviation for auto-straightening. See <code>-autoStraighten</code> for details. The default is 0 (do not do auto-straightening). Good options are 1 to 4 meters, from less aggressive to more aggressive.</p>
+
+</dd>
+<dt id="autoStraightenLength-meters"><b><code>-autoStraightenLength</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>The minimum length of a road section to be auto-straightened, in meters. This is an alternative to providing a second argument to an <code>-autoStraighten</code> option. It can be used in conjunction with <code>-autoStraightenDeviation</code> to request auto-straightening.</p>
+
+</dd>
+<dt id="circle-meters-1-or-more"><b><code>-circle</code></b> &lt;meters&gt; (1 or more)</dt>
+<dd>
+
+<p>Provide segments to be fit with circles, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via <code>-circleStart</code> and/or <code>-circleEnd</code>. IF both methods are used, these will be processed first. So for example, <code>-circle</code> 400 500 100 200 will fit circles for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Not the further points are listed first so the fit of a circle to these points does not affect the distance to the nearer points.</p>
+
+</dd>
+<dt id="circleEnd-meters-1-or-more"><b><code>-circleEnd</code></b> &lt;meters&gt; (1 or more)</dt>
 <dd>
 
 <p>Set one or more distances for circle fitting.</p>
 
-<p>See -circleStart</p>
+<p>See <code>-circleStart</code></p>
 
 </dd>
-<dt id="circleStart-meters-1-or-more"><b>circleStart</b> &lt;meters&gt; (1 or more)</dt>
+<dt id="circleStart-meters-1-or-more"><b><code>-circleStart</code></b> &lt;meters&gt; (1 or more)</dt>
 <dd>
 
 <p>Set one or more start distances for circle fitting.</p>
 
-<p>This is an option which should be used with care. For the special case where a route includes circular sections, for example laps of the San Francisco Polo Fields, you can move points to a circle which passes thru the end-points of an interval, and a point approximately mid-way between the end-points. This should be followed up with a bit of smoothing over the interval to clean up the transitions to and from the circular arc. Be careful in defining the endpoints so the direction doesn&#39;t change suddenly -- for example, you don&#39;t want the circular arc to overshoot, requiring the direction to correct in the opposite direction. Consider only fitting the circlar arc to a center portion of the curve.</p>
+<p>This is an option which should be used with care. For the special case where a route includes circular sections, for example laps of the San Francisco Polo Fields, you can move points to a circle which passes thru the end-points of an interval, and a point approximately mid-way between the end-points. This should be followed up with a bit of smoothing over the interval to clean up the transitions to and from the circular arc. Be careful in defining the endpoints so the direction doesn&#39;t change suddenly. For example, you don&#39;t want the circular arc to overshoot, requiring the direction to correct in the opposite direction. Consider only fitting the circular arc to a center portion of the curve.</p>
 
-<p>The circular arc is fit between points starting at -circleStart and ending at -circleEnd from the start. If the -isLoop option is used, the start may come after the end in which case it wraps around. The circular arc is generated after point interpolation but before smoothing. If you want to generate multiple circular arcs (for example, the Polo fields have circular arcs at each end, separated by straight segments) then you need to run processGPX more than once. Note the circular arc will slightly change distances so you may want to do the corrections starting further from the start, progressing closer, for more stability in these distances.</p>
+<p>The circular arc is fit between points starting at <code>-circleStart</code> and ending at <code>-circleEnd</code> from the start. If the <code>-isLoop</code> option is used, the start may come after the end in which case it wraps around. The circular arc is generated after point interpolation but before smoothing.</p>
 
-<p>If multiple values are listed, then multiple sections will be replaced. Distances will be updated after each circular segment replacement. So if you want to do multiple circular replacements, either list them from further to closer relative to the start to avoid the distances for later fits being affected by earlier fits.</p>
+<p>If you want to generate multiple circular arcs (for example, the Polo fields have circular arcs at each end, separated by straight segments) then specify the same number of values for <code>-circleStart</code> and -circleEnd, for example two values each for an oval like the Polo Fields.</p>
+
+<p>If multiple values are listed, then multiple sections will be replaced. Distances will be updated after each circular segment replacement. So if you want to do multiple circular replacements, list them from further to closer relative to the start to avoid the distances for later fits being affected by earlier fits.</p>
 
 </dd>
-<dt id="copyPoint"><b>copyPoint</b></dt>
+<dt id="closed"><b><code>-closed</code></b></dt>
 <dd>
 
-<p>For &quot;-loop&quot; courses, copy the first point to the end of the list of points, so the circuit is explicitly closed. This assures that RGT Cycling will recognize it as a loop course.</p>
+<p>Alias for <code>-copyPoint</code></p>
 
 </dd>
-<dt id="copyright-string"><b>copyright</b> &lt;string&gt;</dt>
+<dt id="copyPoint"><b><code>-copyPoint</code></b></dt>
+<dd>
+
+<p>For <code>-loop</code> courses, copy the first point to the end of the list of points, so the circuit is explicitly closed. This assures that RGT Cycling will recognize it as a loop course.</p>
+
+</dd>
+<dt id="copyright-string"><b><code>-copyright</code></b> &lt;string&gt;</dt>
 <dd>
 
 <p>If you want to specify a copyright field in the GPX, list it here. The default will preserve the copyright of the source GPX.</p>
 
 </dd>
-<dt id="crop-meters"><b>crop</b> &lt;meters&gt;</dt>
+<dt id="crop-meters"><b><code>-crop</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>This is a short-cut for the --cropMax option</p>
+<p>This is a short-cut for the <code>-cropMax</code> option</p>
 
 </dd>
-<dt id="cropMax-meters"><b>cropMax</b> &lt;meters&gt;</dt>
+<dt id="cropMax-meters"><b><code>-cropMax</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>A point will be interpolated to this distance, if needed, and all points following will be discarded. Distances are calculated after smoothing but before -append or -prepend. It can be useful to design a course beyond the desired length, smooth it, and then crop it, since smoothing can have anomalous effects near the boundaries of the data. This is especially true for a route ending on a section of road previously encountered in the route. Since smoothing is affected by points ahead of and behind the given point, it is good to extend the points sufficiently ahead of and behind the finish so that smoothing has access to similar points both on the final and on preceding passes of that section of road.</p>
+<p>A point will be interpolated to this distance, if needed, and all points following will be discarded. Distances are calculated after smoothing but before <code>-append</code> or <code>-prepend</code>. It can be useful to design a course beyond the desired length, smooth it, and then crop it, since smoothing can have anomalous effects near the boundaries of the data. This is especially true for a route ending on a section of road previously encountered in the route. Since smoothing is affected by points ahead of and behind the given point, it is good to extend the points sufficiently ahead of and behind the finish so that smoothing has access to similar points both on the final and on preceding passes of that section of road.</p>
 
 </dd>
-<dt id="cropMin-meters"><b>cropMin</b> &lt;meters&gt;</dt>
+<dt id="cropMin-meters"><b><code>-cropMin</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Points prior to this will be stripped, and if needed, a point will be interpolated to this position. This shifts the start position of the GPX route. See --cropMax for more discussion.</p>
+<p>Points prior to this will be stripped, and if needed, a point will be interpolated to this position. This shifts the start position of the GPX route. See <code>-cropMax</code> for more discussion.</p>
 
 </dd>
-<dt id="crossingAngle-meters"><b>crossingAngle</b> &lt;meters&gt;</dt>
+<dt id="crossingAngle-degees"><b><code>-crossingAngle</code></b> &lt;degees&gt;</dt>
 <dd>
 
 <p>If set, then this is the minimum degres by which segments need to intercept to be treated as crossings. If intercepting by less than this absolute angle, they are treated as separate. The default is 11.25. This can be increased since the default on twisty out-and-back sections might get marked as crossings otherwise.</p>
 
 </dd>
-<dt id="crossingHeight-meters"><b>crossingHeight</b> &lt;meters&gt;</dt>
+<dt id="crossingHeight-meters"><b><code>-crossingHeight</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>If -fixCrossings is invoked, then the code will attempt to identify crossings and adjust the altitude at them. Typically crossings will be either level (same altitude each direction) or at some minimum height. That minumum height defaults to 2 meters, but can be adjusted with this parameter. If the GPX file has an altitude difference between zero and this number, it will force whichever is closer, and transition the altitude to either side, maintaining the same mean.</p>
+<p>If <code>-fixCrossings</code> is invoked, then the code will attempt to identify crossings and adjust the altitude at them. Typically crossings will be either level (same altitude each direction) or at some minimum height. That minumum height defaults to 2 meters, but can be adjusted with this parameter. If the GPX file has an altitude difference between zero and this number, it will force whichever is closer, and transition the altitude to either side, maintaining the same mean.</p>
 
 </dd>
-<dt id="crossingTransition-meters"><b>crossingTransition</b> &lt;meters&gt;</dt>
+<dt id="crossingTransition-meters"><b><code>-crossingTransition</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>If -fixCrossings is invoked, then the altitude at crossings will be flattened over a length rCrossings. This flattening will be transitioned back to the original altitude over a transition length which defaults to 3 times rCrossing. However, this may be too short, resulting in excessive gradients. This option allows explicitly setting this transition length, specified in meters</p>
+<p>If <code>-fixCrossings</code> is invoked, then the altitude at crossings will be flattened over a length rCrossings. This flattening will be transitioned back to the original altitude over a transition length which defaults to 3 times rCrossing. However, this may be too short, resulting in excessive gradients. This option allows explicitly setting this transition length, specified in meters</p>
 
 </dd>
-<dt id="csv"><b>csv</b></dt>
+<dt id="csv"><b><code>-csv</code></b></dt>
 <dd>
 
-<p>Specifies the output will be CSV rather than GPX. This is ignored if an output file is specied with either a &quot;csv&quot; or &quot;gpx&quot; suffix (case insensitive), in which case the suffix is used to determine the format. Other suffixes are ignored.</p>
+<p>Specifies the output will be CSV rather than GPX. This is ignored if an output file is specified with either a &quot;csv&quot; or &quot;gpx&quot; suffix (case insensitive), in which case the suffix is used to determine the format. Other suffixes are ignored.</p>
 
 </dd>
-<dt id="description-string"><b>description</b> &lt;string&gt;</dt>
+<dt id="description-string"><b><code>-description</code></b> &lt;string&gt;</dt>
 <dd>
 
 <p>List a description for the GPX metadata. Since the description will likely contain spaces, remember to enclose the string in &quot;quotes&quot;, or however else your command-line shell delimits spaces.</p>
 
 </dd>
-<dt id="disableElevationFixes-0-or-1-item-disableAdvancedSmoothing-0-or-1-item-enableElevationFixes-item-enableAdvancedSmoothing"><b>disableElevationFixes</b> &lt;0 or 1&gt; =item <b>disableAdvancedSmoothing</b> &lt;0 or 1&gt; =item <b>enableElevationFixes</b> =item <b>enableAdvancedSmoothing</b></dt>
+<dt id="disableElevationFixes-0-or-1"><b><code>-disableElevationFixes</code></b> &lt;0 or 1&gt;</dt>
+<dd>
+
+</dd>
+<dt id="disableAdvancedSmoothing-0-or-1"><b><code>-disableAdvancedSmoothing</code></b> &lt;0 or 1&gt;</dt>
+<dd>
+
+</dd>
+<dt id="enableElevationFixes"><b><code>-enableElevationFixes</code></b></dt>
+<dd>
+
+</dd>
+<dt id="enableAdvancedSmoothing"><b><code>-enableAdvancedSmoothing</code></b></dt>
 <dd>
 
 <p>These options specify whether to explicity turn off or explicitly turn on various RGT post-processing options. These functions are provided by RGT, not this program, which simply places the appropriate tags in the GPX output. Note the &quot;disable&quot; options take a number as an argument: 0 or 1. the &quot;enable&quot; options do not take a number argument. So this provides two ways of specifying whether you want these features. Enabling supercedes disabling.</p>
@@ -341,49 +403,49 @@ Pod::Usage   : for the -help option</code></pre>
 <p>The default is to disable both.</p>
 
 </dd>
-<dt id="extend-meters"><b>extend</b> &lt;meters&gt;</dt>
+<dt id="extend-meters"><b><code>-extend</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>This is a simultaneous specificiation of both -prepend and -append.</p>
+<p>This is a simultaneous specificiation of both <code>-prepend</code> and <code>-append</code>.</p>
 
 </dd>
-<dt id="extendBack-meters"><b>extendBack</b> &lt;meters&gt;</dt>
+<dt id="extendBack-meters"><b><code>-extendBack</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>With RGT point-to-point Magic Roads, the game will reserve the final 140 meters for riders finishing. If you&#39;ve created a route to the top of a climb, for example, you may want the riders to be able to ride all the way to the top, rather than stopping up to 140 meters before the top.</p>
 
-<p>One way to deal with this is to use -append: this will extend the route with a straight line at the finish. This may be enough, but this 140 meters might not be consistent with the real topography, for example the top of a twisting climb.</p>
+<p>One way to deal with this is to use <code>-append</code>: this will extend the route with a straight line at the finish. This may be enough, but this 140 meters might not be consistent with the real topography, for example the top of a twisting climb.</p>
 
-<p>So this is an alternative: it will create a loop of radius specified by -rTurnaround, then start returning on the route until the specified distance, <i>including the loop</i>, is covered. If the loop is large enough, the route may end on the loop itself. If not, the route will end on the return section.</p>
+<p>So this is an alternative: it will create a loop of radius specified by <code>-rTurnaround</code>, then start returning on the route until the specified distance, <i>including the loop</i>, is covered. If the loop is large enough, the route may end on the loop itself. If not, the route will end on the return section.</p>
 
 <p>It works by doing a normal turnaround, then cropping the course. So if there&#39;s not enough course to reach the specified distance, it will turn the route into a full out-and-back. But typically the distance should be in the range of up to 140 meters or so.</p>
 
-<p>This disables -loop or -lap: it&#39;s meaningless with a lap course</p>
+<p>This disables <code>-loop</code> or <code>-lap</code>: it&#39;s meaningless with a lap course</p>
 
 </dd>
-<dt id="finishCircuitDistance-meters"><b>finishCircuitDistance</b> &lt;meters&gt;</dt>
+<dt id="finishCircuitDistance-meters"><b><code>-finishCircuitDistance</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Often races end with finishing circuits after a lead-in. To accomodate this, you can start with a GPX route which includes at least one lap of the finishing circuit, and add finishing loops. This option allows specifying the start position where a lap of the finish circuit begins. The circuit is assumed to extend to the end of the GPX file. The code will add a number of copies of these points specified by the <b>-finishCircuits</b> option.</p>
+<p>Often races end with finishing circuits after a lead-in. To accomodate this, you can start with a GPX route which includes at least one lap of the finishing circuit, and add finishing loops. This option allows specifying the start position where a lap of the finish circuit begins. The circuit is assumed to extend to the end of the GPX file. The code will add a number of copies of these points specified by the <b><code>-finishCircuits</code></b> option.</p>
 
-<p>So if the course goes from A to B, then completes 3 circuits of the loop B-C-D, then find the distance in meters to point B, then specify that distance as -finishCircuitDistance, and specify -finishCircuits 2. This will add two cop`ies of the loop B-C-D to the end of the data.</p>
+<p>So if the course goes from A to B, then completes 3 circuits of the loop B-C-D, then find the distance in meters to point B, then specify that distance as <code>-finishCircuitDistance</code>, and specify <code>-finishCircuits</code> 2. This will add two cop`ies of the loop B-C-D to the end of the data.</p>
 
-<p>If the desired finish of the GPX is not at the same point as the end of the loop, then you&#39;ll need to specify a -cropMax value to remove some of the final circuit.</p>
+<p>If the desired finish of the GPX is not at the same point as the end of the loop, then you&#39;ll need to specify a <code>-cropMax</code> value to remove some of the final circuit.</p>
 
 </dd>
-<dt id="finishCircuits-count"><b>finishCircuits</b> count</dt>
+<dt id="finishCircuits-count"><b><code>-finishCircuits</code></b> &lt;count&gt;</dt>
 <dd>
 
-<p>A finishing circuit starting at the position specified by the <b>-finishCircuitDistance</b> option, in meters, will be appended to the initial data this number of times. A value of 1 here implies adding one copy, which will result in two laps of the circuit.</p>
+<p>A finishing circuit starting at the position specified by the <b><code>-finishCircuitDistance</code></b> option, in meters, will be appended to the initial data this number of times. A value of 1 here implies adding one copy, which will result in two laps of the circuit.</p>
 
 </dd>
-<dt id="fixCrossings"><b>fixCrossings</b></dt>
+<dt id="fixCrossings"><b><code>-fixCrossings</code></b></dt>
 <dd>
 
-<p>If a route contains crossings, for example a true figure 8, then it will flatten the road on either side of the crossing, and create a transition from the flattened profile back to the unaltered profile. The side of the flattening is determined by the &quot;-rCrossing&quot; option. An issue with RGT is that if a sloped road crosses a flat road, for example, on the upward side the sloped road will appear to rise above the surface, while in reality the pavement would be leveled out to allow for the crossing. This creates that leveling.</p>
+<p>If a route contains crossings, for example a true figure 8, then it will flatten the road on either side of the crossing, and create a transition from the flattened profile back to the unaltered profile. The side of the flattening is determined by the <code>-rCrossing</code> option. An issue with RGT is that if a sloped road crosses a flat road, for example, on the upward side the sloped road will appear to rise above the surface, while in reality the pavement would be leveled out to allow for the crossing. This creates that leveling.</p>
 
 </dd>
-<dt id="flatten-start-meters-altitude-meters-end-meters-altitude-meters-transition-meters"><b>flatten</b> &lt;start-meters&gt; &lt;altitude-meters&gt; &lt;end-meters&gt; &lt;altitude-meters&gt; &lt;transition-meters&gt; ...</dt>
+<dt id="flatten-start-meters-altitude-meters-end-meters-altitude-meters-transition-meters"><b><code>-flatten</code></b> &lt;start-meters&gt; &lt;altitude-meters&gt; &lt;end-meters&gt; &lt;altitude-meters&gt; &lt;transition-meters&gt; ...</dt>
 <dd>
 
 <p>This important option allows the route to be flattened over a specified coordinate range, with a specified transition length. This has been used where there are overpasses in a route, where it is important that the altitude difference between the upper and lower roadway be maintained, even with altitude smoothing.</p>
@@ -394,182 +456,252 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>Multiple sets of five numbers can be provided, in which case altitude flattening is done over each of the specified segments.</p>
 
-<p>Distances are calculated i&lt;after&gt; smoothing but before cropping or extension.</p>
+<p>Distances are calculated <i>after</i> smoothing but before cropping or extension.</p>
 
 </dd>
-<dt id="gradientPower"><b>gradientPower</b></dt>
+<dt id="gradientPower"><b><code>-gradientPower</code></b></dt>
 <dd>
 
-<p>For gradient signs, how much of a power to apply to gradient in determining where signs go. If 0, then all that matters is altitude: put the signs between peaks and valleys. If 1, then a climb which is double the altitude but half the altitude gained scores the same. The higher this number, the more likely a gradient sign is to go on a short steep pitch versus a longer, more gradual climb containing the short steep pitch.</p>
+<p>For gradient signs, how much of a power to apply to gradient in determining where signs go. If 0, then all that matters is altitude: put the signs between peaks and valleys. If 1, then a climb which is double the altitude but half the gradient scores the same. The higher this number, the more likely a gradient sign is to go on a short steep pitch versus a longer, more gradual climb containing the short steep pitch.</p>
 
 </dd>
-<dt id="gradientThreshold"><b>gradientThreshold</b></dt>
+<dt id="gradientThreshold"><b><code>-gradientThreshold</code></b></dt>
 <dd>
 
 <p>This determines the threshold at which a gradient sign gets put in. The units are meters: a 10% climb needs to gain this much altitude to get a gradient sign. How much altitude steeper or less steep climbs need to be depends on gradientPower</p>
 
 </dd>
-<dt id="interpolate-meters"><b>interpolate</b> &lt;meters&gt;</dt>
+<dt id="interpolate-meters"><b><code>-interpolate</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Synonym for &quot;-spacing&quot;</p>
+<p>Synonym for <code>-spacing</code></p>
 
 </dd>
-<dt id="join-filenames"><b>join</b> &lt;filenames&gt;</dt>
+<dt id="join-filenames"><b><code>-join</code></b> &lt;filenames&gt;</dt>
 <dd>
 
-<p>Add the points from the first track, segment found in these files and append them to the first track, segment in the original file. The files must reasonably match up end-to-end.</p>
+<p>Add the points from the first track found in these files and append them to the selected track in the original file. The files must reasonably match up end-to-end. To specify alternate tracks than the first, append the selected track after a colon (&quot;:&quot;). For example, <code>-join file.gpx:2</code> would select the second track in file <code>file.gpx</code>.</p>
 
 </dd>
-<dt id="keywords-meters"><b>keywords</b> &lt;meters&gt;</dt>
+<dt id="keywords-meters"><b><code>-keywords</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>Add keywords to the GPX output. Multiple keywords can be separated with commas. If there are any spaces, make sure to enclose the string in quotes, or however your command-line shell specified strings should be delimited.</p>
 
-<p>So for example, the following are allowed: * -keywords test * -keywords test1,test2,test3 * -keywords &quot;test1, test2, test3&quot;</p>
+<p>So for example, the following are allowed:</p>
+
+<dl>
+
+<dt id="keywords-test"><code>-keywords test</code></dt>
+<dd>
+
+</dd>
+<dt id="keywords-test1-test2-test3"><code>-keywords test1,test2,test3</code></dt>
+<dd>
+
+</dd>
+<dt id="keywords-test1-test2-test31"><code>-keywords &quot;test1, test2, test3&quot;</code></dt>
+<dd>
+
+</dd>
+</dl>
 
 <p>A &quot;processGPX&quot; keyword is automatically added.</p>
 
 </dd>
-<dt id="laneShift-meters"><b>laneShift</b> &lt;meters&gt;</dt>
+<dt id="laneShift-meters"><b><code>-laneShift</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>This shifts the points of a road to the right (for a positive value) or the left (for a negative value) This is used for out-and-back sections, to provide separation between the outward and return legs of the road, which are otherwise described with the same coordinates. In RGT Cycling, a 4 meter shift will cause the resulting inward and outward roads to abut, assuring that even if cyclists use the full road width, they will not visually collide. A larger value may result in a grass island between the two directions. A smaller value may result in the roadways overlapping.</p>
 
+<p>Back in the day a 4 meter laneshift was sufficient. But then RGT added road-side assets to magic roads, so a 4-lane shift with abutting roads will result in riding through tents, fences, etc, associated with the opposite direction. A 6 meter lane-shift is the minimum recommended, or even more to avoid issues with the large tents. Hopefully RGT will fix this problem.</p>
+
 </dd>
-<dt id="lap"><b>lap</b></dt>
+<dt id="lap"><b><code>-lap</code></b></dt>
 <dd>
 
-<p>Synonym for &quot;-loop&quot;</p>
+<p>Synonym for <code>-loop</code></p>
 
 </dd>
-<dt id="loop"><b>loop</b></dt>
+<dt id="loop"><b><code>-loop</code></b></dt>
 <dd>
 
 <p>The course is considered a loop course, or a circuit, and so smoothing and other operations can take place between the beginning and end of the loop.</p>
 
 </dd>
-<dt id="maxSlope"><b>maxSlope</b> &lt;%&gt;</dt>
+<dt id="maxSlope"><b><code>-maxSlope</code></b> &lt;%&gt;</dt>
 <dd>
 
 <p>RGT supports a &quot;maximum slope&quot; option for magic roads. This option allows that to be changed from a default. It is specified in percent. If you specify a number &lt; 1, then that will be assumed to not have been converted into percent, so the number will be multiplied by 100.</p>
 
 </dd>
-<dt id="minRadius-meters"><b>minRadius</b> &lt;meters&gt;</dt>
+<dt id="minRadius-meters"><b><code>-minRadius</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>The code will calculate an effective radius of turns, and if this is less than this value, it will shift the road to increase the radius. This is done prior to -laneShift, which may thus result in tighter turns. So if there is a tight switchback, for example, then applying this option will tend to shift the road outward, increasing the turn radius. There is a transition for this lane shift, so for tight S-turns, alternating left and right, or in very tight switchbacks, where the road snakes up a hill, results may be unsatisfactory. It works best with an isolated corner.</p>
+<p>The code will calculate an effective radius of turns, and if this is less than this value, it will shift the road to increase the radius. This is done prior to <code>-laneShift</code>, which may thus result in tighter turns. So if there is a tight switchback, for example, then applying this option will tend to shift the road outward, increasing the turn radius. There is a transition for this lane shift, so for tight S-turns, alternating left and right, or in very tight switchbacks, where the road snakes up a hill, results may be unsatisfactory. It works best with an isolated corner.</p>
 
 </dd>
-<dt id="minRadiusEnd-meters"><b>minRadiusEnd</b> &lt;meters&gt;</dt>
+<dt id="minRadiusEnd-meters"><b><code>-minRadiusEnd</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>If specified, where to stop applying minimum radius (-minRadius). If both -minRadiusStart and -minRadiusEnd are specified, and if the end is before the beginning, then the region between the points is excluded, and it is applied to the region after the start and the region before the end. To apply multiple radii in different regions of the course, this can be used for one region, but then the code should be re-run on the resulting GPX file to apply a subsequent region.</p>
+<p>If specified, where to stop applying minimum radius (-minRadius). If both <code>-minRadiusStart</code> and <code>-minRadiusEnd</code> are specified, and if the end is before the beginning, then the region between the points is excluded, and it is applied to the region after the start and the region before the end. To apply multiple radii in different regions of the course, this can be used for one region, but then the code should be re-run on the resulting GPX file to apply a subsequent region.</p>
 
 </dd>
-<dt id="minRadiusStart-meters"><b>minRadiusStart</b> &lt;meters&gt;</dt>
+<dt id="minRadiusStart-meters"><b><code>-minRadiusStart</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>If specified, where to start applying minimum radius (-minRadius). If both -minRadiusStart and -minRadiusEnd are specified, and if the end is before the beginning, then the region between the points is excluded, and it is applied to the region after the start and the region before the end. To apply multiple radii in different regions of the course, this can be used for one region, but then the code should be re-run on the resulting GPX file to apply a subsequent region. This is done very late, for example after -rUTurn.</p>
+<p>If specified, where to start applying minimum radius (-minRadius). If both <code>-minRadiusStart</code> and <code>-minRadiusEnd</code> are specified, and if the end is before the beginning, then the region between the points is excluded, and it is applied to the region after the start and the region before the end. To apply multiple radii in different regions of the course, this can be used for one region, but then the code should be re-run on the resulting GPX file to apply a subsequent region.</p>
 
 </dd>
-<dt id="name-string"><b>name</b> &lt;string&gt;</dt>
+<dt id="name-string"><b><code>-name</code></b> &lt;string&gt;</dt>
 <dd>
 
-<p>Specify the name of the GPX route. The default is the name listed in the source GPX. This is synonymous with &quot;-title&quot;.</p>
+<p>Specify the name of the GPX route. The default is the name listed in the source GPX. This is synonymous with <code>-title</code>.</p>
 
 </dd>
-<dt id="noSave"><b>noSave</b></dt>
+<dt id="noSave"><b><code>-noSave</code></b></dt>
 <dd>
 
-<p>The -nosave option suppressed generation of a GPX output file. This may be useful for debugging or for checking the distance of a file, which is reported to standard error, and checking it for zig-zags and loops.</p>
+<p>The <code>-nosave</code> option suppressed generation of a GPX output file. This may be useful for debugging or for checking the distance of a file, which is reported to standard error, and checking it for zig-zags and loops.</p>
 
 </dd>
-<dt id="out-filename"><b>out</b> &lt;filename&gt;</dt>
+<dt id="out-filename"><b><code>-out</code></b> &lt;filename&gt;</dt>
 <dd>
 
 <p>Instead of the default filename, which is the input file with <i>_processed.gpx</i>, use this filename instead. Make sure to specify the <i>.gpx</i> suffix if that is what is wanted. A &quot;-&quot; implies standard output.</p>
 
 </dd>
-<dt id="prepend-meters"><b>prepend</b> &lt;meters&gt;</dt>
+<dt id="outAndBack"><b><code>-outAndBack</code></b></dt>
 <dd>
 
-<p>See the -append option for details, except instead of adding roadway to the end of a point-to-point course, this adds it to the beginning of the course. RGT in general puts the start line 60 meters after the start of a GPX file, so this can provide for that distance, although a better solution is to design in the 60 meter buffer from the start, so it conforms to the actual roadway.</p>
+<p>This is a short-cut for creating an out-and-back, with a loop at the end of the magic road, then a return. It defaults to shifting the road to the right. If you want the left (UK, for example) then specify the <code>-laneShift</code> option as well. It should obviously not be combined with <code>-lap</code> unless you add <code>-rLap</code>.</p>
 
-<p>A negative number will crop the course at the beginning, so is an alternative to -cropMin.</p>
+<p>If you want a different lane shift, or a different loop radius, you can specify these with <code>-laneShift</code> and/or <code>-rTurnaround</code>. You probably alao want to add some smoothing, so <code>-auto</code> is a good option.</p>
+
+<p>If you use this option, then the starting route should be just the &quot;out&quot; section, not the &quot;back&quot;. The code will generate the turn-around loop and the return road, which will be shifted by default for a 12 meter separation, which given the 8 meter road width, results in a 4-meter median between the out and back.</p>
+
+<p>With the lane shift, you should make sure there&#39;s no sharp corners in the out section, or these could become excessively sharp after the lane shift. As a result, this option specifies defaults for point interpolation, spline fitting, point smoothing, and minimum radius. These options can be over-ridden by explictly specifying the appropriate options.</p>
 
 </dd>
-<dt id="prune"><b>prune</b></dt>
+<dt id="outAndBackLap"><b><code>-outAndBackLap</code></b></dt>
+<dd>
+
+<p>This is the same as <code>-outAndBack</code>, except also adds a turn-around to create a lappable course. If you want the turnaround and lap loops to be different than the default radius, then you can specify these separately with -rTurnaround and/or <code>-rLap</code>.</p>
+
+</dd>
+<dt id="outAndBackLoop"><b><code>-outAndBackLoop</code></b></dt>
+<dd>
+
+<p>An alias for <code>-outAndBackLap</code></p>
+
+</dd>
+<dt id="prepend-meters"><b><code>-prepend</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>See the <code>-append</code> option for details, except instead of adding roadway to the end of a point-to-point course, this adds it to the beginning of the course. RGT in general puts the start line 60 meters after the start of a GPX file, so this can provide for that distance, although a better solution is to design in the 60 meter buffer from the start, so it conforms to the actual roadway.</p>
+
+<p>A negative number will crop the course at the beginning, so is an alternative to <code>-cropMin</code>.</p>
+
+</dd>
+<dt id="prune"><b><code>-prune</code></b></dt>
 <dd>
 
 <p>This option says that colinear points (in all three dimensions) should be removed, reducing the size of the output file. There&#39;s no downside to this, unless the file is being prepared for subsequent modification with another tool, such as GPX Magic.</p>
 
 </dd>
-<dt id="pruneD-meters"><b>pruneD</b> &lt;meters&gt;</dt>
+<dt id="pruneD-meters"><b><code>-pruneD</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Given three points in sequence, A, B, and C, if the separation between B and the segment connecting A and C is at least this distance, the point B is not pruned. The &quot;-prune&quot; option must still be invoked to get pruning. There is a default value.</p>
+<p>Given three points in sequence, A, B, and C, if the separation between B and the segment connecting A and C is at least this distance, the point B is not pruned. The <code>-prune</code> option must still be invoked to get pruning. There is a default value.</p>
 
 </dd>
-<dt id="pruneX-value"><b>pruneX</b> &lt;value&gt;</dt>
+<dt id="prunedg-value"><b><code>-prunedg</code></b> &lt;value&gt;</dt>
+<dd>
+
+<p>Given three points in sequence, A, B, and C, if the difference in gradient from A to B, and B to C, exceeds this value (not specified as a percent, but as a raw value, so for example a 45-degree incline has gradient = 1), then the point B is not removed. The default is 1.</p>
+
+</dd>
+<dt id="pruneDistance-meters"><b><code>-pruneDistance</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>An alias for <code>-pruneD</code>.</p>
+
+</dd>
+<dt id="pruneGradient-value"><b><code>-pruneGradient</code></b> &lt;value&gt;</dt>
+<dd>
+
+<p>An alias for <code>-prunedg</code></p>
+
+</dd>
+<dt id="pruneSine-value"><b><code>-pruneSine</code></b> &lt;value&gt;</dt>
+<dd>
+
+<p>An alias for <code>-pruneX</code></p>
+
+</dd>
+<dt id="pruneX-value"><b><code>-pruneX</code></b> &lt;value&gt;</dt>
 <dd>
 
 <p>Given three points in sequence, A, B, and C, if the sine of the angle A-B-C exceeds this value, the point B will not be removed. There is a default value.</p>
 
 </dd>
-<dt id="prunedg-value"><b>prunedg</b> &lt;value&gt;</dt>
-<dd>
-
-<p>Given three points in sequence, A, B, and C, if the difference in gradient from A to B, and B to C, exceeds this value (not specified as a percent, but as a raw value, so for example a 45-degree include has gradient = 1), then the point B is not removed. There is a default value.</p>
-
-</dd>
-<dt id="quiet"><b>quiet</b></dt>
+<dt id="quiet"><b><code>-quiet</code></b></dt>
 <dd>
 
 <p>If specified, suppress all noncritical messages (to the standard error stream). Only warnings and error messages will go to the standard error stream. This will suppress things like the number of points, the altitude smoothness score, and the course distance.</p>
 
 </dd>
-<dt id="rCrossings-meters"><b>rCrossings</b> &lt;meters&gt;</dt>
+<dt id="rCrossings-meters"><b><code>-rCrossings</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>If &quot;-fixCrossings&quot; is invoked, then how far to each side of the crossing the road should be leveled. A transition of three times this length will be used, over which the altitude will be restored to the unaltered value. The default is 6 meters, which works fairly well with the RGT road width of 8 meters, althouugh if the intersection is at a particularly acute value, or if the roads will be wider than the RGT standard of 8 meters, a larger value may be better. If the value is too large, the transitions too and from the flat section may be too steep, or the influence of crossings could overlap, which the algorithm does not handle well.</p>
+<p>If <code>-fixCrossings</code> is invoked, then how far to each side of the crossing the road should be leveled. A transition of three times this length will be used, over which the altitude will be restored to the unaltered value. The default is 6 meters, which works fairly well with the RGT road width of 8 meters, althouugh if the intersection is at a particularly acute value, or if the roads will be wider than the RGT standard of 8 meters, a larger value may be better. If the value is too large, the transitions too and from the flat section may be too steep, or the influence of crossings could overlap, which the algorithm does not handle well.</p>
 
 </dd>
-<dt id="reverse"><b>reverse</b></dt>
+<dt id="reverse"><b><code>-reverse</code></b></dt>
 <dd>
 
-<p>This reverses a course immediately after loading the file. So all subsequent operations will be done on the reversed course rather than the original course. So for example, if I have an initial course which goes from point A to point B, and I specify a turnaround with -rTurnaround 5, instead of an route from A to B and back, it will instead be from B to A and back. If you want to reverse the final product, then do a second run with just the -reverse option after an initial run on other options.</p>
+<p>This reverses a course immediately after loading the file. So all subsequent operations will be done on the reversed course rather than the original course. So for example, if I have an initial course which goes from point A to point B, and I specify a turnaround with -rTurnaround 5, instead of a route from A to B and back, it will instead be from B to A and back. If you want to reverse the final product, then do a second run with just the <code>-reverse</code> option after an initial run on other options.</p>
 
 </dd>
-<dt id="rLap-meters"><b>rLap</b> &lt;meters&gt;</dt>
+<dt id="rLap-meters"><b><code>-rLap</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>For an out-and-back course, create a second loop at the finish, reconnecting to the start, to create a circuit. This allows the out-and-back to be repeated an arbitrary number of laps. This only works if &quot;-rTurnaround&quot; is also positive. See also &quot;-rUTurn&quot;.</p>
+<p>For an out-and-back course, create a second loop at the finish, reconnecting to the start, to create a circuit. This allows the out-and-back to be repeated an arbitrary number of laps. This only works if <code>-rTurnaround</code> is also positive. See also <code>-rUTurn</code>.</p>
+
+<p>If you want to go from a single point-to-point course to get an out-and-back loop course, consider the <code>-outAndBackLap</code> option, which specifes a range of options including this one.</p>
 
 </dd>
-<dt id="rTurnaround-meters"><b>rTurnaround</b> &lt;meters&gt;</dt>
+<dt id="rTurnaround-meters"><b><code>-rTurnaround</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Create an out-and-back course, with a turn of this radius generated at the turn-around point. This may be done in conjunction with &quot;-laneShift&quot; to have the return road shifted from the outward road. If the distance is less than the laneShift value, then the loop will have 3 parts: for example a right, then a left, then another right to turn 180 degrees. The turn The main turn will be to the left if laneShift is negative (UK, for example), or to the right if laneShift is positive (US, for example) with a default (for no laneShift) to the right.</p>
+<p>Create an out-and-back course, with a turn of this radius generated at the turn-around point. This may be done in conjunction with <code>-laneShift</code> to have the return road shifted from the outward road. If the distance is less than the laneShift value, then the loop will have 3 parts: for example a right, then a left, then another right to turn 180 degrees. The turn The main turn will be to the left if laneShift is negative (UK, for example), or to the right if laneShift is positive (US, for example) with a default (for no laneShift) to the right.</p>
+
+<p>The <code>-outAndBack</code> option is an alternative, specifying other smoothing options in addition to a lane shift and this option to create an out-and-back course more simply.</p>
 
 </dd>
-<dt id="rUTurn-meters"><b>rUTurn</b> &lt;meters&gt;</dt>
+<dt id="rUTurn-meters"><b><code>-rUTurn</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>If any 180-degree turns are identified in the course, loops are added with this radius.</p>
 
-<p>This is done late in the process, in particular after lane shifting, so the U-turns can properly connect the land-shifted roads (with the &quot;-laneShift&quot; option). It is done before minRadius, however.</p>
+<p>This is done late in the process, in particular after lane shifting, so the U-turns can properly connect the land-shifted roads (with the <code>-laneShift</code> option). It is done before minRadius, however.</p>
 
 </dd>
-<dt id="segment-start-end-name"><b>segment</b> &lt;start&gt;,&lt;end&gt;,&lt;name&gt; ...</dt>
+<dt id="saveSimplifiedCourse"><b><code>-saveSimplifiedCourse</code></b></dt>
 <dd>
 
-<p>Define one or more non-overlapping named segments for the route. These are defined immediately before the shiftSF option is applied. segments are specified with groups of 3 options separated by commas: a first coordinate specifying the starting distance in meters or &quot;start&quot;, a second ccoordinate specifying the ending distance in meters or &quot;end&quot;, and a name. The starting coordinate instead be &quot;start&quot; to begin at the course start, and the ending coordinate can instead be &quot;end&quot; to end at the course end. It is not recommended to use these options with a loop course, since for loops, the course will not start or finish at the GPX end. In any case, RGT requires that segments start a sufficient distance from the beginning of the route, and end a sufficient distance from the end of the route, and also be separated by a sufficient distance. However, this code only checks that they not overlap. There is no way to define segments which overlap the S/F of a lapped course. Segments already defined in the GPX file, for example from GPX Magic or previous runs of this code, are honored, and so new segments may not overlap previously defined segments. Points are interpolated to get an essentially exact match to the specified coordinates.</p>
-
-<p>If you want multiple named segments, then split them with colons (&quot;:&quot;), so for example &quot;-segments &quot;1000,2000,segment 1;3000,4000,segment 2&quot;</p>
+<p>This is an option for debugging. <code>-fix</code>_crossings, for example, generates a simplified course, and if find in a complex course that certain crossings aren&#39;t identified, then this may be useful for debugging why.</p>
 
 </dd>
-<dt id="shiftEnd-meters"><b>shiftEnd</b> &lt;meters&gt;</dt>
+<dt id="segment-start-end-name"><b><code>-segment</code></b> &lt;start&gt;,&lt;end&gt;,&lt;name&gt; ...</dt>
+<dd>
+
+<p>Define one or more non-overlapping named segments for the route. These are defined immediately before the <code>-shiftSF</code> option is applied. segments are specified with groups of 3 options separated by commas: a first coordinate specifying the starting distance in meters or &quot;start&quot;, a second ccoordinate specifying the ending distance in meters or &quot;end&quot;, and a name. The starting coordinate instead be &quot;start&quot; to begin at the course start, and the ending coordinate can instead be &quot;end&quot; to end at the course end. It is not recommended to use these options with a loop course, since for loops, the course will not start or finish at the GPX end. In any case, RGT requires that segments start a sufficient distance from the beginning of the route, and end a sufficient distance from the end of the route, and also be separated by a sufficient distance. However, this code only checks that they not overlap. There is no way to define segments which overlap the S/F of a lapped course. Segments already defined in the GPX file, for example from GPX Magic or previous runs of this code, are honored, and so new segments may not overlap previously defined segments. Points are interpolated to get an essentially exact match to the specified coordinates. Consider the <code>-stripSegments</code> option to merge segments from the input file if the input file has multiple segments and you wish to replace them.</p>
+
+<p>If you want multiple named segments, then split them with semicolons (&quot;;&quot;), so for example <code>-segments &quot;1000,2000,segment 1;3000,4000,segment 2&quot;</code></p>
+
+</dd>
+<dt id="shiftEnd-meters"><b><code>-shiftEnd</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>The position at which lane shifting should end. This is useful in case you have an isolated out-and-back section and want to be able to shift lanes over only a portion of a course, or for example for an out-and-back where there will be little risk of head-on collisions sufficiently far from the turn-around. A transition zone between shifting and non-shifting is created. The distance is calculated prior to lane shifting, not self-consistently (lane shifting will subtly change distances), so to determine precise distance, run once without lane shifting, get the distance, then do lane shifting with that precise distance.</p>
@@ -580,70 +712,72 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>if shiftStart &gt; shiftEnd, then the shift occurs up to shiftEnd, then begins again at shiftStart. This is useful for a &quot;lollipop&quot; course, where you go out on a road, then do a loop, then return along the original road. So put shiftEnd at the end of the outward leg, then shiftStart at the beginning of the return leg, and leave the loop part unshifted. Place the transitions slightly past where the directions diverge, so the transition regaions do not cause the lanes to come together at the beginning of the return leg (end of the outward leg).</p>
 
-<p>The -laneShift option still needs to be specified.</p>
+<p>The <code>-laneShift</code> option still needs to be specified.</p>
 
 </dd>
-<dt id="shiftStart-meters"><b>shiftStart</b> &lt;meters&gt;</dt>
+<dt id="shiftStart-meters"><b><code>-shiftStart</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>The position on the course where lane shifting starts. See -shiftEnd for details, except this marks the start of the lane shift zone.</p>
+<p>The position on the course where lane shifting starts. See <code>-shiftEnd</code> for details, except this marks the start of the lane shift zone.</p>
 
-<p>The -laneShift option still needs to be specified.</p>
+<p>The <code>-laneShift</code> option still needs to be specified.</p>
 
 </dd>
-<dt id="shiftSF-meters"><b>shiftSF</b> &lt;meters&gt;</dt>
+<dt id="shiftSF-meters"><b><code>-shiftSF</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>For -loop courses, the amount to shift the start/finish forwards (positive) or backwards (negative).</p>
+<p>For <code>-loop</code> courses, the amount to shift the start/finish forwards (positive) or backwards (negative).</p>
 
-<p>For loop courses, RGT Cycling puts the start/finish line 60 meters after the start of the GPX data. This is evidently to provide room for riders to line up before the start, although that is only necessary in point-to-point courses, so the reason for this is unclear. In circuit courses careful placement of the start/finish line, for example at the crest of a hill, or a specific distance from a final corner, is critical, so with this option you can carefully place the start point for the GPX file at the desired start/finish, then use &quot;-loop -shiftSF -60&quot; to move the start of the GPX file back 60 meters, putting the start where it should be.</p>
+<p>For loop courses, RGT Cycling puts the start/finish line 60 meters after the start of the GPX data. This is evidently to provide room for riders to line up before the start, although that is only necessary in point-to-point courses, so the reason for this is unclear. In circuit courses careful placement of the start/finish line, for example at the crest of a hill, or a specific distance from a final corner, is critical, so with this option you can carefully place the start point for the GPX file at the desired start/finish, then use &quot;-loop <code>-shiftSF -60</code>&quot; to move the start of the GPX file back 60 meters, putting the start where it should be.</p>
 
-<p>Since this is so commonly used in loop courses, the default is -60, so to disable it, use &quot;-shiftSF 0 -loop&quot;.</p>
+<p>Since this is so commonly used in loop courses, the default is -60, so to disable it, use <code>-shiftSF 0 -loop</code>.</p>
+
+<p>If you are processing a loop course in multiple steps, make sure to use &quot;-shiftSF 0&quot; on all steps other than one, otherwise each step will apply the default -60 meter shift. You want to apply this shift only once.</p>
 
 </dd>
-<dt id="sigma-meters"><b>sigma</b> &lt;meters&gt;</dt>
+<dt id="sigma-meters"><b><code>-sigma</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Synonym for &quot;-smooth&quot;</p>
+<p>Synonym for <code>-smooth</code></p>
 
 </dd>
-<dt id="sigmaz-meters"><b>sigmaz</b> &lt;meters&gt;</dt>
+<dt id="sigmaz-meters"><b><code>-sigmaz</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Synonym for &quot;-smoothz&quot;</p>
+<p>Synonym for <code>-smoothz</code></p>
 
 </dd>
-<dt id="smooth-meters"><b>smooth</b> &lt;meters&gt;</dt>
+<dt id="smooth-meters"><b><code>-smooth</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>Provide a Gaussian sigma value for smoothing of position and altitude. The result will sharp corners will be rounded to corners with approximately this radius, and grade fluctuations over less distance than this will be lost. Typically altitude needs more smoothing than position, so additional altitude smoothing is required.</p>
 
 </dd>
-<dt id="smoothAngle-degrees"><b>smoothAngle</b> &lt;degrees&gt;</dt>
+<dt id="smoothAngle-degrees"><b><code>-smoothAngle</code></b> &lt;degrees&gt;</dt>
 <dd>
 
-<p>For &quot;-autoSpacing&quot;, determines how dense to place points such that the maximum angle between points is no more than approximately this angle.</p>
+<p>For <code>-autoSpacing</code>, determines how dense to place points such that the maximum angle between points is no more than approximately this angle.</p>
 
 </dd>
-<dt id="smoothEnd-meters"><b>smoothEnd</b> &lt;meters&gt;</dt>
+<dt id="smoothEnd-meters"><b><code>-smoothEnd</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>See -smoothStart. The default is to continue smoothing to the end of the GPX data.</p>
+<p>See <code>-smoothStart</code>. The default is to continue smoothing to the end of the GPX data.</p>
 
 </dd>
-<dt id="smoothStart-meters"><b>smoothStart</b> &lt;meters&gt;</dt>
+<dt id="smoothStart-meters"><b><code>-smoothStart</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>If specified, smoothing will be phased in starting at this position in the course. Note 0 has an effect, as it will phase in smoothing starting at 0, as opposed to the default, which is to apply the same smoothing to all points. This applies to all smoothing, so consider running processGPX multiple times if you want different limits on different smoothing components. For example, you might want to exclude position smoothing from critical corners, but maintain altitude smoothing. If the start is after the finish, then the region between the two is not smoothed, rather than smoothed.</p>
 
 </dd>
-<dt id="smoothz-meters"><b>smoothz</b> &lt;meters&gt;</dt>
+<dt id="smoothz-meters"><b><code>-smoothz</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Additional smoothing to be applied to altitude, on top of the smoothing applied with -smooth. So this number, if specified, will typically be greater than the -smooth number or there is little effect. Grade changes which occur over less than this distace will tend to be averaged out. So for example, if I am designing an urban course, and there is a turn onto a sharp climb, then less smoothing can be tolerated. On the other hand, if I am designing a course with a steady grade up winding switchbacks on a steep hillside, then more smoothing be needed. On roads along steep hillsides, altitude accuracy is more challenging than it is on roads which take the direct route oup more gradual hillsides.</p>
+<p>Additional smoothing to be applied to altitude, on top of the smoothing applied with <code>-smooth</code>. So this number, if specified, will typically be greater than the <code>-smooth</code> number or there is little effect. Grade changes which occur over less than this distace will tend to be averaged out. So for example, if I am designing an urban course, and there is a turn onto a sharp climb, then less smoothing can be tolerated. On the other hand, if I am designing a course with a steady grade up winding switchbacks on a steep hillside, then more smoothing be needed. On roads along steep hillsides, altitude accuracy is more challenging than it is on roads which take the direct route oup more gradual hillsides.</p>
 
 </dd>
-<dt id="snap-option"><b>snap</b> &lt;option&gt;</dt>
+<dt id="snap-option"><b><code>-snap</code></b> &lt;option&gt;</dt>
 <dd>
 
 <p>With snapping, the code will search for sections of road which repeat, either in the forward or reverse directions, and &quot;snap&quot; one pass to the points of the other pass, guaranteeing that the two are perfectly aligned. So for example, if a route covers 1.5 laps of a course, something not presently supported by the RGT multi-lap option (which handles only complete laps), then snapping will make the final half-lap the same as the first half-lap, up to within close to the end of the route (since smoothing is affected by proximity to an end of the route). Similarly if a route has an out-and-back section, this will help make sure there&#39;s no altitude or position differences between the two.</p>
@@ -656,173 +790,197 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>If there are existing segments, snapping will try to map segments from the old points to the new points, but it&#39;s more precise to define segments after snapping. If you define segments within the same run of processGPS, they will be done after possible snapping.</p>
 
+<p>Snapping is done both before and after point interpolation. The reason is it&#39;s potentially very efficient with a smaller number of points, but sometimes more widely spaced points make it more challenging for the algorithm to determine that a section of road is being repeated. In the past, when snapping was done only once, it was a regular practive to run processGPX twice in an effort to more effectively snap points.</p>
+
+<p>The snapping algorithm does not work at the very start or end of the GPX. So if your route ends on a repeated section and you want it to be snapped, then it&#39;s a good practice to extend the route further, then crop it back with <code>-cropMin</code> and/or <code>-cropMax</code>.</p>
+
 </dd>
-<dt id="snapAltitude-meters"><b>snapAltitude</b> &lt;meters&gt;</dt>
+<dt id="snapAltitude-meters"><b><code>-snapAltitude</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>Normally for snapping to identify two sections of road as being a repetition, they need to be within 1 meter altitude, to avoid &quot;snapping&quot; on very tight switchbacks, for example, where roads may be close on a map but at different elevations. But in cases where map data have elevation errors, this may prevent legitimate snapping. This parameter allows for the altitude tolerance to be increased from the default, relatively tight, 1 meter limit. Note there&#39;s an additional tolerance for the separation, using a 30% gradient, which is not adjustable.</p>
 
 </dd>
-<dt id="snapDistance-meters"><b>snapDistance</b> &lt;meters&gt;</dt>
+<dt id="snapDistance-meters"><b><code>-snapDistance</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>The distance in meters a road segment can deviate from another and still be &quot;snapped&quot; (see the &quot;-snap&quot; option). This example can be important: if snapdistance is too small, instead of the repeated road being replaced in one piece, it may be fragmented. Look to the standard error for text describing which segments have been snapped. For example, the following from a criterium course with an out-and-back section:</p>
+<p>The distance in meters a road segment can deviate from another and still be &quot;snapped&quot; (see the <code>-snap</code> option). This example can be important: if snapDistance is too small, instead of the repeated road being replaced in one piece, it may be fragmented. Look to the standard error for text describing which segments have been snapped. For example, the following from a criterium course with an out-and-back section:</p>
 
-<p>snapping reverse segment: iRange = 25 35 &lt;=&gt; jRange = 54 47</p>
+<p>&quot;snapping reverse segment: iRange = 25 35 &lt;=&gt; jRange = 54 47&quot;</p>
 
 <p>This is a nice clean replacement</p>
 
 </dd>
-<dt id="snapTransition-meters"><b>snapTransition</b> &lt;meters&gt;</dt>
+<dt id="snapTransition-meters"><b><code>-snapTransition</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p><b>WARNING</b>: this may be buggy. Check results carefully.</p>
 
-<p>This is an i&lt;experimental&gt; feature whereby points within this distance of a snap transition on partially syncronized in altitude, with a transition weighting depending on distance along the course. This is designed to avoid having divergent roads having different slopes while still overlapping, which can create &quot;ridges&quot; in the pavement which in real life would cause riders to crash. It&#39;s experimental, however, and there is no guarantee it will help rather than hurt, because of the way smoothing affects points near snap transitions, and snapping is almost always combined with smoothing to avoid abrupt jumps in position.</p>
+<p>This is an <i>experimental</i> feature whereby points within this distance of a snap transition on partially syncronized in altitude, with a transition weighting depending on distance along the course. This is designed to avoid having divergent roads having different slopes while still overlapping, which can create &quot;ridges&quot; in the pavement which in real life would cause riders to crash. It&#39;s experimental, however, and there is no guarantee it will help rather than hurt, because of the way smoothing affects points near snap transitions, and snapping is almost always combined with smoothing to avoid abrupt jumps in position.</p>
 
 </dd>
-<dt id="snapZ-meters"><b>snapZ</b> &lt;meters&gt;</dt>
+<dt id="snapZ-meters"><b><code>-snapZ</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>This is a synonym for snapAltitude</p>
+<p>This is a synonym for <code>-snapAltitude</code></p>
 
 </dd>
-<dt id="spacing-meters"><b>spacing</b> &lt;meters&gt;</dt>
+<dt id="spacing-meters"><b><code>-spacing</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>As an early stage to processing, interpolate points on the route so that the spacing between points is no more than approximately this spacing. If -smoothing and/or -smoothingz are specified, then smoothing doesn&#39;t work over distances much smaller than this spacing. -autospacing is another option, in which case the code will selectively interpolate points near points where the direction is changing.</p>
+<p>As an early stage to processing, interpolate points on the route so that the spacing between points is no more than approximately this spacing. If <code>-smoothing</code> and/or <code>-smoothingz</code> are specified, then smoothing doesn&#39;t work over distances much smaller than this spacing. -autospacing is another option, in which case the code will selectively interpolate points near points where the direction is changing.</p>
 
 </dd>
-<dt id="splineDegs-degrees"><b>splineDegs</b> &lt;degrees&gt;</dt>
+<dt id="splineDegs-degrees"><b><code>-splineDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
-<p>If splines are desired, specifying this will cause spline interpolation to be done for corners turning at least this much, but less than the -splineMaxDegs option. A typical value is 5 degrees. This angle is the angle between course points, not an angle of a total turn: the algorithm only looks at points ahead of and behind a given point.</p>
+<p>If splines are desired, specifying this will cause spline interpolation to be done for corners turning at least this much, but less than the <code>-splineMaxDegs</code> option. A typical value is 5 degrees. This angle is the angle between course points, not an angle of a total turn: the algorithm only looks at points ahead of and behind a given point.</p>
 
 </dd>
-<dt id="splineMaxDegs-degrees"><b>splineMaxDegs</b> &lt;degrees&gt;</dt>
+<dt id="splineMaxDegs-degrees"><b><code>-splineMaxDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
-<p>If a -splineDegs option is specified, specifying this limit the maximum angle corner for which spline interpolation will be applied. Splines are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Splines have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using spline interpolation: verty strange results can occur if the corner is too sharp.</p>
+<p>If a <code>-splineDegs</code> option is specified, specifying this limit the maximum angle corner for which spline interpolation will be applied. Splines are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Splines have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using spline interpolation: verty strange results can occur if the corner is too sharp.</p>
 
 </dd>
-<dt id="startCircuitDistance-meters"><b>startCircuitDistance</b> &lt;meters&gt;</dt>
+<dt id="splitAt-meters"><b><code>-splitAt</code></b> &lt;meters&gt; ...</dt>
 <dd>
 
-<p>Sometimes races start with multiple circuits of a loop, before leaving the circuit for a remainder of the course. This option allows you to repeat a beginning portion of the GPX file as a finishing circuit. To do this, you specify the distance to the end of the circuit, then an use the -startCircuits option to specify how many copies of this circuit should be prepended to the route at the beginning.</p>
+<p>Specify one or more locations in the final route, measured in meters distance from the GPX start, at which the route should be split. Adjacent sections of route will overlap by 200 meters to make room for the S/F regions. 60 meters will be allocated for the start area, and 140 meters for the finish area, so the S/F lines should be at the split locations, under the assumption none of the splits are proper loops: use cropping instead if you want to extract loops from a more complicated route. Splits are done late in the process, before auto-segment generation.</p>
 
-<p>If the start/end of the circuit lap is not the same place as the desired beginning of the route, then you&#39;ll need to specify a -cropMin value to remove some of the initial circuit</p>
+<p>If you specify an output file and do not specify a specific split number with the <code>-splitNumber</code> option, then the output files will have a suffix of &quot;_split&quot; followed by a split number (1, 2, 3 ...).</p>
+
+<p>If you want the original route to be split into a number of equal pieces, then see the <code>-autoSplit</code> option instead.</p>
 
 </dd>
-<dt id="startCircuits-count"><b>startCircuits</b> &lt;count&gt;</dt>
+<dt id="splitNumber-1-2-3"><b><code>-splitNumber</code></b> &lt;1, 2, 3..&gt;</dt>
 <dd>
 
-<p>The number of copies of the starting circuit (from distance 0 to the value in meters specified with the -startCircuitDistance option) to be added to the beginning of the data. So a value 1 means adding one copy, which implies two laps of the circuit, including the one defined in the original file.</p>
+<p>If there are multiple splits (-splitAt or <code>-autoSplits</code>), which splits to output. The default is to output all splits if a filename is specified for the output (using a _split with the split number as a suffix) or just the first split if it&#39;s to standard output (&quot;-&quot;). The default can be specifed with a non-positive number, or just omitting this option.</p>
 
 </dd>
-<dt id="startTime-time-string"><b>startTime</b> &quot;&lt;time string&gt;&quot;</dt>
+<dt id="startCircuitDistance-meters"><b><code>-startCircuitDistance</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Sometimes races start with multiple circuits of a loop, before leaving the circuit for a remainder of the course. This option allows you to repeat a beginning portion of the GPX file as a finishing circuit. To do this, you specify the distance to the end of the circuit, then an use the <code>-startCircuits</code> option to specify how many copies of this circuit should be prepended to the route at the beginning.</p>
+
+<p>If the start/end of the circuit lap is not the same place as the desired beginning of the route, then you&#39;ll need to specify a <code>-cropMin</code> value to remove some of the initial circuit</p>
+
+</dd>
+<dt id="startCircuits-count"><b><code>-startCircuits</code></b> &lt;count&gt;</dt>
+<dd>
+
+<p>The number of copies of the starting circuit (from distance 0 to the value in meters specified with the <code>-startCircuitDistance</code> option) to be added to the beginning of the data. So a value 1 means adding one copy, which implies two laps of the circuit, including the one defined in the original file.</p>
+
+</dd>
+<dt id="startTime-time-string"><b><code>-startTime</code></b> &quot;&lt;time string&gt;&quot;</dt>
 <dd>
 
 <p>Specify a start line for an activity using clear notation, for example:</p>
 
-<p>processGPX -startTime &quot;15 Feb 2021 08:00&quot;</p>
+<p>processGPX <code>-startTime</code> &quot;15 Feb 2021 08:00&quot;</p>
 
-<p>would generate a time field beginning at that time, in the local time zone. This is useful for uploading a GPX route to &quot;Relive&quot;, a website which generates animations of routes, and requires a time field. The time is generated using a heureistic formula which has rider speed depend on the road grade.</p>
+<p>would generate a time field beginning at that time, in the local time zone. This is useful for uploading a GPX route to &quot;Relive&quot;, a website which generates animations of routes, and requires a time field. The time is generated using a heureistic formula which has rider speed depend on the road grade, calibrated for a strong rider.</p>
 
 </dd>
-<dt id="straight-meters-1-or-more"><b>straight</b> &lt;meters&gt; (1 or more)</dt>
+<dt id="straight-meters-1-or-more"><b><code>-straight</code></b> &lt;meters&gt; (1 or more)</dt>
 <dd>
 
-<p>Provide segments to be fit with straights, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via -straightStart and/or -straightEnd. IF both methods are used, these will be processed first. So for example, -straight 400 500 100 200 will fit straights for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Not ethe further points are listed first so the fit of a straight to these points does not affect the distance to the nearer points.</p>
+<p>Provide segments to be fit with straights, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via <code>-straightStart</code> and/or <code>-straightEnd</code>. IF both methods are used, these will be processed first. So for example, <code>-straight 400 500 100 200</code> will fit straights for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Not ethe further points are listed first so the fit of a straight to these points does not affect the distance to the nearer points.</p>
 
 </dd>
-<dt id="straightEnd-meters-1-or-more"><b>straightEnd</b> &lt;meters&gt; (1 or more)</dt>
+<dt id="straightEnd-meters-1-or-more"><b><code>-straightEnd</code></b> &lt;meters&gt; (1 or more)</dt>
 <dd>
 
 <p>Set one or more distances for straight fitting.</p>
 
-<p>See -straightStart</p>
+<p>See <code>-straightStart</code></p>
 
 </dd>
-<dt id="straightStart-meters-1-or-more"><b>straightStart</b> &lt;meters&gt; (1 or more)</dt>
+<dt id="straightStart-meters-1-or-more"><b><code>-straightStart</code></b> &lt;meters&gt; (1 or more)</dt>
 <dd>
 
 <p>Set one or more start distances for straight fitting.</p>
 
-<p>Straight fitting is done by finding the endpoints of the straight segment using the provided distances. Only existing points will be used: no point interpolation will be done. Then for points between these endpoints, a projection operator is used to map the new point onto the segment connecting the two endpoints. The original data should be close to straight so this projection operation does not result in any retrograde motion. This would result in 180 degree turns. So if the points are nearly straight, and the end points are good, this can help straighten out sections of road which should be perfectly straight. The points are moved onto the projected position on the line segment, but the elevations (or other parameters) are not changed. So the assumption is that moving onto the staight line is perpendicular to any altitude gradients. This could result in a road with a constant gradient but following a curvy path ending up with a non-constant gradient. So check altitudes with care. One possible approach is to use the -flatten option to interpolate the altitudes, after doing the straight-line fit.</p>
+<p>Straight fitting is done by finding the endpoints of the straight segment using the provided distances. Only existing points will be used: no point interpolation will be done. Then for points between these endpoints, a projection operator is used to map the new point onto the segment connecting the two endpoints. The original data should be close to straight so this projection operation does not result in any retrograde motion. This would result in 180 degree turns. So if the points are nearly straight, and the end points are good, this can help straighten out sections of road which should be perfectly straight. The points are moved onto the projected position on the line segment, but the elevations (or other parameters) are not changed. So the assumption is that moving onto the staight line is perpendicular to any altitude gradients. This could result in a road with a constant gradient but following a curvy path ending up with a non-constant gradient. So check altitudes with care. One possible approach is to use the <code>-flatten</code> option to interpolate the altitudes, after doing the straight-line fit.</p>
 
 <p>If multiple values are listed, then multiple sections will be replaced. Distances will be updated after each circular segment replacement. So if you want to do multiple circular replacements, either list them from further to closer relative to the start to avoid the distances for later fits being affected by earlier fits.</p>
 
 </dd>
-<dt id="stripSegments"><b>stripSegments</b></dt>
+<dt id="stripSegments"><b><code>-stripSegments</code></b></dt>
 <dd>
 
-<p>if specified, this results in existing segment definitions on input files (including those specified with -join) being stripped before processing. This would typically be used if -autoSegments is specified.</p>
+<p>if specified, this results in existing segment definitions on input files (including those specified with <code>-join</code>) being stripped before processing. This would typically be used if <code>-autoSegments</code> is specified.</p>
 
 </dd>
-<dt id="title-string"><b>title</b> &lt;string&gt;</dt>
+<dt id="title-string"><b><code>-title</code></b> &lt;string&gt;</dt>
 <dd>
 
-<p>Specify the name of the GPX route. The default is the name listed in the source GPX. This is synonymous with &quot;-name&quot;.</p>
+<p>Specify the name of the GPX route. The default is the name listed in the source GPX. This is synonymous with <code>-name</code>.</p>
 
 </dd>
-<dt id="v-or-version"><b>v</b> or <b>version</b></dt>
+<dt id="track-number"><b><code>-track</code></b> &lt;number&gt;</dt>
+<dd>
+
+<p>Specify which track (1, 2, 3, ...) within the file to use. The default is 1. If you specify 0 or a negative number, the default will be used. Track number can also be specified by putting a suffix after the filename, for example &quot;file.gpx:2&quot; for the second track in file.gpx.</p>
+
+</dd>
+<dt id="v-or--version"><b><code>-v</code></b> or <b><code>-version</code></b></dt>
 <dd>
 
 <p>Print the version number and exit.</p>
 
 </dd>
-<dt id="zAutoSmooth"><b>zAutoSmooth</b></dt>
+<dt id="zAutoSmooth"><b><code>-zAutoSmooth</code></b></dt>
 <dd>
 
-<p>Synonym for -autoSmoothZ</p>
+<p>Synonym for <code>-autoSmoothZ</code></p>
 
 </dd>
-<dt id="zOffset-meters"><b>zOffset</b> &lt;meters&gt;</dt>
+<dt id="zOffset-meters"><b><code>-zOffset</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>before scaling</i>. Use -zShift for changing altitude after scaling.</p>
+<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altitude is recorded by an improperly zeroed altimeter.</p>
+
+<p>For example, you might prefer using data from a bike computer due to superior resolution of gradient, but note that the starting and finishing altitudes differ from map data. In this instance, a combination of <code>-ZShift</code> and <code>-ZOffset</code> can bring the computer data closer to the net altitude gain from the map data, while providing better resolution of gradients.</p>
+
+<p>This is applied <i>before scaling</i>. Use <code>-zShift</code> for changing altitude after scaling.</p>
 
 </dd>
-<dt id="zScale-factor"><b>zScale</b> &lt;factor&gt;</dt>
+<dt id="zScale-factor"><b><code>-zScale</code></b> &lt;factor&gt;</dt>
 <dd>
 
 <p>Multiply altitudes in the original file <i>after offset</i>. but <i>before shift</i>. This is useful for fantasy routes where climbing should be adjusted, or potentially for data from a poorly calibrated barometer where I want to perfectly tune the net altitude change of a climb.</p>
 
 </dd>
-<dt id="zShift-meters"><b>zShift</b> &lt;meters&gt;</dt>
+<dt id="zShift-meters"><b><code>-zShift</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. Use -zOffset for before scaling.</p>
+<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. Use <code>-zOffset</code> for before scaling.</p>
 
 </dd>
-<dt id="zShift-meters1"><b>zShift</b> &lt;meters&gt;</dt>
+<dt id="zShift-meters1"><b><code>-zShift</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. Use -zOffset for before scaling.</p>
+<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. Use <code>-zOffset</code> for before scaling.</p>
 
 </dd>
-<dt id="zShiftEnd-meters"><b>zShiftEnd</b> &lt;meters&gt;</dt>
-<dd>
-
-<p>Distance on the route to end altitude shift. There will be a transition outside of this range.</p>
-
-</dd>
-<dt id="zShiftStart-meters"><b>zShiftStart</b> &lt;meters&gt;</dt>
+<dt id="zShiftStart-meters"><b><code>-zShiftStart</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>Distance on the route to start altitude shift. There will be a transition outside of this range.</p>
 
 </dd>
-<dt id="zSmooth"><b>zSmooth</b></dt>
+<dt id="zSmooth"><b><code>-zSmooth</code></b></dt>
 <dd>
 
-<p>Synonym for -smoothz</p>
+<p>Synonym for <code>-smoothz</code></p>
 
 </dd>
-<dt id="zsigma"><b>zsigma</b></dt>
+<dt id="zSigma"><b><code>-zSigma</code></b></dt>
 <dd>
 
-<p>Synonym for -smoothz</p>
+<p>Synonym for <code>-smoothz</code></p>
 
 </dd>
 </dl>
@@ -835,21 +993,21 @@ Pod::Usage   : for the -help option</code></pre>
 
 <ul>
 
-<p>1. if the input file has segments defined in the manner required by RGT, then these segments will be retained, unless the -stripSegments option is used. If there are gaps between segments, then these gaps will be filled with additional segments, such that there is no ambiguity about whether a gap belongs to the prior or following segment.</p>
+<p>1. if the input file has segments defined in the manner required by RGT, then these segments will be retained, unless the <code>-stripSegments</code> option is used. If there are gaps between segments, then these gaps will be filled with additional segments, such that there is no ambiguity about whether a gap belongs to the prior or following segment.</p>
 
 <p>2. Adjacent unnamed segments will be merged, so for example the artificial segments assigned to gaps between segments will be assigned to adjacent unnamed segment(s).</p>
 
-<p>3. You can define your own segments using the -segments option. This is followed by a comma-delimited list of a start position, a finish position, and a name, followed optionally by more of these three items. So it can be followed by a number of comma-delimited elements divisible by three. For each triplet, a segment is formed between the first coordinate and the second coordinate and assigned the name of the third element (if non-blank). For example, -segment 1000,2000,&quot;timed km&quot; creates a segment from 1000 meters into the route, up to 2000 meters into the route, and named the segment &quot;timed km&quot;. These coordinates are of course affected by other operations performed by this code so order of these operations is important. The segments are evaluated after most operations such as smoothing, but before cropping, so the coordinates do not take into account potential crops.</p>
+<p>3. You can define your own segments using the <code>-segments</code> option. This is followed by a comma-delimited list of a start position, a finish position, and a name, followed optionally by more of these three items. So it can be followed by a number of comma-delimited elements divisible by three. For each triplet, a segment is formed between the first coordinate and the second coordinate and assigned the name of the third element (if non-blank). For example, <code>-segment</code> 1000,2000,&quot;timed km&quot; creates a segment from 1000 meters into the route, up to 2000 meters into the route, and named the segment &quot;timed km&quot;. These coordinates are of course affected by other operations performed by this code so order of these operations is important. The segments are evaluated after most operations such as smoothing, but before cropping, so the coordinates do not take into account potential crops.</p>
 
-<p>4. A more powerful way to create segments is to do so automatically. This uses an algorithm which examines the route profile and identifies what it considers to be &quot;climbs&quot;. The default is for no automatic segments to be generated, so to request this, the -autoSegments option is used. It&#39;s followed by two numbers. The first is the threshold for a climb: small bumps in the road are not assigned for timing. The number is vertical meters at a reference 10% grade. The second number is a power which describes how much weight is put on steepness for defining a climb. A typical range is 0.3 to 1.0, with 0.5 to 0.7 working fairly well in many cases. A lower number will tend to create longer segments rather than focusing on steep sections, and will tend to combine sections which are separated by plateaus or brief descents. A larger number will tent to split these segmented climbs into individual climbs, so for example if a road is 10% for 1 km, then flat for 500 meters, then 8% for the next km, that might be considered one climb or two. Additionally automatic segments need to be separated from each other. The amount of this separation is specified with the -autoSegmentMargin option (default is 400). There&#39;s also minimum spacings to the start (-autoSegmentStartMargin) and finish (-autoSegmentFinishMargin) lines. If climbs would be too close to each other, the lower rated one is ignored, as are climbs which would be too close to the start and/or finish. So if you&#39;re designing a route for a hillclimbing competition, unless the finish is sufficiently past the start of the climb and the start is suffiently separate from the start of the climb, there will not be a segment defined for the climb.</p>
+<p>4. A more powerful way to create segments is to do so automatically. This uses an algorithm which examines the route profile and identifies what it considers to be &quot;climbs&quot;. The default is for no automatic segments to be generated, so to request this, the <code>-autoSegments</code> option is used. It&#39;s followed by two numbers. The first is the threshold for a climb: small bumps in the road are not assigned for timing. The number is vertical meters at a reference 10% grade. The second number is a power which describes how much weight is put on steepness for defining a climb. A typical range is 0.3 to 3.0, with 0.5 to 1.0 working fairly well in many cases. A lower number will tend to create longer segments rather than focusing on steep sections, and will tend to combine sections which are separated by plateaus or brief descents. A larger number will tent to split these segmented climbs into individual climbs, so for example if a road is 10% for 1 km, then flat for 500 meters, then 8% for the next km, that might be considered one climb or two. Additionally automatic segments need to be separated from each other. The amount of this separation is specified with the -autoSegmentMargin option (default is 400). There&#39;s also minimum spacings to the start (-autoSegmentStartMargin) and finish (-autoSegmentFinishMargin) lines. If climbs would be too close to each other, the lower rated one is ignored, as are climbs which would be too close to the start and/or finish. So if you&#39;re designing a route for a hillclimbing competition, unless the finish is sufficiently past the start of the climb and the start is suffiently separate from the start of the climb, there will not be a segment defined for the climb.</p>
 
 </ul>
 
 <h1 id="EXAMPLES">EXAMPLES</h1>
 
-<h2 id="auto-option">-auto option</h2>
+<h2 id="auto-option"><code>-auto</code> option</h2>
 
-<p>The -auto option attempts to use &quot;reasonable&quot; parameters which may not be the best in each case, and which may require some fine-tuning, but should work fairly well:</p>
+<p>The <code>-auto</code> option attempts to use &quot;reasonable&quot; parameters which may not be the best in each case, and which may require some fine-tuning, but should work fairly well:</p>
 
 <p><code>processGPX -auto GPXData.gpx</code></p>
 
@@ -859,7 +1017,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>The following example was from a criterium course:</p>
 
-<p><code>processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3 -minRadius 6 \ -prune -smooth 7 -snapDistance 2 -snap 1 -copyPoint -lap CherryPieCritRGT.gpx</code></p>
+<p><code>processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -splineDegs 12 -minRadius 6 -prune -smooth 7 -snapDistance 2 -snap 1 -copyPoint -lap CherryPieCritRGT.gpx</code></p>
 
 <p>The course has an out-and-back section ending in a loop. In the actual race, the out-and-back is separated by cones. However, for RGT cycling, riders use the full road width of 8 meters, so the out and back portions needed to be separated.</p>
 
@@ -867,7 +1025,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <dl>
 
-<dt id="laneshift--6"><b>-laneshift -6</b></dt>
+<dt id="laneshift--6"><b><code>-laneshift -6</code></b></dt>
 <dd>
 
 <p>Riders remain to the left left on the out-and-back portion, so each direction is shifted 4 meters to the left. The negative number implies left, a positive number implies right.</p>
@@ -875,7 +1033,7 @@ Pod::Usage   : for the -help option</code></pre>
 <p>At one time a lane shift of 4 meters was adequate, but with changes to &quot;asset&quot; placement, a larger lane shift is now needed. This example uses 7 meters to the left (UK, perhaps).</p>
 
 </dd>
-<dt id="shiftStart-740--shiftEnd-1390"><b>-shiftStart 740 -shiftEnd 1390</b></dt>
+<dt id="shiftStart-740--shiftEnd-1390"><b><code>-shiftStart 740 -shiftEnd 1390</code></b></dt>
 <dd>
 
 <p>The lane shift is applied starting at 740 meters and ending at 1390 meters, with a transition calculated from the lane shift. This is applied after all smoothing, but before the lane shifting, and importantly, before the route start shift. Note there is a default &quot;-shiftSF -60&quot; applied at the end of the process, so if you want to determine the distance to apply the lane shift, then make sure to either do a run first with &quot;-shiftSF 0 -laneShift 0&quot;, or subtract 100 meters from the distance coordinates to judge what the distance would have been at the time the lane shift is applied.</p>
@@ -883,113 +1041,163 @@ Pod::Usage   : for the -help option</code></pre>
 <p>It&#39;s important to check to make sure at the edge of the lane shift region the two directions don&#39;t get too close, due to the transition. If they do, then extend the lane shift region somewhat to make room for the transition. Also check the lane shift hasn&#39;t caused any corners to fold into points, or invert. If this happens, apply more smoothing to round the corners more before applying the lane shift. Unfortunately there is no support yet for position-dependent smoothing, which would help.</p>
 
 </dd>
-<dt id="spacing-3"><b>-spacing 3</b></dt>
+<dt id="spacing-3"><b><code>-spacing 3</code></b></dt>
 <dd>
 
-<p>This is a short criterium course with a lot of tight corners, so the initial spacing between points is set to 3 meters. This works for the 1.6 km criterium, but would perhaps be too many points for a 75 km point-to-point course, for example. But for longer routes, sharp corners are probably less of a factor. Note this number should probably be no greater than the &quot;-smooth&quot; parameter, unless &quot;-autospacing&quot; is used, in which case corners will set with finer spacing.</p>
+<p>This is a short criterium course with a lot of tight corners, so the initial spacing between points is set to 3 meters. This works for the 1.6 km criterium, but would perhaps be too many points for a 75 km point-to-point course, for example. But for longer routes, sharp corners are probably less of a factor. Note this number should probably be no greater than the <code>-smooth</code> parameter, unless <code>-autospacing</code> is used, in which case corners will set with finer spacing.</p>
 
 </dd>
-<dt id="minRadius-6"><b>-minRadius 6</b></dt>
+<dt id="autoSpacing1"><b><code>-autoSpacing</code></b></dt>
+<dd>
+
+<p>This option is almost always a good idea, setting the spacing in the corners to provide adequare resolution.</p>
+
+</dd>
+<dt id="splineDegs-12"><b><code>-splineDegs 12</code></b></dt>
+<dd>
+
+<p>This option helps improve prevent corners from &quot;collapsing&quot; when they don&#39;t have enough points to define the curve in the original GPX file. Instead of being interpreted as polygons with straight segments, they will be interpreted as smooth curves, if there are corners bending more than this angle (12 degrees, in this example). This is usually a good idea if there are tight turns.</p>
+
+</dd>
+<dt id="minRadius-6"><b><code>-minRadius 6</code></b></dt>
 <dd>
 
 <p>If a corner turns out sharper than 6 meters, RGT will try to increase the radius of the turn by extending the road outward, with a smooth transition into and out of the correction.</p>
 
 </dd>
-<dt id="prune1"><b>-prune</b></dt>
+<dt id="prune1"><b><code>-prune</code></b></dt>
 <dd>
 
 <p>Remove useless points which don&#39;t affect either the shape of the route, or the altitude profile. This should probably be the default.</p>
 
 </dd>
-<dt id="smooth-7"><b>-smooth 7</b></dt>
+<dt id="smooth-7"><b><code>-smooth 7</code></b></dt>
 <dd>
 
 <p>Position is smoothed with a Gaussin with sigma = 7 meters. This was done here to tune the corner rounding, especially since there was a lane-shifted corner, and lane-shifting reduces inside corner radii.</p>
 
 </dd>
-<dt id="snapDistance-2--snap-1"><b>-snapDistance 2 -snap 1</b></dt>
+<dt id="snapDistance-2--snap-1"><b><code>-snapDistance 2 -snap 1</code></b></dt>
 <dd>
 
 <p>Snap the return leg in the out-and-back to match the outgoing leg when the two are within 2 meters. The &quot;1&quot; refers to replacing later occurances of road with preceding cases: &quot;2&quot; would replace the earlier occurance. 2 meters is presently the default snap distance. With Strava Route Editor data, 1 meter can result in a fragmented replacement, and bad results. When a road has curves, a larger snapDistance than the default may be necessary. Too large a value may cause merging roads to suddenly &quot;snap&quot; together from too far a range, however, or even adjacent roads or lanes to merge. For reference, in RGT Cycling, road width is 8 meters.</p>
 
 </dd>
-<dt id="copyPoint1"><b>-copyPoint</b></dt>
+<dt id="copyPoint1"><b><code>-copyPoint</code></b></dt>
 <dd>
 
 <p>Make sure the last point matches the first, so RGT Cycling recognizes it as a circuit</p>
 
 </dd>
-<dt id="lap1"><b>-lap</b></dt>
+<dt id="lap1"><b><code>-lap</code></b></dt>
 <dd>
 
-<p>It is a multi-lap race, so assure a smooth transition from the end of a lap to the beginning of a next. This is also necessary for &quot;-copyPoint&quot; to work.</p>
+<p>It is a multi-lap race, so assure a smooth transition from the end of a lap to the beginning of a next. This is also necessary for <code>-copyPoint</code> to work.</p>
+
+</dd>
+</dl>
+
+<h2 id="out-and-back-course">out-and-back course</h2>
+
+<p>This example uses the -outAndBack shortcut to create an out-and-back course starting from a simple point-to-point GPX file:</p>
+
+<p><code>processGPX -outAndBack outSection.gpx -out outAndBack.gpx</code></p>
+
+<dl>
+
+<dt id="outAndBack1"><b><code>-outAndBack</code></b></dt>
+<dd>
+
+<p>This specifies that the route should loop around at the turn-around, then return, with a default lane shift.</p>
+
+</dd>
+</dl>
+
+<h2 id="out-and-back-circuit">out-and-back circuit</h2>
+
+<p>This example uses the -outAndBackLap shortcut to create an out-and-back circuit with loops at both ends to create a circuit.</p>
+
+<p><code>processGPX -outAndBackLap outSection.gpx -out outAndBackCircuit.gpx</code></p>
+
+<dl>
+
+<dt id="outAndBack2"><b><code>-outAndBack</code></b></dt>
+<dd>
+
+<p>This specifies that the route should loop around at the turn-around, then return, with a default lane shift.</p>
 
 </dd>
 </dl>
 
 <h2 id="road-course-w-out-and-back">road course w/ out-and-back</h2>
 
-<p>This is from a road course with an out-and-back section:</p>
+<p>This is from a road course with an out-and-back section. Note -RUTurn is not used here, since in this example, the loop at the end of the out-and-back is part of the original route.</p>
 
-<p><code>processGPX -crop 38730 -anchor -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothz 20 -snapDistance 5 -snap 1 -minRadius 6 NoonRide.gpx</code></p>
+<p><code>processGPX -crop 38730 -anchorSF -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothz 20 -snapDistance 5 -snap 1 -autoSegments 10 0.5 -minRadius 6 NoonRide.gpx</code></p>
 
 <dl>
 
-<dt id="crop-38730"><b>-crop 38730</b></dt>
+<dt id="crop-38730"><b><code>-crop 38730</code></b></dt>
 <dd>
 
-<p>The course was designed beyond the desired end of the RGT course, since the end is on an out-and-back section, and to assure the end is perfectly aligned with the outward portion of the same road, it was extended further and cropped back. This is important since smoothing uses both the road ahead of and behind a certain point, so at an endpoint of GPX data, smoothing will be different than if that road had been extended further. This course ended up being 38.73 km, which corresponds to a distance between banners of 37.63 km, since 60 meters (start) and 140 meters (finish) each end is reserved for riders gathering.</p>
+<p>The finish of this route is on the out-and-back section, so alignment of the outward and inward legs is important. Since smoothing at the end of a GPX file is different than smoothing sufficiently far from the end, and the desire was to have smoothing similarly affect the out and back portions at the eventual finish, the GPX file was designed to extend beyond the ultimate end of the file, then it was cropped back. Cropping is done after smoothing, so this cropping distance was chosen by first examining the result of all smoothing, then processGPX was re-run on the original file with this crop distance added. This will result in a race distance of 38.53 km, since 200 meters is allocated to start (60 meters) or finish (140 meters) zones.</p>
 
 </dd>
-<dt id="anchor"><b>-anchor</b></dt>
+<dt id="anchorSF1"><b><code>-anchorSF</code></b></dt>
 <dd>
 
 <p>Don&#39;t move the start point or the finish point of the course. Smoothing is done as normal, but then at the end, these points are returned to their original positions, and nearby points nudged to keep a smooth transition.</p>
 
 </dd>
-<dt id="spacing-10"><b>-spacing 10</b></dt>
+<dt id="spacing-10"><b><code>-spacing 10</code></b></dt>
 <dd>
 
 <p>A point spacing of 10 meters is initially established. This is more than what was used in the criterium course example, since for a longer course, smaller spacing results in more points.</p>
 
 </dd>
-<dt id="autospacing"><b>-autospacing</b></dt>
+<dt id="autospacing"><b><code>-autospacing</code></b></dt>
 <dd>
 
 <p>Automatically put extra points near corners before smoothing. This is a good option to assure smooth corners.</p>
 
 </dd>
-<dt id="smoothAngle-20"><b>-smoothAngle 20</b></dt>
+<dt id="smoothAngle-20"><b><code>-smoothAngle 20</code></b></dt>
 <dd>
 
 <p>Target the angle between segments at the apex of corners to be no more than 20 degrees. This seems to work fairly well. You can compare to 10 degrees. Most of the corner will end up with smaller angles than this, as will corners which are less than 90 degrees.</p>
 
 </dd>
-<dt id="prune2"><b>-prune</b></dt>
+<dt id="prune2"><b><code>-prune</code></b></dt>
 <dd>
 
 <p>Eliminate unnecessary points at the end. This should probably always be used.</p>
 
 </dd>
-<dt id="smooth-10"><b>-smooth 10</b></dt>
+<dt id="smooth-10"><b><code>-smooth 10</code></b></dt>
 <dd>
 
 <p>Use 10 meter smoothing on position and, initially, on altitude. This results in some rounding of corners. For this course the result was compared with the &quot;GPX Visualizer&quot; website to satellite data, to make sure corners were fairly well aligned with actual corners, but additionally that there were no anomalies such as &quot;zig-zags&quot; which did not exist in the real road. More than 10 meters and some detail from the actual road may be lost, such as switchbacks with imperfect variable radius.</p>
 
 </dd>
-<dt id="smoothz-20"><b>-smoothz 20</b></dt>
+<dt id="smoothz-20"><b><code>-smoothz 20</code></b></dt>
 <dd>
 
 <p>Additionally smooth altitude with a 20 meter smoothing distance. On this course, there were still gradient spikes with 10 meter smoothing, while more than 20 meter smoothing would have lost some of the actual variations in steepness.</p>
 
 </dd>
-<dt id="snapDistance-5--snap-1"><b>-snapDistance 5 -snap 1</b></dt>
+<dt id="snapDistance-5--snap-1"><b><code>-snapDistance 5 -snap 1</code></b></dt>
 <dd>
 
 <p>The course is a &quot;lollypop&quot;, meaning it heads out, does a big loop, then returns (part way). To make sure the return is well-aligned with the out, snapping is used. &quot;-snap 1&quot; means align the return to the out (rather than the reverse). &quot;-snapDistance 5&quot; means to snap points which are as much as 5 meters apart. 5 meters is a lot, and the result needs to be checked afterwards to make sure this doesn&#39;t result in transitions are too abrupt, but a large snapdistance can help make sure corners get snapped together.</p>
 
 </dd>
-<dt id="minRadius-61"><b>-minRadius 6</b></dt>
+<dt id="autoSegments-10-0.5"><b><code>-autoSegments 10 0.5</code></b></dt>
+<dd>
+
+<p>This specifies that segments should be generated for hills found in the route. The first number is the approximate altitude gained in meters needed for a hill to be marked as a segment. THe second is how strongly average gradient should be used in segment placement: a higher number places a higher value on segments having a higher average gradient.</p>
+
+</dd>
+<dt id="minRadius-61"><b><code>-minRadius 6</code></b></dt>
 <dd>
 
 <p>If a corner turns out sharper than 6 meters, RGT will try to increase the radius of the turn by extending the road outward, with a smooth transition into and out of the correction.</p>
@@ -1013,31 +1221,31 @@ Pod::Usage   : for the -help option</code></pre>
 
 <dl>
 
-<dt id="shiftSF-0"><b>-shiftSF 0</b></dt>
+<dt id="shiftSF-0"><b><code>-shiftSF 0</code></b></dt>
 <dd>
 
 <p>The first call to processGPX specifies no S/F line shift (that will be done the second call, and I want to maintain the position of the start of the GPX for the first call).</p>
 
 </dd>
-<dt id="lap2"><b>-lap</b></dt>
+<dt id="lap2"><b><code>-lap</code></b></dt>
 <dd>
 
 <p>It is a lap course.</p>
 
 </dd>
-<dt id="spacing-31"><b>-spacing 3</b></dt>
+<dt id="spacing-31"><b><code>-spacing 3</code></b></dt>
 <dd>
 
 <p>A fine spacing is used here, as the loop is only 1600 meters, and I&#39;ll rely on pruning to reduce the number of points later.</p>
 
 </dd>
-<dt id="zsmooth-10"><b>-zsmooth 10</b></dt>
+<dt id="zsmooth-10"><b><code>-zsmooth 10</code></b></dt>
 <dd>
 
 <p>This is moderate altitude smoothing. It&#39;s an urban course, but the climbs have fairly smooth transitions, and observing the gradient profile, there were some anomalies with using 5 meter smoothing. Strava Route Editor tends to produce abrupt gradient changes.</p>
 
 </dd>
-<dt id="smooth-5"><b>-smooth 5</b></dt>
+<dt id="smooth-5"><b><code>-smooth 5</code></b></dt>
 <dd>
 
 <p>This is a fairly small amount of smoothing, for urban corners with some rounding, or where the actual road is wider than the Magic Roads 8 meter road width, and wider lines are available.</p>
@@ -1049,55 +1257,41 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This is the name of the original GPX file</p>
 
 </dd>
-<dt id="out"><b>-out -</b></dt>
+<dt id="out"><b><code>-out -</code></b></dt>
 <dd>
 
 <p>This tells the code to write the resulting GPX to &quot;the standard output&quot;.</p>
 
 </dd>
-<dt id="processGPX"><b>| processGPX -</b>&quot;</dt>
+<dt id="processGPX"><b><code>| processGPX -</code></b>&quot;</dt>
 <dd>
 
 <p>This tells the command line shell to &quot;send the standard output to the standard input of the next program&quot;, which is a sepearate call to processGPX. It&#39;s called a &quot;pipe&quot;. The &quot;-&quot; tells the code that this call takes its input from the pipe. So think of it as a virtual file, a direct line of communication from one call of the code to the next.</p>
 
 </dd>
-<dt id="copyPoint--lap"><b>-copyPoint -lap</b></dt>
+<dt id="copyPoint--lap"><b><code>-copyPoint -lap</code></b></dt>
 <dd>
 
 <p>Tell this call to the code that it&#39;s a lap, and I want to copy the first point to the last point to close the loop.</p>
 
 </dd>
-<dt id="smooth-15--smoothStart-1540--smoothEnd-270"><b>-smooth 15 -smoothStart 1540 -smoothEnd 270</b></dt>
+<dt id="smooth-15--smoothStart-1540--smoothEnd-270"><b><code>-smooth 15 -smoothStart 1540 -smoothEnd 270</code></b></dt>
 <dd>
 
 <p>Apply 15 meter smoothing this time, except start it at 1540 meters into the course, and end it as 270 meters into the course. The smoothing domain wraps around, because it starts after it finishes. So the end of the loop, and the beginning of the loop, will be additionally smoothed, while the rest will be kept unaltered, with a transitional range applied to avoid abrupt changes.</p>
 
 </dd>
-<dt id="minRadius-62"><b>-minRadius 6</b></dt>
+<dt id="minRadius-62"><b><code>-minRadius 6</code></b></dt>
 <dd>
 
 <p>This sets the minimum radius of corners to 6 meters. This is done in the second step here to include effects from processing in both steps.</p>
 
 </dd>
-<dt id="out-processed.gpx"><b>-out processed.gpx</b></dt>
+<dt id="out-processed.gpx"><b><code>-out processed.gpx</code></b></dt>
 <dd>
 
 </dd>
 </dl>
-
-<h2 id="Multi-step-processing:-snapping-after-spacing">Multi-step processing: snapping after spacing</h2>
-
-<p>Snapping (making sure the course is aligned where it repeats itself) is performed before any point interpolation or smoothing. However, especially with short courses, it may not work well where straigh sections in the initial route have only two points, or elsewhere when the number of points is very sparse. A solution in this case is to run the program twice. This is an example:</p>
-
-<p><code>processGPX -loop -copyPoint -shiftSF -50 -snapDistance 3 -spacing 2 -snap 1 -smoothz 10 -lap CritRGT.gpx -out Crit_step1.gpx</code></p>
-
-<p><code>processGPX -loop -copyPoint -shiftSF 0 -snapDistance 1 -snapTransition 20 -prune -snap 1 -smooth 10 CritRGT_step1.gpx -out Crit_processed_v1.gpx</code></p>
-
-<p>Here the first pass does a first pass of snapping, and afterwards it adds points to a very fine spacing of 2 meters, It shifts the start of the GPX back 50 meters. The goal here is to do the first crude point snapping on the low-resolution data,then reduce the point spacing for a second snap pass which will be done next, since the code snaps only before adding points. The result of the first pass is the file <i>Crit_step1.gpx</i>.</p>
-
-<p>The second pass is not going to shift the start of the GPX any further: that was already done the first pass. Gross snapping was done the first pass, so a smaller snap distance is used here, since with the finer spacing of points after pass 1, some additional snapping may be needed here. The experimental &quot;-snapTransition&quot; option is used here. It makes sure points entering or leaving snap regions are aligned in altitude. This was a reason for the very fine point spacing used here: this course has a lot of repeated sections, and the goal is to keep the roads at similar altitude as they converge or diverge to avoid ridges in the asphault. Smoothing is done this step, with a 10 nm smoothing length. Note the snap transition was twice this value: we don&#39;t want smoothing to compromise our synchronization of altitude. The resulting file is <i>Crit_processed_v1.gpx</i>.</p>
-
-<p>Some experimentation is needed with these options, but it helps to have an idea of what the requirements are of each specific course. The course shown here was special in taking multiple passes over the same roads (actually paths) and having a complicated altitude profile. This situation is particularly challenging with Magic Roads if you want the transitions to look good.</p>
 
 <h2 id="segment-generation">segment generation</h2>
 
@@ -1105,19 +1299,19 @@ Pod::Usage   : for the -help option</code></pre>
 
 <dl>
 
-<dt id="stripSegments1"><b>-stripSegments</b></dt>
+<dt id="stripSegments1"><b><code>-stripSegments</code></b></dt>
 <dd>
 
 <p>If the input file has segments already defined, this will ignore those.</p>
 
 </dd>
-<dt id="autoSegments-20-0.5"><b>-autoSegments 20 0.5</b></dt>
+<dt id="autoSegments-20-0.5"><b><code>-autoSegments 20 0.5</code></b></dt>
 <dd>
 
 <p>This tells the code that automatic segments should be generated for climbs gaining at least 20 meters if they average 10% gradient. Shallower climbs need to gain more, steeper climbs don&#39;t need to gain as much. The power assigned to gradient is 0.5, so for example if the gradient is 5% instead of 10%, then since the square root of 5/10 = 0.71, this climb would need to gain at least 28.2 meters instead of 20 meters to be considered as a timed segment.</p>
 
 </dd>
-<dt id="segments-1500-2000-bonus-segment"><b>-segments 1500,2000,&quot;bonus segment&quot;</b></dt>
+<dt id="segments-1500-2000-bonus-segment"><b><code>-segments 1500,2000,&quot;bonus segment&quot;</code></b></dt>
 <dd>
 
 <p>This adds an additional segment to the route. between 1500 and 2000 meters from the start of the route. This is defined before any automatic segments are generated, so care should be taken that this segment is not overlapping anything which will be considered to be a climb.</p>
@@ -1131,19 +1325,19 @@ Pod::Usage   : for the -help option</code></pre>
 
 <dl>
 
-<dt id="autoSegmentMargin-1000"><b>-autoSegmentMargin 1000</b></dt>
+<dt id="autoSegmentMargin-1000"><b><code>-autoSegmentMargin 1000</code></b></dt>
 <dd>
 
 <p>The minimum spacing between auto-segments is set to 1000 meters. The minimum spacing to the start line would be set with -autoSegmentStartMargin, and for the finish, -autoSegmentFinishMargin.</p>
 
 </dd>
-<dt id="autoSegmentStretch-1"><b>-autoSegmentStretch 1</b></dt>
+<dt id="autoSegmentStretch-1"><b><code>-autoSegmentStretch 1</code></b></dt>
 <dd>
 
 <p>Be willing to increase auto-segment lengths up to their original length in order to either reach a flat portion for the start or a flat portion for the finish,</p>
 
 </dd>
-<dt id="autoSegments-5-1"><b>-autoSegments 5 1</b></dt>
+<dt id="autoSegments-5-1"><b><code>-autoSegments 5 1</code></b></dt>
 <dd>
 
 <p>The climb threshold is set to a relatively low value of 5 meters, meaning I want to pick up even small steps in the larger climb, and the gradient factor is set to 1, putting an emphasis on isolating individual climbing portions.</p>
@@ -1161,7 +1355,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <dl>
 
-<dt id="startTime-Feb-25-2021-07:00"><b>-startTime &quot;Feb 25 2021 07:00&quot;</b></dt>
+<dt id="startTime-Feb-25-2021-07:00"><b><code>-startTime &quot;Feb 25 2021 07:00&quot;</code></b></dt>
 <dd>
 
 <p>This specifies that the time points begin on the listed data and time in the local time zone (local to the user, not the course). The format of the data and time are flexible, but try to be unambiguous. For example, rather than put &quot;01/02/03&quot; for a date, try &quot;02 Jan 2003&quot;.</p>
@@ -1171,7 +1365,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <h2 id="adding-gradient-signs">adding gradient signs</h2>
 
-<p>This is an i&lt;experimental&gt; feature since RGT, the game which is the primary target of this code, does not at present include waypoint support.</p>
+<p>This is an <i>experimental</i> feature since RGT, the game which is the primary target of this code, does not at present include waypoint support.</p>
 
 <p>The following shows a partial command line, so added to other elements of a command line:</p>
 
@@ -1179,25 +1373,19 @@ Pod::Usage   : for the -help option</code></pre>
 
 <dl>
 
-<dt id="addGradientSigns1"><b>-addGradientSigns</b></dt>
+<dt id="addGradientSigns1"><b><code>-addGradientSigns</code></b></dt>
 <dd>
 
 <p>Tells the code to add waypoints where gradient signs should be placed.</p>
 
 </dd>
-<dt id="auto1"><b>auto</b></dt>
-<dd>
-
-<p>This option will attempt to guess at some good settings based on the course.</p>
-
-</dd>
-<dt id="gradientThreshold-20"><b>-gradientThreshold 20</b></dt>
+<dt id="gradientThreshold-20"><b><code>-gradientThreshold 20</code></b></dt>
 <dd>
 
 <p>A 10% grade would need to gain or lose 20 meters to get a sign. The altitude required for other gradients depends on the next option.</p>
 
 </dd>
-<dt id="gradientPower-2"><b>-gradientPower 2</b></dt>
+<dt id="gradientPower-2"><b><code>-gradientPower 2</code></b></dt>
 <dd>
 
 <p>This is the default value, but is listed here for documentation purposes. It says the suitability of a climb for a gradient sign is proportional to gradient squared. So for example, if a 10% climb gets one if it climbs 20 meters, than a 5% grade would need to gain 40 meters. This also affects the placement of signs, since if a climb is gradual, then steeper, then gradual again, should a single sign be used to cover the entire climb, or should signs be prioritized to the steep portion, then possibly add addiitonal signs to the gradual portions if they meet the threshold? The higher gradient power, the greater the priority placed on steepness. The default of &quot;2&quot; seems to work well.</p>
@@ -1223,19 +1411,19 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If you apply more lane shift than the radius of the tightest corner, the corner could end up with a non-positive radius, which is not what you want. The code may in the future be enhanced to make sure lane shifting doesn&#39;t reverse the direction of any road segments. But if you want, for example, 4 meter lane shifting, then make sure smoothing is at least 5 meters.</p>
 
 </dd>
-<dt id="snapping-not-perfect"><b>snapping not perfect</b></dt>
+<dt id="snapping-isnt-perfect"><b>snapping isn&#39;t perfect.</b></dt>
 <dd>
 
 <p>The snapping algorithm makes certain assumptions to reduce computation time and can be conflused for sufficiently complicated routes. More testing is needed.</p>
 
 </dd>
-<dt id="snapTransition-is-suspect"><b>-snapTransition is suspect.</b></dt>
+<dt id="snapTransition-is-suspect"><b><code>-snapTransition</code> is suspect.</b></dt>
 <dd>
 
 <p>This option needs more debugging.</p>
 
 </dd>
-<dt id="RGT-ignores-gradient-signs-and-puts-in-its-own"><b>RGT ignores gradient signs, and puts in its own</b></dt>
+<dt id="RGT-ignores-gradient-signs-and-puts-in-its-own"><b>RGT ignores gradient signs, and puts in its own.</b></dt>
 <dd>
 
 <p>This isn&#39;t the fault of this code: complain to RGT.</p>
@@ -1251,7 +1439,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <h1 id="AUTHORS">AUTHORS</h1>
 
-<p>Daniel Connelly &lt;<i>djconnel!at!gmail.com</i>&gt;</p>
+<p>Daniel Connelly &lt;<i>djconnel@gmail.com</i>&gt;</p>
 
 <h1 id="LICENSE">LICENSE</h1>
 
