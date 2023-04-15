@@ -15,9 +15,10 @@ use Pod::Usage;
 # version 0.38: fixed bug in speed model
 # version 0.39: add named segments, fixed spline smoothing
 # version 0.40: adjust default margin, smoothing after minRadius
-# version 0.41: improvements to snapping, single track, outAndBack shortcuts, auto-straighten
+# version 0.41: improvements to snapping, adds splitting, single track, outAndBack shortcuts, auto-straighten
+# version 0.42: fixed error in segment naming
 
-my $version = "0.41";             # make sure this matches pod value
+my $version = "0.42";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -3888,7 +3889,7 @@ for my $file ( @files ) {
     $nSegment ++;
     $segmentDefined{$nSegment} ++;
 
-    my $segmentName = $extensions->{segmentName}->{$nSegment};
+    my $segmentName = $extensions->{segmentName}->{$nTrack}->{$nSegment};
     $segmentName{$nSegment} = $segmentName;
     note("processing segment $nSegment ...\n");
     note("segment name = $segmentName\n") if ( (defined $segmentName) && ($segmentName ne "") );
@@ -5403,7 +5404,7 @@ for my $file ( @files ) {
     my @segments = ();
 
     # reset the segment names field for this track
-    $extensions->{segmentName} = {};
+    $extensions->{segmentName}->{$nTrack} = {};
 
     my @segmentPoints;
     my $sPrev;
@@ -5431,7 +5432,7 @@ for my $file ( @files ) {
           # add segment name if defined
           my $nSegment = scalar @segments;
           my $segmentID = $segment{points}->[0]->{segment} // 0;
-          $extensions->{segmentName}->{$nSegment} = $segmentName{$segmentID}
+          $extensions->{segmentName}->{$nTrack}->{$nSegment} = $segmentName{$segmentID}
             if (defined $segmentName{$segmentID});
 
           # zero out the current segment
@@ -5550,7 +5551,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.41
+0.42
 
 =head1 DESCRIPTION
 
@@ -5617,9 +5618,9 @@ By default, this is the first track, or track #1 counting 1, 2, 3 ...
 If you want to specify a track other than 1, then use either the
 C<-track> option (followed by a number 1, 2, 3...), or put the number
 after a ":" at the end of a filename.  So for example, if I wanted
-track #2 in a file file.gpx, I could specify either "-track 2", or
+track #2 in a file file.gpx, I could specify either "C<-track 2>", or
 "file.gpx:2".  For the -join option only the filename suffix works, so
-"-join file.gpx:2".
+"C<-join file.gpx:2>".
 
 The program will calculate a "altitude quality score" of both the
 original GPX file, and of the result of processing, which is based on
@@ -5761,7 +5762,7 @@ courses. In RGT, the finish line is typically places 140 meters prior
 to the end of a point-to-point course, so if for example you design a
 course to be exactly 10 miles, (a typical UK time trial distance),
 then to put the finish line at the end of those 10 miles, the option
-"-append 140" would add 140 meters.  This buffer is needed by RGT
+"C<-append 140>" would add 140 meters.  This buffer is needed by RGT
 because riders group along the road-side after crossing the finish.
 Note the start line would also need to be extended, via C<-prepend>, by
 60 meters, in this case.
@@ -5773,7 +5774,7 @@ close, the code may put a bend in the road it creates with this command,
 if both C<-append> and C<-prepend> are specified (perhaps via C<-extend>).
 
 Negative values crop the course by the negative distance.  So
-"-append -100" will move the finish line back 100 meters.  This is
+"C<-append -100>" will move the finish line back 100 meters.  This is
 useful for preventing RGT from connecting the finish and start points,
 which has a 100 meter threshold, as this is written.
 
@@ -6296,7 +6297,7 @@ and loops.
 
 Instead of the default filename, which is the input file with
 F<_processed.gpx>, use this filename instead.  Make sure to specify
-the F<.gpx> suffix if that is what is wanted. A "-" implies standard
+the F<.gpx> suffix if that is what is wanted. A "C<->" implies standard
 output.
 
 =item B<C<-outAndBack>>
@@ -6543,14 +6544,14 @@ unclear.  In circuit courses careful placement of the start/finish
 line, for example at the crest of a hill, or a specific distance from
 a final corner, is critical, so with this option you can carefully
 place the start point for the GPX file at the desired start/finish,
-then use "-loop C<-shiftSF -60>" to move the start of the GPX file back
+then use "C<-loop -shiftSF -60>" to move the start of the GPX file back
 60 meters, putting the start where it should be.
 
 Since this is so commonly used in loop courses, the default is -60, so to
 disable it, use C<-shiftSF 0 -loop>.
 
 If you are processing a loop course in multiple steps, make sure to use
-"-shiftSF 0" on all steps other than one, otherwise each step will apply
+"C<-shiftSF 0>" on all steps other than one, otherwise each step will apply
 the default -60 meter shift.  You want to apply this shift only once.
 
 =item B<C<-sigma>> <meters>
@@ -6637,7 +6638,7 @@ reason is it's potentially very efficient with a smaller number
 of points, but sometimes more widely spaced points make it more
 challenging for the algorithm to determine that a section of road
 is being repeated.  In the past, when snapping was done only once,
-it was a regular practive to run processGPX twice in an effort
+it was a regular practice to run processGPX twice in an effort
 to more effectively snap points.
 
 The snapping algorithm does not work at the very start or end of the
@@ -6741,10 +6742,10 @@ pieces, then see the C<-autoSplit> option instead.
 
 =item B<C<-splitNumber>> <1, 2, 3..>
 
-If there are multiple splits (-splitAt or C<-autoSplits>), which splits
+If there are multiple splits (C<-splitAt> or C<-autoSplits>), which splits
 to output.  The default is to output all splits if a filename is
 specified for the output (using a _split with the split number as a
-suffix) or just the first split if it's to standard output ("-").  The
+suffix) or just the first split if it's to standard output ("C<->").  The
 default can be specifed with a non-positive number, or just omitting
 this option.
 
@@ -7017,9 +7018,9 @@ The lane shift is applied starting at 740 meters and ending at 1390
 meters, with a transition calculated from the lane shift.  This is
 applied after all smoothing, but before the lane shifting, and
 importantly, before the route start shift.  Note there is a default
-"-shiftSF -60" applied at the end of the process, so if you want to
+"C<-shiftSF -60>" applied at the end of the process, so if you want to
 determine the distance to apply the lane shift, then make sure to
-either do a run first with "-shiftSF 0 -laneShift 0", or subtract 100
+either do a run first with "C<-shiftSF 0 -laneShift 0>", or subtract 100
 meters from the distance coordinates to judge what the distance would
 have been at the time the lane shift is applied.
 
@@ -7204,8 +7205,8 @@ steepness.
 
 The course is a "lollypop", meaning it heads out, does a big loop,
 then returns (part way).  To make sure the return is well-aligned
-with the out, snapping is used.  "-snap 1" means align the return
-to the out (rather than the reverse).  "-snapDistance 5" means to snap
+with the out, snapping is used.  "C<-snap 1>" means align the return
+to the out (rather than the reverse).  "C<-snapDistance 5>" means to snap
 points which are as much as 5 meters apart.  5 meters is a lot, and the
 result needs to be checked afterwards to make sure this doesn't result
 in transitions are too abrupt, but a large snapdistance can help make sure
@@ -7290,11 +7291,11 @@ This is the name of the original GPX file
 This tells the code to write the resulting GPX to "the standard
 output".
 
-=item B<C<| processGPX ->>"
+=item B<C<| processGPX ->>
 
 This tells the command line shell to "send the standard output to the
 standard input of the next program", which is a sepearate call to
-processGPX.  It's called a "pipe".  The "-" tells the code that this
+processGPX.  It's called a "pipe".  The "C<->" tells the code that this
 call takes its input from the pipe.  So think of it as a virtual file, a
 direct line of communication from one call of the code to the next.
 

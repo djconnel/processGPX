@@ -48,7 +48,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.41</p>
+<p>0.42</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -74,7 +74,7 @@
 
 <p>where the order of command line options does not matter, except that the same option listed more than once will result in parameters specified last being used.</p>
 
-<p>Typically GPX file contain a single &quot;track&quot;, each of which contains multiple &quot;segments&quot;, each of which contains multiple connected &quot;points&quot;. RGT assumes segments are connected as well as points within the segments. However, GPX file may also contain multiple tracks. processGPX is set up to process one track at a time within a GPX file. By default, this is the first track, or track #1 counting 1, 2, 3 ... If you want to specify a track other than 1, then use either the <code>-track</code> option (followed by a number 1, 2, 3...), or put the number after a &quot;:&quot; at the end of a filename. So for example, if I wanted track #2 in a file file.gpx, I could specify either &quot;-track 2&quot;, or &quot;file.gpx:2&quot;. For the -join option only the filename suffix works, so &quot;-join file.gpx:2&quot;.</p>
+<p>Typically GPX file contain a single &quot;track&quot;, each of which contains multiple &quot;segments&quot;, each of which contains multiple connected &quot;points&quot;. RGT assumes segments are connected as well as points within the segments. However, GPX file may also contain multiple tracks. processGPX is set up to process one track at a time within a GPX file. By default, this is the first track, or track #1 counting 1, 2, 3 ... If you want to specify a track other than 1, then use either the <code>-track</code> option (followed by a number 1, 2, 3...), or put the number after a &quot;:&quot; at the end of a filename. So for example, if I wanted track #2 in a file file.gpx, I could specify either &quot;<code>-track 2</code>&quot;, or &quot;file.gpx:2&quot;. For the -join option only the filename suffix works, so &quot;<code>-join file.gpx:2</code>&quot;.</p>
 
 <p>The program will calculate a &quot;altitude quality score&quot; of both the original GPX file, and of the result of processing, which is based on how much the grade changes point-to-point -- it is basically the ratio of the root-mean-squared change in gradient to the root-mean-squared average gradient for each point in the course. The goal is to only have abrupt gradient changes where they actually exist in the real-life course. A score of 1 on this metric is poor: it means there are many abrupt gradient changes. A score of 0.1 is smooth: gradients typically change around 10% from segment-to-segment. This quality score can provide guidance to if altitude smoothing and point density are sufficient. This doesn&#39;t address the issue of whether the &quot;top-down&quot; view of the course is optimally smoothed. For this careful examination of the resulting GPX on GPX Visualizer, or similar, with &quot;aerial view&quot; is a good idea.</p>
 
@@ -174,13 +174,13 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="append-meters"><b><code>-append</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>A distance in meters which should be added to point-to-point courses. In RGT, the finish line is typically places 140 meters prior to the end of a point-to-point course, so if for example you design a course to be exactly 10 miles, (a typical UK time trial distance), then to put the finish line at the end of those 10 miles, the option &quot;-append 140&quot; would add 140 meters. This buffer is needed by RGT because riders group along the road-side after crossing the finish. Note the start line would also need to be extended, via <code>-prepend</code>, by 60 meters, in this case.</p>
+<p>A distance in meters which should be added to point-to-point courses. In RGT, the finish line is typically places 140 meters prior to the end of a point-to-point course, so if for example you design a course to be exactly 10 miles, (a typical UK time trial distance), then to put the finish line at the end of those 10 miles, the option &quot;<code>-append 140</code>&quot; would add 140 meters. This buffer is needed by RGT because riders group along the road-side after crossing the finish. Note the start line would also need to be extended, via <code>-prepend</code>, by 60 meters, in this case.</p>
 
 <p>Extended points will be set to the altitude of the final point.</p>
 
 <p>Since RGT tends to create loop courses when start and finish points are close, the code may put a bend in the road it creates with this command, if both <code>-append</code> and <code>-prepend</code> are specified (perhaps via <code>-extend</code>).</p>
 
-<p>Negative values crop the course by the negative distance. So &quot;-append -100&quot; will move the finish line back 100 meters. This is useful for preventing RGT from connecting the finish and start points, which has a 100 meter threshold, as this is written.</p>
+<p>Negative values crop the course by the negative distance. So &quot;<code>-append -100</code>&quot; will move the finish line back 100 meters. This is useful for preventing RGT from connecting the finish and start points, which has a 100 meter threshold, as this is written.</p>
 
 </dd>
 <dt id="author-string"><b><code>-author</code></b> &lt;string&gt;</dt>
@@ -568,7 +568,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="out-filename"><b><code>-out</code></b> &lt;filename&gt;</dt>
 <dd>
 
-<p>Instead of the default filename, which is the input file with <i>_processed.gpx</i>, use this filename instead. Make sure to specify the <i>.gpx</i> suffix if that is what is wanted. A &quot;-&quot; implies standard output.</p>
+<p>Instead of the default filename, which is the input file with <i>_processed.gpx</i>, use this filename instead. Make sure to specify the <i>.gpx</i> suffix if that is what is wanted. A &quot;<code>-</code>&quot; implies standard output.</p>
 
 </dd>
 <dt id="outAndBack"><b><code>-outAndBack</code></b></dt>
@@ -728,11 +728,11 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>For <code>-loop</code> courses, the amount to shift the start/finish forwards (positive) or backwards (negative).</p>
 
-<p>For loop courses, RGT Cycling puts the start/finish line 60 meters after the start of the GPX data. This is evidently to provide room for riders to line up before the start, although that is only necessary in point-to-point courses, so the reason for this is unclear. In circuit courses careful placement of the start/finish line, for example at the crest of a hill, or a specific distance from a final corner, is critical, so with this option you can carefully place the start point for the GPX file at the desired start/finish, then use &quot;-loop <code>-shiftSF -60</code>&quot; to move the start of the GPX file back 60 meters, putting the start where it should be.</p>
+<p>For loop courses, RGT Cycling puts the start/finish line 60 meters after the start of the GPX data. This is evidently to provide room for riders to line up before the start, although that is only necessary in point-to-point courses, so the reason for this is unclear. In circuit courses careful placement of the start/finish line, for example at the crest of a hill, or a specific distance from a final corner, is critical, so with this option you can carefully place the start point for the GPX file at the desired start/finish, then use &quot;<code>-loop -shiftSF -60</code>&quot; to move the start of the GPX file back 60 meters, putting the start where it should be.</p>
 
 <p>Since this is so commonly used in loop courses, the default is -60, so to disable it, use <code>-shiftSF 0 -loop</code>.</p>
 
-<p>If you are processing a loop course in multiple steps, make sure to use &quot;-shiftSF 0&quot; on all steps other than one, otherwise each step will apply the default -60 meter shift. You want to apply this shift only once.</p>
+<p>If you are processing a loop course in multiple steps, make sure to use &quot;<code>-shiftSF 0</code>&quot; on all steps other than one, otherwise each step will apply the default -60 meter shift. You want to apply this shift only once.</p>
 
 </dd>
 <dt id="sigma-meters"><b><code>-sigma</code></b> &lt;meters&gt;</dt>
@@ -790,7 +790,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>If there are existing segments, snapping will try to map segments from the old points to the new points, but it&#39;s more precise to define segments after snapping. If you define segments within the same run of processGPS, they will be done after possible snapping.</p>
 
-<p>Snapping is done both before and after point interpolation. The reason is it&#39;s potentially very efficient with a smaller number of points, but sometimes more widely spaced points make it more challenging for the algorithm to determine that a section of road is being repeated. In the past, when snapping was done only once, it was a regular practive to run processGPX twice in an effort to more effectively snap points.</p>
+<p>Snapping is done both before and after point interpolation. The reason is it&#39;s potentially very efficient with a smaller number of points, but sometimes more widely spaced points make it more challenging for the algorithm to determine that a section of road is being repeated. In the past, when snapping was done only once, it was a regular practice to run processGPX twice in an effort to more effectively snap points.</p>
 
 <p>The snapping algorithm does not work at the very start or end of the GPX. So if your route ends on a repeated section and you want it to be snapped, then it&#39;s a good practice to extend the route further, then crop it back with <code>-cropMin</code> and/or <code>-cropMax</code>.</p>
 
@@ -856,7 +856,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="splitNumber-1-2-3"><b><code>-splitNumber</code></b> &lt;1, 2, 3..&gt;</dt>
 <dd>
 
-<p>If there are multiple splits (-splitAt or <code>-autoSplits</code>), which splits to output. The default is to output all splits if a filename is specified for the output (using a _split with the split number as a suffix) or just the first split if it&#39;s to standard output (&quot;-&quot;). The default can be specifed with a non-positive number, or just omitting this option.</p>
+<p>If there are multiple splits (<code>-splitAt</code> or <code>-autoSplits</code>), which splits to output. The default is to output all splits if a filename is specified for the output (using a _split with the split number as a suffix) or just the first split if it&#39;s to standard output (&quot;<code>-</code>&quot;). The default can be specifed with a non-positive number, or just omitting this option.</p>
 
 </dd>
 <dt id="startCircuitDistance-meters"><b><code>-startCircuitDistance</code></b> &lt;meters&gt;</dt>
@@ -1036,7 +1036,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="shiftStart-740--shiftEnd-1390"><b><code>-shiftStart 740 -shiftEnd 1390</code></b></dt>
 <dd>
 
-<p>The lane shift is applied starting at 740 meters and ending at 1390 meters, with a transition calculated from the lane shift. This is applied after all smoothing, but before the lane shifting, and importantly, before the route start shift. Note there is a default &quot;-shiftSF -60&quot; applied at the end of the process, so if you want to determine the distance to apply the lane shift, then make sure to either do a run first with &quot;-shiftSF 0 -laneShift 0&quot;, or subtract 100 meters from the distance coordinates to judge what the distance would have been at the time the lane shift is applied.</p>
+<p>The lane shift is applied starting at 740 meters and ending at 1390 meters, with a transition calculated from the lane shift. This is applied after all smoothing, but before the lane shifting, and importantly, before the route start shift. Note there is a default &quot;<code>-shiftSF -60</code>&quot; applied at the end of the process, so if you want to determine the distance to apply the lane shift, then make sure to either do a run first with &quot;<code>-shiftSF 0 -laneShift 0</code>&quot;, or subtract 100 meters from the distance coordinates to judge what the distance would have been at the time the lane shift is applied.</p>
 
 <p>It&#39;s important to check to make sure at the edge of the lane shift region the two directions don&#39;t get too close, due to the transition. If they do, then extend the lane shift region somewhat to make room for the transition. Also check the lane shift hasn&#39;t caused any corners to fold into points, or invert. If this happens, apply more smoothing to round the corners more before applying the lane shift. Unfortunately there is no support yet for position-dependent smoothing, which would help.</p>
 
@@ -1188,7 +1188,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="snapDistance-5--snap-1"><b><code>-snapDistance 5 -snap 1</code></b></dt>
 <dd>
 
-<p>The course is a &quot;lollypop&quot;, meaning it heads out, does a big loop, then returns (part way). To make sure the return is well-aligned with the out, snapping is used. &quot;-snap 1&quot; means align the return to the out (rather than the reverse). &quot;-snapDistance 5&quot; means to snap points which are as much as 5 meters apart. 5 meters is a lot, and the result needs to be checked afterwards to make sure this doesn&#39;t result in transitions are too abrupt, but a large snapdistance can help make sure corners get snapped together.</p>
+<p>The course is a &quot;lollypop&quot;, meaning it heads out, does a big loop, then returns (part way). To make sure the return is well-aligned with the out, snapping is used. &quot;<code>-snap 1</code>&quot; means align the return to the out (rather than the reverse). &quot;<code>-snapDistance 5</code>&quot; means to snap points which are as much as 5 meters apart. 5 meters is a lot, and the result needs to be checked afterwards to make sure this doesn&#39;t result in transitions are too abrupt, but a large snapdistance can help make sure corners get snapped together.</p>
 
 </dd>
 <dt id="autoSegments-10-0.5"><b><code>-autoSegments 10 0.5</code></b></dt>
@@ -1263,10 +1263,10 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This tells the code to write the resulting GPX to &quot;the standard output&quot;.</p>
 
 </dd>
-<dt id="processGPX"><b><code>| processGPX -</code></b>&quot;</dt>
+<dt id="processGPX"><b><code>| processGPX -</code></b></dt>
 <dd>
 
-<p>This tells the command line shell to &quot;send the standard output to the standard input of the next program&quot;, which is a sepearate call to processGPX. It&#39;s called a &quot;pipe&quot;. The &quot;-&quot; tells the code that this call takes its input from the pipe. So think of it as a virtual file, a direct line of communication from one call of the code to the next.</p>
+<p>This tells the command line shell to &quot;send the standard output to the standard input of the next program&quot;, which is a sepearate call to processGPX. It&#39;s called a &quot;pipe&quot;. The &quot;<code>-</code>&quot; tells the code that this call takes its input from the pipe. So think of it as a virtual file, a direct line of communication from one call of the code to the next.</p>
 
 </dd>
 <dt id="copyPoint--lap"><b><code>-copyPoint -lap</code></b></dt>
