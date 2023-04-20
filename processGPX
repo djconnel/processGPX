@@ -17,8 +17,9 @@ use Pod::Usage;
 # version 0.40: adjust default margin, smoothing after minRadius
 # version 0.41: improvements to snapping, adds splitting, single track, outAndBack shortcuts, auto-straighten
 # version 0.42: fixed error in segment naming
+# version 0.43: fixed -segment option
 
-my $version = "0.42";             # make sure this matches pod value
+my $version = "0.43";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -4716,19 +4717,18 @@ for my $file ( @files ) {
     for my $a ($start, $end, $name) {
       $a =~ s/^\s*(.*?)\s*$/$1/;
     }
-    note("processing named segment $name from $start to $end ...\n");
     if ((! defined $start) || ($start eq "") || ($start eq "start")) {
       $start = 0;
     }
     if ((! defined $end) || ($end eq "") || ($end eq "end")) {
       $end = $points->[-1]->{distance};
     }
-    note("defining segment \"$name\" from $start to $end ...\n");
+    note("defining segment \"$name\" from $start meters to $end meters ...\n");
     my ($pStart, $pEnd);
     ($points, $pStart) = pointAtPosition($start, $points, $isLoop);
-    die("ERROR: unable to find the segment start point at positon $start.\n");
+    die("ERROR: unable to find the segment start point at positon $start.\n") unless (defined $pStart);
     ($points, $pEnd)   = pointAtPosition($end, $points, $isLoop);
-    die("ERROR unable to find the segment end point at positon $end.\n");
+    die("ERROR unable to find the segment end point at positon $end.\n") unless (defined $pEnd);
 
     # find a segment number
     my $nS = 1;
@@ -4748,6 +4748,7 @@ for my $file ( @files ) {
     $points = \@pNew;
     $segmentName{$nS} = $name;
     $segmentDefined{$nS} ++;
+    note("defined segment $name from point number $pStart to point number $pEnd of ", scalar(@$points), "\n");
   }
 
   #
@@ -5551,7 +5552,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.42
+0.43
 
 =head1 DESCRIPTION
 
