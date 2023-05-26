@@ -13,6 +13,16 @@ my $pi = atan2(0, -1);
 my $pi2 = $pi / 2;
 my $twopi = 2 * $pi;
 
+sub softMax {
+  my $x1 = shift() / 10;
+  my $x2 = shift() / 10;
+  my $u =
+    ($x1 > $x2 + 10) ? $x1 :
+    ($x2 > $x1 + 10) ? $x2 :
+    $x1 + log(exp($x2 - $x1) + 1);
+  return 10 * $u;
+}
+
 sub xyDistance {
   my $p1 = shift;
   my $p2 = shift;
@@ -123,13 +133,18 @@ sub randomizeAltitude {
   my $gMax   = $var{gMax} // 0.12;
   my $zMin   = $var{zMin} // 0;
   my $kPow   = $var{kPow} // 1.3;
+  my $k0     = $var{k0} // 0;
+  my $kMax   = $var{kMax} // 50;
+  my $zCrop  = $var{zCrop} // 0;   # amount of altitude to crop to fill in valleys
+  my $p2p    = $var{p2p} // 0;     # if we have a point-to-point (non-periodic
+  my $gained = $var{gained};       # if we have a point-to-point (non-periodic
+  my $bow    = $var{bow};          # 2nd order altitude adjustment to center of route
 
   # add first point to end if not already
-  if (xyDistance($points->[-1], $points->[0]) > 0.01) {
+  if ((! $p2p) && (xyDistance($points->[-1], $points->[0]) > 0.01)) {
     my @pLast = @{$points->[0]};
     push @$points, \@pLast;
   }
-
 
   my @ss = (0);
   my $s = 0;
@@ -137,19 +152,28 @@ sub randomizeAltitude {
     $s += xyDistance($points->[$i - 1], $points->[$i]);
     push @ss, $s;
   }
-  my $courseDistance = $ss[-1] + xyDistance($points->[-1], $points->[0]);
+
+  my $courseDistance = $ss[-1];
+  $courseDistance += xyDistance($points->[-1], $points->[0]) unless ($p2p);
+  my $period = $courseDistance * ($p2p ? 2 : 1);
+  warn("course distance = $courseDistance\naltitude period = $period\n");
 
   # periodic boundary conditions: cosine (k0 x), k0 = 2pi / L
   # peak grade = 2pi a0 / L => a0 = L gmax / 2pi
   # start with second mode
-  my $a0 = $gMax * $courseDistance / $twopi;
+  my $a0 = $gMax * $period / $twopi;
   my @a = (0, -$a0);
   my @phase = (0, 0);
-  my $sum = ($a0 * $twopi / $courseDistance) ** 2;
-  for my  $k ( 2 .. 40 ) {
-    $a[$k] = $a0 * rNorm() / $k ** $kPow;
+  my $sum = ($a0 * $twopi / $period) ** 2;
+  $kMax = 50 if ($kMax < 1);
+  for my  $k ( 2 .. $kMax ) {
+    if ($k0 > 0) {
+      $a[$k] = $a0 * rNorm() / (1 + ($k / $k0) ** $kPow);
+    } else {
+      $a[$k] = $a0 * rNorm() / $k ** $kPow;
+    }
     $phase[$k] = $twopi * rand();
-    $sum += ($a[$k] * $k * $twopi / $courseDistance) ** 2;
+    $sum += ($a[$k] * $k * $twopi / $period) ** 2;
   }
   warn("sqrt(sum) = ", sqrt($sum), "\n");
   my $f = $gMax / sqrt($sum);
@@ -161,7 +185,7 @@ sub randomizeAltitude {
   my @zNews = ();
   for my $i ( 0 .. $#$points ) {
     my $z = 0;
-    my $theta0 = $twopi * $ss[$i] / $courseDistance;
+    my $theta0 = $twopi * $ss[$i] / $period;
     for my $k ( 1 .. $#a  ) {
       $z += $a[$k] * cos($phase[$k] + $k * $theta0);
     }
@@ -169,7 +193,7 @@ sub randomizeAltitude {
     if ($i > 0) {
       my $ds = $ss[$i] - $ss[$i - 1];
       my $dz = $zs[$i] - $zs[$i - 1];
-      my $g = $dz / $ds;
+      my $g = $dz / (0.001 + $ds);
       # clamp g and adjust altitude
       $g = ($g <=> 0) * (($gMax ** -4 + $g ** -4) ** -0.25);
       $zNews[$i] = $zNews[$i - 1] + $g * $ds;
@@ -181,12 +205,49 @@ sub randomizeAltitude {
 
   @zs = @zNews;
 
-  # now adjust altitudes to match up first and last point
-  my $gFix = ($zs[0] - $zs[-1]) / ($ss[-1] - $ss[0]);
+  if ($p2p) {
+    # add gained (point to point only)
+    if (defined $gained) {
+      my $deltaZ = $gained + $zs[0] - $zs[-1];
+      for my $i ( 0 .. $#zs ) {
+	my $f = $ss[$i] / $courseDistance;
+	$zs[$i] += $deltaZ * $f;
+      }
+    }
+
+    if (defined $bow) {
+      for my $i ( 0 .. $#zs ) {
+	my $f = $ss[$i] / $courseDistance;
+	$zs[$i] += 4 * $bow * $f * (1 - $f)
+      }
+    }
+
+  } else {
+    # now adjust altitudes to match up first and last point (laps only)
+    my $gFix = ($zs[0] - $zs[-1]) / ($ss[-1] - $ss[0]);
+    for my $i ( 0 .. $#zs ) {
+      $zs[$i] += $gFix * $ss[$i];
+    }
+  }
+
+  # calculate base altitude
   my $z0;
-  for my $i ( 0 .. $#zs ) {
-    $zs[$i] += $gFix * $ss[$i];
-    $z0 = $zs[$i] if ((! defined $z0) || ($zs[$i] < $z0));
+  for my $z ( @zs ) {
+    $z0 = $z if ((! defined $z0) || ($z < $z0));
+  }
+
+  # crop altitude
+  if ((defined $zCrop) && ($zCrop > 0)) {
+    my $z0New;
+    my $z1 = $z0 + $zCrop;
+    warn("cropping altitude by $zCrop...\n");
+
+    for my $i ( 0 .. $#zs ) {
+      my $z = softMax($z1, $zs[$i]);
+      $z0New = $z unless ((defined $z0New) && ($z > $z0New));
+      $zs[$i] = $z;
+    }
+    $z0 = $z0New;
   }
 
   # set altitude with desired minimum
@@ -356,7 +417,6 @@ sub makePath {
   my $coords = $vars{coords} // die;
   my $path = $vars{path} // die;
   my $onPath = $vars{onPath} // die;
-  my $hollow = $vars{hollow} // 0;
 
   die "road must have at least two points per side\n"
     if ($N < 2);
@@ -428,7 +488,6 @@ sub makePath {
       }
       $path = \@newPath;
       warn("blasted hole in path to try and untie knots\n");
-      # printPath(path=> $path, coords=> $coords); exit;
       next pathLoop;
     }
 
@@ -454,8 +513,15 @@ sub makeRoute {
   my $N = $vars{N} // die;
   my $gMax = $vars{gMax} // die;
   my $kPow = $vars{kPow} // die;
+  my $k0 = $vars{k0} // 0;
+  my $kMax = $vars{kMax} // 0;
   my $maxSpacing = $vars{maxSpacing} // 0;
   my $randomizeAltitude = $vars{randomizeAltitude} // 1;
+  my $zMin = $vars{zMin} // 10;
+  my $zCrop = $vars{zCrop} // 0;
+  my $p2p = $vars{p2p} // 0;
+  my $gained = $vars{gained};
+  my $bow = $vars{bow};
 
 
   # first set of points, before interpolation
@@ -473,7 +539,15 @@ sub makeRoute {
   my $f2 = 0.5;
   my $f = 1 / (1/$f1 + 1/$f2);
 
-  for my $i ( 0 .. $#points1 ) {
+  # set up expanded list of points with interpolated turning points
+  my $i0;
+  if ($p2p) {
+    push @points2, $points1[0];
+    $i0 = 1;
+  } else {
+    $i0 = 0;
+  }
+  for my $i ( $i0 .. $#points1 ) {
     my $p1 = $points1[$i - 1];
     my $p2 = $points1[$i];
     my $p3 = xyInterpolate($p1, $p2, $f);
@@ -482,9 +556,34 @@ sub makeRoute {
     push @points2, $p3, $p4, $p2;
   }
 
-  # shift first two points to end
-  push @points2, shift @points2;
-  push @points2, shift @points2;
+  # on loop shift first two points to end (they're associated with last point)
+  # this moves points interpolating last point to this point to end of the route on loops
+  # on point-to-point, these points remain, and we'll add in the first point
+  if (! $p2p) {
+    push @points2, shift @points2;
+    push @points2, shift @points2;
+  }
+
+  # points (fractions representative not actual)
+  #  loop:
+  #   0: 1st point
+  #   1: 1/3 to 2nd point
+  #   2: 2/3 to 2nd point
+  #   3: 2nd point
+  #   ...
+  #  3N - 3: last point
+  #  3N - 2: 1/3rd to 1st point
+  #  3N - 1: 2/3rd to 1st point
+  #
+  #  point-to-point
+  #   0: 1st point
+  #   1: 1/3 to 2nd point
+  #   2: 2/3 to 2nd point..
+  #   3: 2nd point
+  #   ...
+  #   3N - 3: last point
+  #
+
 
   warn("points[0] = @{$points2[0]}\n");
   warn("points[1] = @{$points2[1]}\n");
@@ -492,18 +591,24 @@ sub makeRoute {
   warn("points[3] = @{$points2[3]}\n");
   warn("points[4] = @{$points2[4]}\n");
 
-
   # point 0: the first point: used for spline
   # point 1: 1/4 of way to next point : this is on the route
   # point 2: 3/4 of way to next point : this is on the route
   # point 3: the next point : used for spline
   my @points = ();
+
+  if ($p2p) {
+    push @points, $points2[0];
+  }
   for (my $i = 0; $i <= $#points2; $i += 3 ) {
     my $p1 = $points2[$i - 1];
     my $p2 = $points2[$i];
     my $p3 = $points2[($i + 1) % @points2];
 
-    if (pointsColinear($p1, $p2, $p3)) {
+    if (
+        ((($i == 0) || ($i == $#points2)) && $p2p) ||
+        pointsColinear($p1, $p2, $p3)
+       ) {
       push @points, $p2;
     } else {
       push @points, $p1 if ($f < 0.5);
@@ -520,11 +625,13 @@ sub makeRoute {
       my $p1 = $points[$i];
       my $p2 = $points[($i + 1) % @points];
       push @pNew, $p1;
-      my $ps = xyDistance( $p1, $p2 );
-      my $npoints = int( $ps / $maxSpacing + 0.5);
-      # interpolate points...
-      for my $n ( 1 .. $npoints - 1 ) {
-	push @pNew,  xyInterpolate( $p1, $p2, $n / $npoints);
+      if ((! $p2p) || ($i < $iMax)) {
+        my $ps = xyDistance( $p1, $p2 );
+        my $npoints = int( $ps / $maxSpacing + 0.5);
+        # interpolate points...
+        for my $n ( 1 .. $npoints - 1 ) {
+          push @pNew,  xyInterpolate( $p1, $p2, $n / $npoints);
+        }
       }
     }
     @points = @pNew;
@@ -535,7 +642,18 @@ sub makeRoute {
 
   # construct altitude profiles
   if ( $randomizeAltitude ) {
-    randomizeAltitude(points=> \@points, gMax=> $gMax, zMin => 50, kPow=> $kPow);
+    randomizeAltitude(
+                      points=> \@points,
+                      gMax=> $gMax,
+                      zMin => $zMin,
+                      kPow=> $kPow,
+                      k0=> $k0,
+                      $kMax=> $kMax,
+                      zCrop=> $zCrop,
+                      p2p=> $p2p,
+                      gained=> $gained,
+		      bow => $bow,
+                     );
   } else {
     # altitude, grade peaks at north:
     # max grade 0.1:
@@ -557,20 +675,20 @@ sub makeRoute {
       my $w = $N - 1 - $u - $v;
       my $z;
       if ( $hexagon ) {
-	my $Nhex = int(($N / 3) -1);
-	my $u2 = $N - 1 - $Nhex - $u;
-	my $v2 = $N - 1 - $Nhex - $v;
-	my $w2 = $N - 1 - $Nhex - $w;
-	$z = $u * $v * $w * $u2 * $v2 * $w2 * $aHex;
+        my $Nhex = int(($N / 3) -1);
+        my $u2 = $N - 1 - $Nhex - $u;
+        my $v2 = $N - 1 - $Nhex - $v;
+        my $w2 = $N - 1 - $Nhex - $w;
+        $z = $u * $v * $w * $u2 * $v2 * $w2 * $aHex;
       } else {
-	$z = $u * $v * $w * $a;
+        $z = $u * $v * $w * $a;
       }
       $p->[2] = $z;
     }
   }
 
   # copy last point
-  push @points, $points[0];
+  push @points, $points[0] unless($p2p);
 
   print "x y z u v s\n";
   my $s = 0;
@@ -596,7 +714,15 @@ my $hollow = 0;   # whether the center is hollow
 my $gMax = 0.12;
 my $randomizeAltitude = 0;
 my $kPow = 1.3;
+my $k0 = 0;
+my $kMax = 50;
 my $maxSpacing = 0;
+my $zMin = 50;
+my $zCrop = 0;
+my $p2p;
+my $gained;
+my $bow;
+my $loop;
 
 GetOptions (
             "L=f"      => \$L,
@@ -605,14 +731,31 @@ GetOptions (
             "out=s"    => \$out,
             "hexagon"  => \$hexagon,
             "hollow"   => \$hollow,
-	    "maxGradient=f" => \$gMax,
-   	    "gMax=f"     => \$gMax,
-	    "randomizeAltitude" => \$randomizeAltitude,
-	    "kPower=f"  => \$kPow,
-	    "maxSpacing=f" => \$maxSpacing,
+            "maxGradient=f" => \$gMax,
+            "gMax=f"     => \$gMax,
+            "randomizeAltitude" => \$randomizeAltitude,
+            "kPower=f" => \$kPow,
+            "k0=f"     => \$k0,
+            "kMax=i"   => \$kMax,
+            "zMin=f"   => \$zMin,
+            "zCrop=f"  => \$zCrop,
+            "maxSpacing=f" => \$maxSpacing,
+            "pointToPoint" => \$p2p,
+            "p2p"          => \$p2p,
+            "gained=f"     => \$gained,
+	    "bow=f"        => \$bow,
+            "loop"         => \$loop,
            );
 
+
 die "minimum N = 3 points\n" if ($N < 3);
+
+# if gained specified, then it's point-to-point
+$p2p = 1 if ((defined $gained) && ($gained != 0));
+
+
+# whether it's a point-to-point
+$p2p //= (defined $loop) ? (! $loop) : 0;
 
 # hexagons should be divisible by 3
 warn("hexagons are are best if points are divisible by 3\n") if ($hexagon || ($N % 3 > 0));
@@ -620,7 +763,6 @@ warn("hollow hexagons are are best if points are divisible by 9\n") if (($hollow
 warn("hollow triangles are are best if points are divisible by 3\n") if (($hollow && (! $hexagon)) || ($N % 3 > 0));
 
 warn("total points in domain = ", N2Total($N), "\n");
-
 
 my $coords = [];
 my $index = [];
@@ -666,32 +808,55 @@ if ($hexagon) {
 
 # initial path
 my $u1 = int($N / 2) - 1;
-my $u2 = $u1 + 1;
 
-# assume path is closed
-my $path = [
-            $index->[$u1]->[0],
-            $index->[$u2]->[0],
-            $index->[$u1]->[1],
-           ];
+my $path;
+if ($p2p) {
+  # open path
+  for my $v ( 0 .. $N - 1 ) {
+    # if we're up against a hollow, quit
+    if ($onPath->[$index->[$u1]->[$v]]) {
+      last;
+    }
+    push @$path, $index->[$u1]->[$v];
+  }
+} else {
+  # closed path
+  my $u2 = $u1 + 1;
+  $path = [
+           $index->[$u1]->[0],
+           $index->[$u2]->[0],
+           $index->[$u1]->[1],
+          ];
+}
+
+# we need at least 2 points in the initial path
+die("unable to create an initial path: increase N = $N\n")
+  if (@$path < 2);
 
 warn("path:  " . join(", ", map( { "(" . join(", ", @{$coords->[$_]}) . ")" } @$path )) . "\n");
 
-makePath(N=> $N, coords=> $coords, index=> $index, neighbors=> $neighbors, path=> $path, onPath=> $onPath);
+makePath(N=> $N, coords=> $coords, neighbors=> $neighbors, path=> $path, onPath=> $onPath);
 
 
 # create route, which includes rounding corners
 my $points = makeRoute(
-		       L=> $L,
-		       N=> $N,
-		       coords=> $coords,
-		       gMax=> $gMax,
-		       hexagon=> $hexagon,
-		       kPow => $kPow,
-		       maxSpacing => $maxSpacing,
-		       path=> $path,
-		       randomizeAltitude => $randomizeAltitude,
-		      );
+                       L=> $L,
+                       N=> $N,
+                       coords=> $coords,
+                       gMax=> $gMax,
+                       hexagon=> $hexagon,
+                       kPow => $kPow,
+                       k0 => $k0,
+                       kMax => $kMax,
+                       maxSpacing => $maxSpacing,
+                       path=> $path,
+                       randomizeAltitude => $randomizeAltitude,
+                       zMin  => $zMin,
+                       zCrop => $zCrop,
+                       p2p => $p2p,
+                       gained => $gained,
+		       bow => $bow,
+                      );
 
 
 exit if ($noSave);
