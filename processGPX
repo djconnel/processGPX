@@ -18,8 +18,9 @@ use Pod::Usage;
 # version 0.41: improvements to snapping, adds splitting, single track, outAndBack shortcuts, auto-straighten
 # version 0.42: fixed error in segment naming
 # version 0.43: fixed -segment option
+# version 0.44: fixed -join
 
-my $version = "0.43";             # make sure this matches pod value
+my $version = "0.44";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -3934,7 +3935,7 @@ for my $file ( @files ) {
     my $gpx2 = Geo::Gpx->new( xml => $xml2 );
 
     # get segment names indexed by track and segments
-    my $extensions2 = getTrackExtensions(\$xml2, $trkIndex2 + 1);
+    my $extensions2 = getExtensions(\$xml2, $trkIndex2 + 1);
 
     # Parse GPX from open file
     my $waypoints2 = $gpx2->waypoints();
@@ -5552,7 +5553,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.43
+0.44
 
 =head1 DESCRIPTION
 
