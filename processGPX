@@ -16,11 +16,12 @@ use Pod::Usage;
 # version 0.39: add named segments, fixed spline smoothing
 # version 0.40: adjust default margin, smoothing after minRadius
 # version 0.41: improvements to snapping, adds splitting, single track, outAndBack shortcuts, auto-straighten
-# version 0.42: fixed error in segment naming
+# version 0.42: fixed error in autonamed segments
 # version 0.43: fixed -segment option
 # version 0.44: fixed -join
+# version 0.45: selectiveSmooth, selectiveSmoothZ, fixed append + prepend bug, fixed transition bug, retuned z-autosmoothing
 
-my $version = "0.44";             # make sure this matches pod value
+my $version = "0.45";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -938,14 +939,12 @@ sub applyLaneShift {
 #
 sub smoothing {
   my %var = @_;
-  my $fields  = $var{fields}  // [];
-  my $isLoop  = $var{isLoop} // 0;
-  my $points  = $var{points} // [];
-  my $sigma0  = $var{sigma}  // 0;
+  my $fields      = $var{fields}  // [];
+  my $isLoop      = $var{isLoop} // 0;
+  my $points      = $var{points} // [];
   my $sigmaField  = $var{sigmaField} // "";
   my $sigmaFactor = $var{sigmaFactor} // 1;
-  my $smoothEnd   = $var{smoothEnd};
-  my $smoothStart = $var{smoothStart};
+  my $sigma0      = $var{sigma} // 0;   # uniform smoothing across all points
   my $courseDistance = $var{courseDistance} // calcCourseDistance(points=> $points, isLoop=> $isLoop);
 
   my $sigma02 = $sigma0 ** 2;
@@ -973,17 +972,6 @@ sub smoothing {
     my %var = %$p;
 
     if ($sigma > 0) {
-      # if smoothStart and/or smoothEnd are defined, then create a window for smoothing
-      {
-        my $smoothDistance = 4 * $sigma;
-        my $s = $points->[$i]->{distance};
-        if ( (defined $smoothStart) && (defined $smoothEnd) && ($smoothEnd < $smoothStart) ) {
-          $sigma *= (transition(($smoothStart - $s) / $smoothDistance) + transition(($s - $smoothEnd) / $smoothDistance));
-        } else {
-          $sigma *= transition(($smoothStart - $s) / $smoothDistance) if (defined $smoothStart);
-          $sigma *= transition(($s - $smoothEnd) / $smoothDistance)   if (defined $smoothEnd);
-        }
-      }
       my $sigma2 = $sigma ** 2;
 
       if (abs($sigma) < 0.01) {
@@ -3201,6 +3189,7 @@ sub splitPoints {
 sub calcSmoothingSigma {
   my %var = @_;
   my $points = $var{points} // [];
+  my $sigmaFactor = $var{sigmaFactor} // 1;
   my $isLoop = $var{isLoop};
 
   return unless (@$points);
@@ -3244,7 +3233,7 @@ sub calcSmoothingSigma {
     if ($sum0 > 0) {
       my $gVar = $sum1 / $sum0; # variance of gradient differences
       my $d = $sum0 / ($sigmaAvg * $sqrt2pi); # density of points
-      my $sigma = sqrt($gVar) * 25 / $d; # 10% grade varying +/- 1% : sigma = 0.8 points, 2.5% grade varying +/- 1% = 1.6 points
+      my $sigma = $sigmaFactor * sqrt($gVar) * 50 / $d;
       $points->[$i]->{sigma} = $sigma;
     } else {
       $points->[$i]->{sigma} = 0;
@@ -3574,17 +3563,19 @@ my $zShiftStart;          # where to start applying z shift
 my $zShiftEnd;            # where to end applying z shift
 my $zSmooth = 0;          # smoothing applied additionally to altitude
 
-my @autoSegments;             # parameters for auto-segment generation
-my @autoStraighten;           # parameters for auto-straightening
-my @circle;                   # points for circle substitution
-my @circleEnd; # ending point (meters) for a circular corner (one per run)
-my @circleStart;  # starting point for a circular corner (one per run)
-my @flatten; # points come in sets of 4: altitude, start point, finish point, lambda
-my @join;    # GPX file(s) to join to this one
-my @splitDistance;              # locations for splitting route
-my @straight;                   # points for straight substitution
-my @straightEnd; # ending point (meters) for a circular corner (one per run)
-my @straightStart; # starting point for a circular corner (one per run)
+my @autoSegments;         # parameters for auto-segment generation
+my @autoStraighten;       # parameters for auto-straightening
+my @circle;               # points for circle substitution
+my @circleEnd;            # ending point (meters) for a circular corner (one per run)
+my @circleStart;          # starting point for a circular corner (one per run)
+my @flatten;              # points come in sets of 4: altitude, start point, finish point, lambda
+my @join;                 # GPX file(s) to join to this one
+my @selectiveSmooth;      # alternative to specifying smoothing varying along the course
+my @selectiveSmoothZ;     # alternative to specifying altitude smoothing varying along the course
+my @splitDistance;        # locations for splitting route
+my @straight;             # points for straight substitution
+my @straightEnd;          # ending point (meters) for a circular corner (one per run)
+my @straightStart;        # starting point for a circular corner (one per run)
 
 # shortcut options:
 my $auto = 0; # automatically set options based on the course (doesn't turn options off)
@@ -3677,6 +3668,9 @@ GetOptions (
             "saveSimplifiedCourse" => \$saveSimplifiedCourse,
             "segment=s"     =>  \$namedSegments,
             "segments=s"    =>  \$namedSegments,
+	    "selectiveSmooth=f{0,1000}" => \@selectiveSmooth,
+	    "selectiveSmoothZ=f{0,1000}" => \@selectiveSmoothZ,
+	    "selectiveZSmooth=f{0,1000}" => \@selectiveSmoothZ,
             "shiftEnd=f"    => \$shiftEnd,
             "shiftSF=f"     => \$shiftSF,
             "shiftStart=f"  => \$shiftStart,
@@ -3686,7 +3680,7 @@ GetOptions (
             "smoothAngle=f" => \$smoothAngle,
             "smoothEnd=f"   => \$smoothEnd,
             "smoothStart=f" => \$smoothStart,
-            "smoothz=f"     => \$zSmooth,
+            "smoothZ=f"     => \$zSmooth,
             "snap=i"        => \$snap,
             "snapDistance=f" => \$snapDistance,
             "snapTransition=f" => \$snapTransition,
@@ -3745,7 +3739,7 @@ if ( $outAndBack || $outAndBackLap ) {
   $rTurnaround //= 8;
   $rUTurn //= 8;
   $spacing //= 10;
-  $splineDegs //= 15;
+  $splineDegs //= 25;
 } else {
   $lSmooth //= 0;
   $laneShift //= 0;
@@ -3754,7 +3748,7 @@ if ( $outAndBack || $outAndBackLap ) {
   $rLap //= 0;
   $rTurnaround //= 0;
   $spacing //= 0;
-  $splineDegs //= 0;
+  $splineDegs //= ($auto ? 25 : 0);
 }
 
 # auto-straighten
@@ -3762,7 +3756,7 @@ $autoStraightenDeviation //= $autoStraighten[0] // 0;
 $autoStraightenLength //= $autoStraighten[1] // 100;
 
 # named segments
-my @namedSegments    = split(";", $namedSegments);
+my @namedSegments    = split("[;]", $namedSegments);
 my @autoSegmentNames = split("[,;]", $autoSegmentNames);
 
 # convert max slope to percent
@@ -4153,7 +4147,13 @@ for my $file ( @files ) {
       $v ++ while (($v < $#$points) && ($points->[$v + 1]->{distance} < $p->{distance} + $loopDistance));
       if (abs($p->{direction} - $points->[$v]->{direction}) > $loopAngle) {
         $u ++ while (($u + 1 < $v) && (abs($points->[$u + 1]->{direction} - $points->[$v]->{direction}) > $loopAngle));
-        warn("WARNING: loop between distance: ", sprintf("%.3f km and %.3f km", $points->[$u]->{distance} / 1000, $points->[$v]->{distance} / 1000), "\n");
+        warn(
+	     "WARNING: loop between distance: ",
+	     sprintf("%.3f km and %.3f km",
+		     $points->[$u]->{distance} / 1000,
+		     $points->[$v]->{distance} / 1000
+		    ),
+	     "\n");
         $u = $v;
         next;
       }
@@ -4179,7 +4179,7 @@ for my $file ( @files ) {
       my $s = $p->{distance};
       my $dz = $zShift;
       if ( (defined $zShiftStart) && (defined $zShiftEnd) && ($zShiftEnd < $zShiftStart) ) {
-        $dz *= (transition(($zShiftStart - $s) / $zShiftDistance) + transition(($s - $zShiftEnd) / $zShiftDistance));
+        $dz *= (transition(($zShiftStart - $s) / $zShiftDistance) * transition(($s - $zShiftEnd) / $zShiftDistance));
       } else {
         $dz *= transition(($zShiftStart - $s) / $zShiftDistance) if (defined $zShiftStart);
         $dz *= transition(($s - $zShiftEnd) / $zShiftDistance)   if (defined $zShiftEnd);
@@ -4342,14 +4342,26 @@ for my $file ( @files ) {
   # various smoothing passes:
   # 1  : position
   # 2  : altitude
-  # 3  : reserved for position auto-smoothing (not implemented yet)
+  # 3  : position auto-smoothing (not yet implemented)
   # 4  : altitude auto-smoothing
   #
   # smoothing parameter with auto-smoothing is normalized,
   # so tuned for smoothing = 1 being reasonable choice
+  #
+  # this is an update on prior smoothing code
+  # this code creates a smooth field if either selective smoothing, or a start/finish
+  # to smoothing is chosen.  Only if uniform smoothing is being applied is a single
+  # sigma value sent to the smoothing code
 
-  # update distance field if we've got autosmoothing
-  addDistanceField(points=> $points) if ($zAutoSmooth || $lAutoSmooth);
+  addDistanceField(points=> $points)
+    if (
+	($lSmooth > 0)     ||
+	($zSmooth > 0)     ||
+	($lAutoSmooth > 0) ||
+	($zAutoSmooth > 0) ||
+	@selectiveSmooth   ||
+	@selectiveSmoothZ
+       );
 
   # keep track of the first and last points, if anchoring is happening
   my @endPoints  = ($points->[0], $points->[-1]);
@@ -4363,50 +4375,132 @@ for my $file ( @files ) {
     $smooth = $lAutoSmooth if ($smoothLoop == 2);
     $smooth = $zAutoSmooth if ($smoothLoop == 3);
 
-    if ( $smooth > 0 ) {
-      note("smoothing...", ($smoothLoop==0) ? "position" : ($smoothLoop==1) ? "altitude" : ($smoothLoop==3) ? "altitude(auto)" : "other", ": parameter = $smooth\n");
+    # selective smoothing
+    my $sSmooth =
+      ($smoothLoop == 0) ? \@selectiveSmooth :
+      ($smoothLoop == 1) ? \@selectiveSmoothZ :
+      [];
 
-      # scale factors
-      if ( $smoothLoop % 2 == 0 ) {
-        %fsigma = (
-                   "ele" => 1,
-                   "latlon" => 1,
-                  );
-      } elsif ( $smoothLoop % 2 == 1 ) {
-        %fsigma = (
-                   "ele" => 1,
-                   "latlon" => 0,
-                  );
+    my $sigma0;
+    if ($smoothLoop == 3) {
+      # smooth field is generated from data
+      calcSmoothingSigma( points=> $points, sigmaFactor=> $smooth );
+      $sigma0 = 0;
+    } else {
+    # parse and check the selective smoothing parameters
+      my $i = 0;
+      my $sPrev;
+      my @smoothSigmas;
+      my @smoothPositions;
+      my $positiveSigmaFound = ($smooth > 0);
+      while ($i < @$sSmooth) {
+	my $sigma = $sSmooth->[$i]; # value
+	die("negative sigma value found in selective smoothing list: @$smooth\n")
+	  if ($sigma < 0);
+	$positiveSigmaFound ||= ($sigma > 0);
+	push @smoothSigmas, $sigma;
+	$i ++;
+	last if ($i >= @$sSmooth);
+	my $s = $sSmooth->[$i];	# position
+	die("position values in selective smoothing list must be in non-decreasing order\n")
+	  if ( (defined $sPrev) && ($s < $sPrev) );
+	push @smoothPositions, $s;
+	$sPrev = $s;
+	$i ++;
       }
-      my $autoSmoothing = ($smoothLoop > 1);
 
-      my @keys = keys %fsigma;
-      for my $key ( @keys ) {
-        next if ($fsigma{$key} <= 0);
-        my $sigma0 = $smooth * $fsigma{$key};
+      if ( $positiveSigmaFound ) {
+	note("smoothing...",
+	     ($smoothLoop==0) ? "position" :
+	     ($smoothLoop==1) ? "altitude" :
+	     ($smoothLoop==2) ? "position(auto)" :
+	     ($smoothLoop==3) ? "altitude(auto)" :
+	     "other",
+	     "\n");
 
-        #
-        # smoothing is different than auto-smoothing
-        # autosmoothing has a variable sigma, determined by the appropriate field
-        # smoothing has a fixed sigma
-        # try to share code....
-        #
+	$sigma0 = $smooth;	# constant component of smoothing
 
-        # calculate smoothing sigma for autosmoothing based on gradient
-        calcSmoothingSigma( points=> $points )
-          if ($smoothLoop == 3);
+	# convert constant smoothing to a smoothing field if there's a smoothStart and/or smoothEnd
+	if ( (defined $smoothStart) || (defined $smoothEnd) ) {
+	  $positiveSigmaFound = 0;
+	  my $lambda = 10 + 4 * $sigma0;
+	  for my $i ( 0 .. $#$points ) {
+	    my $s = $points->[$i]->{distance};
+	    my $sigma;
+	    if ( (defined $smoothStart) && (defined $smoothEnd) && ($smoothEnd < $smoothStart) ) {
+	      $sigma = $sigma0 * (transition(($smoothStart - $s) / $lambda) * transition(($s - $smoothEnd) / $lambda));
+	    } else {
+	      $sigma = $sigma0;
+	      $sigma *= transition(($smoothStart - $s) / $lambda) if (defined $smoothStart);
+	      $sigma *= transition(($s - $smoothEnd) / $lambda)   if (defined $smoothEnd);
+	    }
+	    $points->[$i]->{sigma} = ($sigma < 0.01) ? 0 : $sigma; # ignore small values of sigma
+	    $positiveSigmaFound ||= ($points->[$i]->{sigma} > 0);
+	  }
+	  $sigma0 = 0;
+	  deleteField(points=> $points, field=> "sigma") unless ($positiveSigmaFound);
+	}
 
-        $points =
-          smoothing(
-                    sigmaField=>  ($autoSmoothing ? "sigma" : ""),
-                    isLoop=>      $isLoop,
-                    points=>      $points,
-                    sigma=>       ($autoSmoothing ? 0 : $sigma0),
-                    fields=>      (($key eq "latlon") ? ["lat", "lon"] : [$key]),
-                    smoothEnd=>   $smoothEnd,
-                    smoothStart=> $smoothStart,
-                   );
+	if (@smoothSigmas) {
+	  if (@smoothPositions) {
+	    # construct sigma field from selective smoothing
+	    my $positiveSigmaFound = 0;
+	    my @sigmas = ();
+	    for my $i ( 0 .. $#smoothSigmas ) {
+	      my $sigma = $smoothSigmas[$i];
+	      my $start = $smoothPositions[$i - 1] if ($i > 0);
+	      my $end   = $smoothPositions[$i] if ($i < @smoothPositions);
+	      my $lambda1 = 10;
+	      my $lambda2 = 10;
+	      $lambda1 += 4 * abs($sigma - $smoothSigmas[$i - 1]) if ($i > 0);
+	      $lambda2 += 4 * abs($sigma - $smoothSigmas[$i + 1]) if ($i < $#smoothSigmas);
+
+	      for my $j ( 0 .. $#$points ) {
+		my $s = $points->[$j]->{distance};
+		my $sigmaEff;
+		if ( (defined $start) && (defined $end) ) {
+		  $sigmaEff = $sigma * (transition(($start - $s) / $lambda1) * transition(($s - $end) / $lambda2));
+		} else {
+		  $sigmaEff = $sigma;
+		  $sigmaEff *= transition(($start - $s) / $lambda1) if (defined $start);
+		  $sigmaEff *= transition(($s - $end) / $lambda2)   if (defined $end);
+		}
+		$sigmas[$j] //= 0;
+		$sigmas[$j] += $sigmaEff if ($sigmaEff > 0.01);
+	      }
+	    }
+	    for my $i ( 0 .. $#sigmas ) {
+	      $points->[$i]->{sigma} =
+		(
+		 ((defined $points->[$i]->{sigma}) && ($points->[$i]->{sigma} > 0)) ?
+		 sqrt($points->[$i]->{sigma} ** 2 + $sigmas[$i] ** 2) :
+		 $sigmas[$i]
+		);
+	    }
+	  } else {
+	    # if only a sigma value was provided in selective smoothing, then add it to any sigma0
+	    $sigma0 = sqrt($sigma0 ** 2 + $smoothSigmas[0] ** 2);
+	  }
+	}
       }
+    }
+
+    my @keys;
+    if ( $smoothLoop % 2 == 0 ) {
+      @keys = ("ele",  "latlon");
+    } elsif ( $smoothLoop % 2 == 1 ) {
+      @keys = ("ele");
+    }
+
+    for my $key ( @keys ) {
+      $points =
+	smoothing(
+		  sigmaField=>  (defined $points->[0]->{sigma}) ? "sigma" : "",
+		  isLoop=>      $isLoop,
+		  points=>      $points,
+		  sigma=>       $sigma0,
+		  fields=>      (($key eq "latlon") ? ["lat", "lon"] : [$key]),
+		 );
     }
   }
 
@@ -4760,6 +4854,7 @@ for my $file ( @files ) {
   # if crops may have been specified with negative append or prepend...
   if ((! $isLoop) && (((! (defined $cropMax)) || ($cropMax <= 0)) && ($append < 0))) {
     $cropMax = calcCourseDistance(points=> $points, isLoop=> $isLoop) + $append;
+    $cropMax -= $prepend if ($prepend > 0);  # adjust for prepend since cropping done after prepend
   }
   if ((! defined $cropMin) || ($cropMin <= 0) && ($prepend < 0)) {
     $cropMin = -$prepend;
@@ -4813,7 +4908,7 @@ for my $file ( @files ) {
         if ( $i > 0 );
       my $shift = $laneShift;
       if ( (defined $shiftStart) && (defined $shiftEnd) && ($shiftEnd < $shiftStart) ) {
-        $shift *= (transition(($shiftStart - $s) / $shiftDistance) + transition(($s - $shiftEnd) / $shiftDistance));
+        $shift *= (transition(($shiftStart - $s) / $shiftDistance) * transition(($s - $shiftEnd) / $shiftDistance));
       } else {
         $shift *= transition(($shiftStart - $s) / $shiftDistance) if (defined $shiftStart);
         $shift *= transition(($s - $shiftEnd) / $shiftDistance)   if (defined $shiftEnd);
@@ -5079,7 +5174,6 @@ for my $file ( @files ) {
                   sigmaFactor=> 0.2,
                   isLoop=>      $isLoop,
                   points=>      $points,
-                  sigma=>       0,
                   fields=>      ["lat", "lon", "ele"],
                  );
 
@@ -5553,7 +5647,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.44
+0.45
 
 =head1 DESCRIPTION
 
@@ -5848,7 +5942,7 @@ This invokes an auto-smoothing algorithm whereby more altitude
 smoothing is applied where gradient changes rapidly point-to-point,
 less altitude smoothing where gradient changes slowly.  This is done
 after the conventional position and altitude smoothing specified with
-C<-smooth> and/or C<-smoothz>.  So it allows the use of less of these
+C<-smooth> and/or C<-smoothZ>.  So it allows the use of less of these
 fixed smoothings, and apply an additional smoothing where it is most
 needed.  An application of this would be a course where the altitude
 is low quality on a subset of the total course, and one thus wants
@@ -6464,32 +6558,68 @@ generates a simplified course, and if find in a complex course that
 certain crossings aren't identified, then this may be useful
 for debugging why.
 
-=item B<C<-segment>> <start>,<end>,<name> ...
+=item B<C<-segment>> <start>,<end>,<name>; ...
 
 Define one or more non-overlapping named segments for the route.
-These are defined immediately before the C<-shiftSF> option is applied.
-segments are specified with groups of 3 options separated by commas: a
-first coordinate specifying the starting distance in meters or
-"start", a second ccoordinate specifying the ending distance in meters
-or "end", and a name.  The starting coordinate instead be "start" to
-begin at the course start, and the ending coordinate can instead be
-"end" to end at the course end.  It is not recommended to use these
-options with a loop course, since for loops, the course will not start
-or finish at the GPX end.  In any case, RGT requires that segments
-start a sufficient distance from the beginning of the route, and end a
-sufficient distance from the end of the route, and also be separated
-by a sufficient distance.  However, this code only checks that they
-not overlap.  There is no way to define segments which overlap the S/F
-of a lapped course.  Segments already defined in the GPX file, for
-example from GPX Magic or previous runs of this code, are honored, and
-so new segments may not overlap previously defined segments.  Points
-are interpolated to get an essentially exact match to the specified
-coordinates.  Consider the C<-stripSegments> option to merge segments
-from the input file if the input file has multiple segments and you
-wish to replace them.
+These are defined immediately before the C<-shiftSF> option is
+applied.  segments are specified with groups of 3 options separated by
+comma: a first coordinate specifying the starting distance in meters
+or "start", a second ccoordinate specifying the ending distance in
+meters or "end", and a name.  The starting coordinate instead be
+"start" to begin at the course start, and the ending coordinate can
+instead be "end" to end at the course end.  It is not recommended to
+use these options with a loop course, since for loops, the course will
+not start or finish at the GPX end.  In any case, RGT requires that
+segments start a sufficient distance from the beginning of the route,
+and end a sufficient distance from the end of the route, and also be
+separated by a sufficient distance.  However, this code only checks
+that they not overlap.  There is no way to define segments which
+overlap the S/F of a lapped course.  Segments already defined in the
+GPX file, for example from GPX Magic or previous runs of this code,
+are honored, and so new segments may not overlap previously defined
+segments.  Points are interpolated to get an essentially exact match
+to the specified coordinates.  Consider the C<-stripSegments> option
+to merge segments from the input file if the input file has multiple
+segments and you wish to replace them.
 
 If you want multiple named segments, then split them with semicolons
 (";"), so for example C<-segments "1000,2000,segment 1;3000,4000,segment 2">
+
+=item B<C<-selectiveSmooth>> <meters> ...
+
+This allows for smoothing to be varied throughout the course.  The
+first number is the smoothing distance for the first part of the
+course.  The next number is a position where the smoothing changes to
+the next smoothing number.  A third number is the smoothing beyond the
+second number.  This can continue.  So you alternate smoothing numbers
+and positions marking the transition between these smoothing numbers.
+So there should be an odd number of numbers following.  If there's an even
+number, a last number of zero is assumed (no smoothing after the listed
+distance).
+
+For example, suppose I want to use 7 meter smoothing up to 2 km, then
+change to 20 meter smoothing from 2 km to 3 km, then back to 7 meters
+past 3 km.
+
+C<-selectiveSmooth 7 2000 20 3000 7>
+
+=item B<C<-selectiveSmoothZ>> <meters> ...
+
+This is similar to C<-selectiveSmooth> except it is applied to
+altitude only.  This is particularly useful with Strava Route
+Editor output, where the quality of the altiude data often varies.
+
+For example, suppose I want to use 15 meter smoothing everywhere
+except between km 4 and km 5, where I will use 50 meter smoothing,
+knowiing perhaps from bike computer data that the gradient in that
+interval is much more uniform than is reflected in the Strava Route
+Editor data:
+
+C<-selectiveSmoothZ 15 4000 50 5000 15>
+
+=item B<C<-selectiveZSmooth>> <meters> ...
+
+an alias for -selectiveSmoothZ
 
 =item B<C<-shiftEnd>> <meters>
 
@@ -6562,7 +6692,7 @@ Synonym for C<-smooth>
 
 =item B<C<-sigmaz>> <meters>
 
-Synonym for C<-smoothz>
+Synonym for C<-smoothZ>
 
 =item B<C<-smooth>> <meters>
 
@@ -6594,7 +6724,7 @@ exclude position smoothing from critical corners, but maintain
 altitude smoothing.  If the start is after the finish, then the region
 between the two is not smoothed, rather than smoothed.
 
-=item B<C<-smoothz>> <meters>
+=item B<C<-smoothZ>> <meters>
 
 Additional smoothing to be applied to altitude, on top of the
 smoothing applied with C<-smooth>.  So this number, if specified, will
@@ -6897,11 +7027,11 @@ outside of this range.
 
 =item B<C<-zSmooth>>
 
-Synonym for C<-smoothz>
+Synonym for C<-smoothZ>
 
 =item B<C<-zSigma>>
 
-Synonym for C<-smoothz>
+Synonym for C<-smoothZ>
 
 =back
 
@@ -7137,7 +7267,7 @@ This is from a road course with an out-and-back section.  Note -RUTurn
 is not used here, since in this example, the loop at the end of the
 out-and-back is part of the original route.
 
-C<processGPX -crop 38730 -anchorSF -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothz 20 -snapDistance 5 -snap 1 -autoSegments 10 0.5 -minRadius 6 NoonRide.gpx>
+C<processGPX -crop 38730 -anchorSF -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothZ 20 -snapDistance 5 -snap 1 -autoSegments 10 0.5 -minRadius 6 NoonRide.gpx>
 
 =over
 
@@ -7196,7 +7326,7 @@ not exist in the real road.  More than 10 meters and some detail from
 the actual road may be lost, such as switchbacks with imperfect
 variable radius.
 
-=item B<C<-smoothz 20>>
+=item B<C<-smoothZ 20>>
 
 Additionally smooth altitude with a 20 meter smoothing distance.  On this
 course, there were still gradient spikes with 10 meter smoothing, while more

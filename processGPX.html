@@ -48,7 +48,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.44</p>
+<p>0.45</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -240,7 +240,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="autoSmoothZ-scale-factor"><b><code>-autoSmoothZ</code></b> &lt;scale factor&gt;</dt>
 <dd>
 
-<p>This invokes an auto-smoothing algorithm whereby more altitude smoothing is applied where gradient changes rapidly point-to-point, less altitude smoothing where gradient changes slowly. This is done after the conventional position and altitude smoothing specified with <code>-smooth</code> and/or <code>-smoothz</code>. So it allows the use of less of these fixed smoothings, and apply an additional smoothing where it is most needed. An application of this would be a course where the altitude is low quality on a subset of the total course, and one thus wants more averaging averaging focused on that subset.</p>
+<p>This invokes an auto-smoothing algorithm whereby more altitude smoothing is applied where gradient changes rapidly point-to-point, less altitude smoothing where gradient changes slowly. This is done after the conventional position and altitude smoothing specified with <code>-smooth</code> and/or <code>-smoothZ</code>. So it allows the use of less of these fixed smoothings, and apply an additional smoothing where it is most needed. An application of this would be a course where the altitude is low quality on a subset of the total course, and one thus wants more averaging averaging focused on that subset.</p>
 
 <p>The scale factor controls how much smoothing is applied. It is roughly calibrated so &quot;1&quot; works well, but you can try reducing that to 0.5, for example, and see if the results are still satisfactory, or increasing it to 2 if the gradient is still too spiky.</p>
 
@@ -693,12 +693,38 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This is an option for debugging. <code>-fix</code>_crossings, for example, generates a simplified course, and if find in a complex course that certain crossings aren&#39;t identified, then this may be useful for debugging why.</p>
 
 </dd>
-<dt id="segment-start-end-name"><b><code>-segment</code></b> &lt;start&gt;,&lt;end&gt;,&lt;name&gt; ...</dt>
+<dt id="segment-start-end-name"><b><code>-segment</code></b> &lt;start&gt;,&lt;end&gt;,&lt;name&gt;; ...</dt>
 <dd>
 
-<p>Define one or more non-overlapping named segments for the route. These are defined immediately before the <code>-shiftSF</code> option is applied. segments are specified with groups of 3 options separated by commas: a first coordinate specifying the starting distance in meters or &quot;start&quot;, a second ccoordinate specifying the ending distance in meters or &quot;end&quot;, and a name. The starting coordinate instead be &quot;start&quot; to begin at the course start, and the ending coordinate can instead be &quot;end&quot; to end at the course end. It is not recommended to use these options with a loop course, since for loops, the course will not start or finish at the GPX end. In any case, RGT requires that segments start a sufficient distance from the beginning of the route, and end a sufficient distance from the end of the route, and also be separated by a sufficient distance. However, this code only checks that they not overlap. There is no way to define segments which overlap the S/F of a lapped course. Segments already defined in the GPX file, for example from GPX Magic or previous runs of this code, are honored, and so new segments may not overlap previously defined segments. Points are interpolated to get an essentially exact match to the specified coordinates. Consider the <code>-stripSegments</code> option to merge segments from the input file if the input file has multiple segments and you wish to replace them.</p>
+<p>Define one or more non-overlapping named segments for the route. These are defined immediately before the <code>-shiftSF</code> option is applied. segments are specified with groups of 3 options separated by comma: a first coordinate specifying the starting distance in meters or &quot;start&quot;, a second ccoordinate specifying the ending distance in meters or &quot;end&quot;, and a name. The starting coordinate instead be &quot;start&quot; to begin at the course start, and the ending coordinate can instead be &quot;end&quot; to end at the course end. It is not recommended to use these options with a loop course, since for loops, the course will not start or finish at the GPX end. In any case, RGT requires that segments start a sufficient distance from the beginning of the route, and end a sufficient distance from the end of the route, and also be separated by a sufficient distance. However, this code only checks that they not overlap. There is no way to define segments which overlap the S/F of a lapped course. Segments already defined in the GPX file, for example from GPX Magic or previous runs of this code, are honored, and so new segments may not overlap previously defined segments. Points are interpolated to get an essentially exact match to the specified coordinates. Consider the <code>-stripSegments</code> option to merge segments from the input file if the input file has multiple segments and you wish to replace them.</p>
 
 <p>If you want multiple named segments, then split them with semicolons (&quot;;&quot;), so for example <code>-segments &quot;1000,2000,segment 1;3000,4000,segment 2&quot;</code></p>
+
+</dd>
+<dt id="selectiveSmooth-meters"><b><code>-selectiveSmooth</code></b> &lt;meters&gt; ...</dt>
+<dd>
+
+<p>This allows for smoothing to be varied throughout the course. The first number is the smoothing distance for the first part of the course. The next number is a position where the smoothing changes to the next smoothing number. A third number is the smoothing beyond the second number. This can continue. So you alternate smoothing numbers and positions marking the transition between these smoothing numbers. So there should be an odd number of numbers following. If there&#39;s an even number, a last number of zero is assumed (no smoothing after the listed distance).</p>
+
+<p>For example, suppose I want to use 7 meter smoothing up to 2 km, then change to 20 meter smoothing from 2 km to 3 km, then back to 7 meters past 3 km.</p>
+
+<p><code>-selectiveSmooth 7 2000 20 3000 7</code></p>
+
+</dd>
+<dt id="selectiveSmoothZ-meters"><b><code>-selectiveSmoothZ</code></b> &lt;meters&gt; ...</dt>
+<dd>
+
+<p>This is similar to <code>-selectiveSmooth</code> except it is applied to altitude only. This is particularly useful with Strava Route Editor output, where the quality of the altiude data often varies.</p>
+
+<p>For example, suppose I want to use 15 meter smoothing everywhere except between km 4 and km 5, where I will use 50 meter smoothing, knowiing perhaps from bike computer data that the gradient in that interval is much more uniform than is reflected in the Strava Route Editor data:</p>
+
+<p><code>-selectiveSmoothZ 15 4000 50 5000 15</code></p>
+
+</dd>
+<dt id="selectiveZSmooth-meters"><b><code>-selectiveZSmooth</code></b> &lt;meters&gt; ...</dt>
+<dd>
+
+<p>an alias for -selectiveSmoothZ</p>
 
 </dd>
 <dt id="shiftEnd-meters"><b><code>-shiftEnd</code></b> &lt;meters&gt;</dt>
@@ -744,7 +770,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="sigmaz-meters"><b><code>-sigmaz</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Synonym for <code>-smoothz</code></p>
+<p>Synonym for <code>-smoothZ</code></p>
 
 </dd>
 <dt id="smooth-meters"><b><code>-smooth</code></b> &lt;meters&gt;</dt>
@@ -771,7 +797,7 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If specified, smoothing will be phased in starting at this position in the course. Note 0 has an effect, as it will phase in smoothing starting at 0, as opposed to the default, which is to apply the same smoothing to all points. This applies to all smoothing, so consider running processGPX multiple times if you want different limits on different smoothing components. For example, you might want to exclude position smoothing from critical corners, but maintain altitude smoothing. If the start is after the finish, then the region between the two is not smoothed, rather than smoothed.</p>
 
 </dd>
-<dt id="smoothz-meters"><b><code>-smoothz</code></b> &lt;meters&gt;</dt>
+<dt id="smoothZ-meters"><b><code>-smoothZ</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>Additional smoothing to be applied to altitude, on top of the smoothing applied with <code>-smooth</code>. So this number, if specified, will typically be greater than the <code>-smooth</code> number or there is little effect. Grade changes which occur over less than this distace will tend to be averaged out. So for example, if I am designing an urban course, and there is a turn onto a sharp climb, then less smoothing can be tolerated. On the other hand, if I am designing a course with a steady grade up winding switchbacks on a steep hillside, then more smoothing be needed. On roads along steep hillsides, altitude accuracy is more challenging than it is on roads which take the direct route oup more gradual hillsides.</p>
@@ -974,13 +1000,13 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="zSmooth"><b><code>-zSmooth</code></b></dt>
 <dd>
 
-<p>Synonym for <code>-smoothz</code></p>
+<p>Synonym for <code>-smoothZ</code></p>
 
 </dd>
 <dt id="zSigma"><b><code>-zSigma</code></b></dt>
 <dd>
 
-<p>Synonym for <code>-smoothz</code></p>
+<p>Synonym for <code>-smoothZ</code></p>
 
 </dd>
 </dl>
@@ -1133,7 +1159,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>This is from a road course with an out-and-back section. Note -RUTurn is not used here, since in this example, the loop at the end of the out-and-back is part of the original route.</p>
 
-<p><code>processGPX -crop 38730 -anchorSF -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothz 20 -snapDistance 5 -snap 1 -autoSegments 10 0.5 -minRadius 6 NoonRide.gpx</code></p>
+<p><code>processGPX -crop 38730 -anchorSF -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothZ 20 -snapDistance 5 -snap 1 -autoSegments 10 0.5 -minRadius 6 NoonRide.gpx</code></p>
 
 <dl>
 
@@ -1179,7 +1205,7 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Use 10 meter smoothing on position and, initially, on altitude. This results in some rounding of corners. For this course the result was compared with the &quot;GPX Visualizer&quot; website to satellite data, to make sure corners were fairly well aligned with actual corners, but additionally that there were no anomalies such as &quot;zig-zags&quot; which did not exist in the real road. More than 10 meters and some detail from the actual road may be lost, such as switchbacks with imperfect variable radius.</p>
 
 </dd>
-<dt id="smoothz-20"><b><code>-smoothz 20</code></b></dt>
+<dt id="smoothZ-20"><b><code>-smoothZ 20</code></b></dt>
 <dd>
 
 <p>Additionally smooth altitude with a 20 meter smoothing distance. On this course, there were still gradient spikes with 10 meter smoothing, while more than 20 meter smoothing would have lost some of the actual variations in steepness.</p>
