@@ -20,8 +20,9 @@ use Pod::Usage;
 # version 0.43: fixed -segment option
 # version 0.44: fixed -join
 # version 0.45: selectiveSmooth, selectiveSmoothZ, fixed append + prepend bug, fixed transition bug, retuned z-autosmoothing
+# version 0.46: efficiency improvements in calling smoothing.
 
-my $version = "0.45";             # make sure this matches pod value
+my $version = "0.46";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -972,7 +973,6 @@ sub smoothing {
     my %var = %$p;
 
     if ($sigma > 0) {
-      my $sigma2 = $sigma ** 2;
 
       if (abs($sigma) < 0.01) {
         push @pNew, $p;
@@ -3668,9 +3668,9 @@ GetOptions (
             "saveSimplifiedCourse" => \$saveSimplifiedCourse,
             "segment=s"     =>  \$namedSegments,
             "segments=s"    =>  \$namedSegments,
-	    "selectiveSmooth=f{0,1000}" => \@selectiveSmooth,
-	    "selectiveSmoothZ=f{0,1000}" => \@selectiveSmoothZ,
-	    "selectiveZSmooth=f{0,1000}" => \@selectiveSmoothZ,
+            "selectiveSmooth=f{0,1000}" => \@selectiveSmooth,
+            "selectiveSmoothZ=f{0,1000}" => \@selectiveSmoothZ,
+            "selectiveZSmooth=f{0,1000}" => \@selectiveSmoothZ,
             "shiftEnd=f"    => \$shiftEnd,
             "shiftSF=f"     => \$shiftSF,
             "shiftStart=f"  => \$shiftStart,
@@ -4148,12 +4148,12 @@ for my $file ( @files ) {
       if (abs($p->{direction} - $points->[$v]->{direction}) > $loopAngle) {
         $u ++ while (($u + 1 < $v) && (abs($points->[$u + 1]->{direction} - $points->[$v]->{direction}) > $loopAngle));
         warn(
-	     "WARNING: loop between distance: ",
-	     sprintf("%.3f km and %.3f km",
-		     $points->[$u]->{distance} / 1000,
-		     $points->[$v]->{distance} / 1000
-		    ),
-	     "\n");
+             "WARNING: loop between distance: ",
+             sprintf("%.3f km and %.3f km",
+                     $points->[$u]->{distance} / 1000,
+                     $points->[$v]->{distance} / 1000
+                    ),
+             "\n");
         $u = $v;
         next;
       }
@@ -4355,12 +4355,12 @@ for my $file ( @files ) {
 
   addDistanceField(points=> $points)
     if (
-	($lSmooth > 0)     ||
-	($zSmooth > 0)     ||
-	($lAutoSmooth > 0) ||
-	($zAutoSmooth > 0) ||
-	@selectiveSmooth   ||
-	@selectiveSmoothZ
+        ($lSmooth > 0)     ||
+        ($zSmooth > 0)     ||
+        ($lAutoSmooth > 0) ||
+        ($zAutoSmooth > 0) ||
+        @selectiveSmooth   ||
+        @selectiveSmoothZ
        );
 
   # keep track of the first and last points, if anchoring is happening
@@ -4381,6 +4381,8 @@ for my $file ( @files ) {
       ($smoothLoop == 1) ? \@selectiveSmoothZ :
       [];
 
+    next unless ( ($smooth > 0) || @$sSmooth );
+
     my $sigma0;
     if ($smoothLoop == 3) {
       # smooth field is generated from data
@@ -4394,94 +4396,94 @@ for my $file ( @files ) {
       my @smoothPositions;
       my $positiveSigmaFound = ($smooth > 0);
       while ($i < @$sSmooth) {
-	my $sigma = $sSmooth->[$i]; # value
-	die("negative sigma value found in selective smoothing list: @$smooth\n")
-	  if ($sigma < 0);
-	$positiveSigmaFound ||= ($sigma > 0);
-	push @smoothSigmas, $sigma;
-	$i ++;
-	last if ($i >= @$sSmooth);
-	my $s = $sSmooth->[$i];	# position
-	die("position values in selective smoothing list must be in non-decreasing order\n")
-	  if ( (defined $sPrev) && ($s < $sPrev) );
-	push @smoothPositions, $s;
-	$sPrev = $s;
-	$i ++;
+        my $sigma = $sSmooth->[$i]; # value
+        die("negative sigma value found in selective smoothing list: @$smooth\n")
+          if ($sigma < 0);
+        $positiveSigmaFound ||= ($sigma > 0);
+        push @smoothSigmas, $sigma;
+        $i ++;
+        last if ($i >= @$sSmooth);
+        my $s = $sSmooth->[$i]; # position
+        die("position values in selective smoothing list must be in non-decreasing order\n")
+          if ( (defined $sPrev) && ($s < $sPrev) );
+        push @smoothPositions, $s;
+        $sPrev = $s;
+        $i ++;
       }
 
       if ( $positiveSigmaFound ) {
-	note("smoothing...",
-	     ($smoothLoop==0) ? "position" :
-	     ($smoothLoop==1) ? "altitude" :
-	     ($smoothLoop==2) ? "position(auto)" :
-	     ($smoothLoop==3) ? "altitude(auto)" :
-	     "other",
-	     "\n");
+        note("smoothing...",
+             ($smoothLoop==0) ? "position" :
+             ($smoothLoop==1) ? "altitude" :
+             ($smoothLoop==2) ? "position(auto)" :
+             ($smoothLoop==3) ? "altitude(auto)" :
+             "other",
+             "\n");
 
-	$sigma0 = $smooth;	# constant component of smoothing
+        $sigma0 = $smooth;      # constant component of smoothing
 
-	# convert constant smoothing to a smoothing field if there's a smoothStart and/or smoothEnd
-	if ( (defined $smoothStart) || (defined $smoothEnd) ) {
-	  $positiveSigmaFound = 0;
-	  my $lambda = 10 + 4 * $sigma0;
-	  for my $i ( 0 .. $#$points ) {
-	    my $s = $points->[$i]->{distance};
-	    my $sigma;
-	    if ( (defined $smoothStart) && (defined $smoothEnd) && ($smoothEnd < $smoothStart) ) {
-	      $sigma = $sigma0 * (transition(($smoothStart - $s) / $lambda) * transition(($s - $smoothEnd) / $lambda));
-	    } else {
-	      $sigma = $sigma0;
-	      $sigma *= transition(($smoothStart - $s) / $lambda) if (defined $smoothStart);
-	      $sigma *= transition(($s - $smoothEnd) / $lambda)   if (defined $smoothEnd);
-	    }
-	    $points->[$i]->{sigma} = ($sigma < 0.01) ? 0 : $sigma; # ignore small values of sigma
-	    $positiveSigmaFound ||= ($points->[$i]->{sigma} > 0);
-	  }
-	  $sigma0 = 0;
-	  deleteField(points=> $points, field=> "sigma") unless ($positiveSigmaFound);
-	}
+        # convert constant smoothing to a smoothing field if there's a smoothStart and/or smoothEnd
+        if ( (defined $smoothStart) || (defined $smoothEnd) ) {
+          $positiveSigmaFound = 0;
+          my $lambda = 10 + 4 * $sigma0;
+          for my $i ( 0 .. $#$points ) {
+            my $s = $points->[$i]->{distance};
+            my $sigma;
+            if ( (defined $smoothStart) && (defined $smoothEnd) && ($smoothEnd < $smoothStart) ) {
+              $sigma = $sigma0 * (transition(($smoothStart - $s) / $lambda) * transition(($s - $smoothEnd) / $lambda));
+            } else {
+              $sigma = $sigma0;
+              $sigma *= transition(($smoothStart - $s) / $lambda) if (defined $smoothStart);
+              $sigma *= transition(($s - $smoothEnd) / $lambda)   if (defined $smoothEnd);
+            }
+            $points->[$i]->{sigma} = ($sigma < 0.01) ? 0 : $sigma; # ignore small values of sigma
+            $positiveSigmaFound ||= ($points->[$i]->{sigma} > 0);
+          }
+          $sigma0 = 0;
+          deleteField(points=> $points, field=> "sigma") unless ($positiveSigmaFound);
+        }
 
-	if (@smoothSigmas) {
-	  if (@smoothPositions) {
-	    # construct sigma field from selective smoothing
-	    my $positiveSigmaFound = 0;
-	    my @sigmas = ();
-	    for my $i ( 0 .. $#smoothSigmas ) {
-	      my $sigma = $smoothSigmas[$i];
-	      my $start = $smoothPositions[$i - 1] if ($i > 0);
-	      my $end   = $smoothPositions[$i] if ($i < @smoothPositions);
-	      my $lambda1 = 10;
-	      my $lambda2 = 10;
-	      $lambda1 += 4 * abs($sigma - $smoothSigmas[$i - 1]) if ($i > 0);
-	      $lambda2 += 4 * abs($sigma - $smoothSigmas[$i + 1]) if ($i < $#smoothSigmas);
+        if (@smoothSigmas) {
+          if (@smoothPositions) {
+            # construct sigma field from selective smoothing
+            my $positiveSigmaFound = 0;
+            my @sigmas = ();
+            for my $i ( 0 .. $#smoothSigmas ) {
+              my $sigma = $smoothSigmas[$i];
+              my $start = $smoothPositions[$i - 1] if ($i > 0);
+              my $end   = $smoothPositions[$i] if ($i < @smoothPositions);
+              my $lambda1 = 10;
+              my $lambda2 = 10;
+              $lambda1 += 4 * abs($sigma - $smoothSigmas[$i - 1]) if ($i > 0);
+              $lambda2 += 4 * abs($sigma - $smoothSigmas[$i + 1]) if ($i < $#smoothSigmas);
 
-	      for my $j ( 0 .. $#$points ) {
-		my $s = $points->[$j]->{distance};
-		my $sigmaEff;
-		if ( (defined $start) && (defined $end) ) {
-		  $sigmaEff = $sigma * (transition(($start - $s) / $lambda1) * transition(($s - $end) / $lambda2));
-		} else {
-		  $sigmaEff = $sigma;
-		  $sigmaEff *= transition(($start - $s) / $lambda1) if (defined $start);
-		  $sigmaEff *= transition(($s - $end) / $lambda2)   if (defined $end);
-		}
-		$sigmas[$j] //= 0;
-		$sigmas[$j] += $sigmaEff if ($sigmaEff > 0.01);
-	      }
-	    }
-	    for my $i ( 0 .. $#sigmas ) {
-	      $points->[$i]->{sigma} =
-		(
-		 ((defined $points->[$i]->{sigma}) && ($points->[$i]->{sigma} > 0)) ?
-		 sqrt($points->[$i]->{sigma} ** 2 + $sigmas[$i] ** 2) :
-		 $sigmas[$i]
-		);
-	    }
-	  } else {
-	    # if only a sigma value was provided in selective smoothing, then add it to any sigma0
-	    $sigma0 = sqrt($sigma0 ** 2 + $smoothSigmas[0] ** 2);
-	  }
-	}
+              for my $j ( 0 .. $#$points ) {
+                my $s = $points->[$j]->{distance};
+                my $sigmaEff;
+                if ( (defined $start) && (defined $end) ) {
+                  $sigmaEff = $sigma * (transition(($start - $s) / $lambda1) * transition(($s - $end) / $lambda2));
+                } else {
+                  $sigmaEff = $sigma;
+                  $sigmaEff *= transition(($start - $s) / $lambda1) if (defined $start);
+                  $sigmaEff *= transition(($s - $end) / $lambda2)   if (defined $end);
+                }
+                $sigmas[$j] //= 0;
+                $sigmas[$j] += $sigmaEff if ($sigmaEff > 0.01);
+              }
+            }
+            for my $i ( 0 .. $#sigmas ) {
+              $points->[$i]->{sigma} =
+                (
+                 ((defined $points->[$i]->{sigma}) && ($points->[$i]->{sigma} > 0)) ?
+                 sqrt($points->[$i]->{sigma} ** 2 + $sigmas[$i] ** 2) :
+                 $sigmas[$i]
+                );
+            }
+          } else {
+            # if only a sigma value was provided in selective smoothing, then add it to any sigma0
+            $sigma0 = sqrt($sigma0 ** 2 + $smoothSigmas[0] ** 2);
+          }
+        }
       }
     }
 
@@ -4494,13 +4496,13 @@ for my $file ( @files ) {
 
     for my $key ( @keys ) {
       $points =
-	smoothing(
-		  sigmaField=>  (defined $points->[0]->{sigma}) ? "sigma" : "",
-		  isLoop=>      $isLoop,
-		  points=>      $points,
-		  sigma=>       $sigma0,
-		  fields=>      (($key eq "latlon") ? ["lat", "lon"] : [$key]),
-		 );
+        smoothing(
+                  sigmaField=>  (defined $points->[0]->{sigma}) ? "sigma" : "",
+                  isLoop=>      $isLoop,
+                  points=>      $points,
+                  sigma=>       $sigma0,
+                  fields=>      (($key eq "latlon") ? ["lat", "lon"] : [$key]),
+                 );
     }
   }
 
@@ -5647,7 +5649,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.45
+0.46
 
 =head1 DESCRIPTION
 
