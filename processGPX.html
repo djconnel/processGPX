@@ -48,7 +48,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.46</p>
+<p>0.47</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -237,6 +237,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p>The amount of distance increase one is willing to extend an auto-segment to reach a true peak or valley. This is applied to each side, so a value of 0.05 will result in up to a 10% increase in the total length of an automatically generated segment. The increase will not be applied if it would result in the loss of mandated margin (by -autoSegmentMargin) to an adjacent segment, or too close to the start (-autoSegmentStartMargin) or finish (-autoSegmentFinishMargin)</p>
 
 </dd>
+<dt id="autoSmoothG"><b><code>-autoSmoothG</code></b></dt>
+<dd>
+
+<p>This invokes gradient autosmoothing selectively along the course, using a similar syntax to <code>-autoSmooth</code> and <code>-autoSmoothZ</code>. For details on gradient smoothing, see the <code>-smoothG</code> option.</p>
+
+</dd>
 <dt id="autoSmoothZ-scale-factor"><b><code>-autoSmoothZ</code></b> &lt;scale factor&gt;</dt>
 <dd>
 
@@ -244,7 +250,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>The scale factor controls how much smoothing is applied. It is roughly calibrated so &quot;1&quot; works well, but you can try reducing that to 0.5, for example, and see if the results are still satisfactory, or increasing it to 2 if the gradient is still too spiky.</p>
 
-<p>Consider using <code>-sigmaz</code> instead unless you think there&#39;s a reason the quality of the data is worse in some areas than in others: that applies uniform smoothing over the whole course. Or the two can be combined.</p>
+<p>Consider using <code>-smoothZ</code> instead unless you think there&#39;s a reason the quality of the data is worse in some areas than in others: that applies uniform smoothing over the whole course. Or the two can be combined.</p>
 
 </dd>
 <dt id="autoSpacing"><b><code>-autoSpacing</code></b></dt>
@@ -270,11 +276,11 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>This specifies the auto-straightening algorithm should be run. It looks for sections of road, at least the minimum length long, where the road deviates laterally no more than the listed amount, each in meters. This is done before any other smoothing.</p>
 
-<p>This may have mixed results. If a minimum deviation is too large, you&#39;ll potentially lose details of the route. 2 meter is a decent number. 4 meters is relatively aggressive.</p>
+<p>This may have mixed results. If a minimum deviation is too large, you&#39;ll potentially lose details of the route. 2 meters is a decent number. 4 meters is relatively aggressive.</p>
 
 <p>This is in particular designed for routes generated from bike computer data, where rider position will move back and forth across the road, even for straight sections of road. However, if the road doesn&#39;t have long straight sections, then this will likely only decrease accuracy.</p>
 
-<p>it should likely be used in conjunction with some smoothing, for example by additionally providing the <code>-auto</code> option.</p>
+<p>This option should likely be used in conjunction with some smoothing, for example by additionally providing the <code>-auto</code> option.</p>
 
 </dd>
 <dt id="autoStraightenDeviation-meters"><b><code>-autoStraightenDeviation</code></b> &lt;meters&gt;</dt>
@@ -312,7 +318,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>The circular arc is fit between points starting at <code>-circleStart</code> and ending at <code>-circleEnd</code> from the start. If the <code>-isLoop</code> option is used, the start may come after the end in which case it wraps around. The circular arc is generated after point interpolation but before smoothing.</p>
 
-<p>If you want to generate multiple circular arcs (for example, the Polo fields have circular arcs at each end, separated by straight segments) then specify the same number of values for <code>-circleStart</code> and -circleEnd, for example two values each for an oval like the Polo Fields.</p>
+<p>If you want to generate multiple circular arcs (for example, the Polo fields have circular arcs at each end, separated by straight segments) then specify the same number of values for <code>-circleStart</code> and <code>-circleEnd</code>, for example two values each for an oval like the Polo Fields.</p>
 
 <p>If multiple values are listed, then multiple sections will be replaced. Distances will be updated after each circular segment replacement. So if you want to do multiple circular replacements, list them from further to closer relative to the start to avoid the distances for later fits being affected by earlier fits.</p>
 
@@ -335,6 +341,14 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If you want to specify a copyright field in the GPX, list it here. The default will preserve the copyright of the source GPX.</p>
 
 </dd>
+<dt id="cornerEffect-number"><b><code>-cornerEffect</code></b> &lt;number&gt;</dt>
+<dd>
+
+<p>This adjusts the corner effect on gradient smoothing, which maintains the original gradient in corners. The default is 1. A nonpositive number turns off the experimental algorithm. A number between 0 and 1 makes is weaker. A number greater than 1 makes it stronger. In some cases using a value of 2 may help pin down a corner leading into or coming out of a steep climb, for example. However, larger numbers may lead to irregularities due to the rapid modification of smoothing.</p>
+
+<p>This is not used in altitude or position smoothing.</p>
+
+</dd>
 <dt id="crop-meters"><b><code>-crop</code></b> &lt;meters&gt;</dt>
 <dd>
 
@@ -344,7 +358,9 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="cropMax-meters"><b><code>-cropMax</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>A point will be interpolated to this distance, if needed, and all points following will be discarded. Distances are calculated after smoothing but before <code>-append</code> or <code>-prepend</code>. It can be useful to design a course beyond the desired length, smooth it, and then crop it, since smoothing can have anomalous effects near the boundaries of the data. This is especially true for a route ending on a section of road previously encountered in the route. Since smoothing is affected by points ahead of and behind the given point, it is good to extend the points sufficiently ahead of and behind the finish so that smoothing has access to similar points both on the final and on preceding passes of that section of road.</p>
+<p>A point will be interpolated to this distance, if needed, and all points following will be discarded. Distances are calculated after smoothing but before <code>-append</code> or <code>-prepend</code>. It can be useful to design a course beyond the desired length, smooth it, and then crop it, since smoothing can have anomalous effects near the boundaries of the data. This is especially true for a route ending on a section of road previously encountered in the route.</p>
+
+<p>Since smoothing is affected by points ahead of and behind the given point, it is good to extend the points a few smoothing lengths, then crop it back to the desired endpoints.</p>
 
 </dd>
 <dt id="cropMin-meters"><b><code>-cropMin</code></b> &lt;meters&gt;</dt>
@@ -356,7 +372,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="crossingAngle-degees"><b><code>-crossingAngle</code></b> &lt;degees&gt;</dt>
 <dd>
 
-<p>If set, then this is the minimum degres by which segments need to intercept to be treated as crossings. If intercepting by less than this absolute angle, they are treated as separate. The default is 11.25. This can be increased since the default on twisty out-and-back sections might get marked as crossings otherwise.</p>
+<p>If set, then this is the minimum degrees by which segments need to intercept to be treated as crossings. If intercepting by less than this absolute angle, they are treated as separate. The default is 11.25. This can be increased since the default on twisty out-and-back sections might get marked as crossings otherwise.</p>
 
 </dd>
 <dt id="crossingHeight-meters"><b><code>-crossingHeight</code></b> &lt;meters&gt;</dt>
@@ -428,7 +444,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>Often races end with finishing circuits after a lead-in. To accomodate this, you can start with a GPX route which includes at least one lap of the finishing circuit, and add finishing loops. This option allows specifying the start position where a lap of the finish circuit begins. The circuit is assumed to extend to the end of the GPX file. The code will add a number of copies of these points specified by the <b><code>-finishCircuits</code></b> option.</p>
 
-<p>So if the course goes from A to B, then completes 3 circuits of the loop B-C-D, then find the distance in meters to point B, then specify that distance as <code>-finishCircuitDistance</code>, and specify <code>-finishCircuits</code> 2. This will add two cop`ies of the loop B-C-D to the end of the data.</p>
+<p>So if the course goes from A to B, then completes 3 circuits of the loop B-C-D, then find the distance in meters to point B, then specify that distance as <code>-finishCircuitDistance</code>, and specify <code>-finishCircuits</code> 2. This will add two copies of the loop B-C-D to the end of the data.</p>
 
 <p>If the desired finish of the GPX is not at the same point as the end of the loop, then you&#39;ll need to specify a <code>-cropMax</code> value to remove some of the final circuit.</p>
 
@@ -437,6 +453,12 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>A finishing circuit starting at the position specified by the <b><code>-finishCircuitDistance</code></b> option, in meters, will be appended to the initial data this number of times. A value of 1 here implies adding one copy, which will result in two laps of the circuit.</p>
+
+</dd>
+<dt id="finishCircuitStart-meters"><b><code>-finishCircuitStart</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Synonym for <code>-finishCircuitDistance</code>.</p>
 
 </dd>
 <dt id="fixCrossings"><b><code>-fixCrossings</code></b></dt>
@@ -457,6 +479,24 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Multiple sets of five numbers can be provided, in which case altitude flattening is done over each of the specified segments.</p>
 
 <p>Distances are calculated <i>after</i> smoothing but before cropping or extension.</p>
+
+</dd>
+<dt id="gAutoSmooth"><b><code>-gAutoSmooth</code></b></dt>
+<dd>
+
+<p>Synonym for <code>-autoSmoothG</code></p>
+
+</dd>
+<dt id="gSmooth"><b><code>-gSmooth</code></b></dt>
+<dd>
+
+<p>Synonym for <code>-smoothG</code></p>
+
+</dd>
+<dt id="gSigma"><b><code>-gSigma</code></b></dt>
+<dd>
+
+<p>Synonym for <code>-smoothG</code></p>
 
 </dd>
 <dt id="gradientPower"><b><code>-gradientPower</code></b></dt>
@@ -701,6 +741,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If you want multiple named segments, then split them with semicolons (&quot;;&quot;), so for example <code>-segments &quot;1000,2000,segment 1;3000,4000,segment 2&quot;</code></p>
 
 </dd>
+<dt id="selectiveGSmooth-meters"><b><code>-selectiveGSmooth</code></b> &lt;meters&gt; ...</dt>
+<dd>
+
+<p>This is an alias for <code>-selectiveSmoothG</code>, which provides for selective gradient smoothing.</p>
+
+</dd>
 <dt id="selectiveSmooth-meters"><b><code>-selectiveSmooth</code></b> &lt;meters&gt; ...</dt>
 <dd>
 
@@ -709,6 +755,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p>For example, suppose I want to use 7 meter smoothing up to 2 km, then change to 20 meter smoothing from 2 km to 3 km, then back to 7 meters past 3 km.</p>
 
 <p><code>-selectiveSmooth 7 2000 20 3000 7</code></p>
+
+</dd>
+<dt id="selectiveSmoothG-meters"><b><code>-selectiveSmoothG</code></b> &lt;meters&gt; ...</dt>
+<dd>
+
+<p>This is similar to <code>-selectiveSmooth</code> except it is applied only to gradient smoothing.</p>
 
 </dd>
 <dt id="selectiveSmoothZ-meters"><b><code>-selectiveSmoothZ</code></b> &lt;meters&gt; ...</dt>
@@ -778,6 +830,8 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>Provide a Gaussian sigma value for smoothing of position and altitude. The result will sharp corners will be rounded to corners with approximately this radius, and grade fluctuations over less distance than this will be lost. Typically altitude needs more smoothing than position, so additional altitude smoothing is required.</p>
 
+<p>Synonym for <code>-smoothZ</code></p>
+
 </dd>
 <dt id="smoothAngle-degrees"><b><code>-smoothAngle</code></b> &lt;degrees&gt;</dt>
 <dd>
@@ -789,6 +843,20 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>See <code>-smoothStart</code>. The default is to continue smoothing to the end of the GPX data.</p>
+
+</dd>
+<dt id="smoothG-meters"><b><code>-smoothG</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Additional smoothing to be applied to gradient, after smoothing applied to position and/or altitude. Gradient smoothing is very similar to altitude smoothing it smooths the gradient, then calculates altitude from the new gradient numbers, adjusting slightly to restore net altitude change for the route.</p>
+
+<p>There&#39;s a few differences from altitude smoothing. One is that altitude smoothing, on point-to-point courses, tends to flatten out the beginning and end of the route, while gradient smoothing tends to maintain the gradient at the beginning and end. A second difference is that gradient smoothing automatically reduces smoothing in corners with the philosophy that on real roads the gradient in corners may differ from the gradient on the straight road either before or after, and preserving that detail is more realistic. Altitude smoothing smooths corners and straight sections the same.</p>
+
+<p>The corner effect term can be adjusted with the <code>-cornerEffect</code> option.</p>
+
+<p>Altitude smoothing is better at preserving altitudes, while gradient smoothing is more focused on gradients, although since the two are related by a derivative, the difference is extremely subtle.</p>
+
+<p>This is a more experimental algorithm than altitude smoothing, due in part to the error correction at the end, but more for the consideration of cornering radius.</p>
 
 </dd>
 <dt id="smoothStart-meters"><b><code>-smoothStart</code></b> &lt;meters&gt;</dt>
@@ -893,6 +961,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If the start/end of the circuit lap is not the same place as the desired beginning of the route, then you&#39;ll need to specify a <code>-cropMin</code> value to remove some of the initial circuit</p>
 
 </dd>
+<dt id="startCircuitEnd-meters"><b><code>-startCircuitEnd</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Synonym for <code>-startCircuitDistance</code>.</p>
+
+</dd>
 <dt id="startCircuits-count"><b><code>-startCircuits</code></b> &lt;count&gt;</dt>
 <dd>
 
@@ -912,7 +986,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="straight-meters-1-or-more"><b><code>-straight</code></b> &lt;meters&gt; (1 or more)</dt>
 <dd>
 
-<p>Provide segments to be fit with straights, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via <code>-straightStart</code> and/or <code>-straightEnd</code>. IF both methods are used, these will be processed first. So for example, <code>-straight 400 500 100 200</code> will fit straights for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Not ethe further points are listed first so the fit of a straight to these points does not affect the distance to the nearer points.</p>
+<p>Provide segments to be fit with straights, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via <code>-straightStart</code> and/or <code>-straightEnd</code>. IF both methods are used, these will be processed first. So for example, <code>-straight 400 500 100 200</code> will fit straights for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Note the further points are listed first so the fit of a straight to these points does not affect the distance to the nearer points. This is recommended.</p>
 
 </dd>
 <dt id="straightEnd-meters-1-or-more"><b><code>-straightEnd</code></b> &lt;meters&gt; (1 or more)</dt>
@@ -966,11 +1040,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="zOffset-meters"><b><code>-zOffset</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altitude is recorded by an improperly zeroed altimeter.</p>
-
-<p>For example, you might prefer using data from a bike computer due to superior resolution of gradient, but note that the starting and finishing altitudes differ from map data. In this instance, a combination of <code>-ZShift</code> and <code>-ZOffset</code> can bring the computer data closer to the net altitude gain from the map data, while providing better resolution of gradients.</p>
-
-<p>This is applied <i>before scaling</i>. Use <code>-zShift</code> for changing altitude after scaling.</p>
+<p>This is like <code>-zShift</code>, but is applied <i>before</i> scaling.</p>
 
 </dd>
 <dt id="zScale-factor"><b><code>-zScale</code></b> &lt;factor&gt;</dt>
@@ -979,22 +1049,28 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Multiply altitudes in the original file <i>after offset</i>. but <i>before shift</i>. This is useful for fantasy routes where climbing should be adjusted, or potentially for data from a poorly calibrated barometer where I want to perfectly tune the net altitude change of a climb.</p>
 
 </dd>
+<dt id="zScaleRef-meters"><b><code>-zScaleRef</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is the reference altitude which will not be affected by <code>-zScale</code>. So if you have a course which starts at 100 meters and extends to 600 meters, but it should go from 100 meters to 700 meters, you would specify <code>-zScaleRef 100 -zScale 1.2</code>.</p>
+
+</dd>
 <dt id="zShift-meters"><b><code>-zShift</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. Use <code>-zOffset</code> for before scaling.</p>
+<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. So, for example, <code>-zScale 2 -zShift 100</code> will change an altitude 0 to an altitude 200, and an altitude 100 to an altitude 400.</p>
 
 </dd>
-<dt id="zShift-meters1"><b><code>-zShift</code></b> &lt;meters&gt;</dt>
+<dt id="zShiftEnd-meters"><b><code>-zShiftEnd</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Add this to the altitudes in the original file. This is useful for &quot;fantasy courses&quot;, or where altiude is recorded by an improperly zeroed altimeter. This is applied <i>after scaling</i>. Use <code>-zOffset</code> for before scaling.</p>
+<p>Distance on the route to end altitude shift. There will be a transition outside of this range. This is also used for <code>-zScale</code> and <code>-zOffset</code> (it affects all)..</p>
 
 </dd>
 <dt id="zShiftStart-meters"><b><code>-zShiftStart</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Distance on the route to start altitude shift. There will be a transition outside of this range.</p>
+<p>Distance on the route to start altitude shift. There will be a transition outside of this range. This is also used for <code>-zScale</code> and <code>-zOffset</code> (it affects all)..</p>
 
 </dd>
 <dt id="zSmooth"><b><code>-zSmooth</code></b></dt>
@@ -1239,7 +1315,25 @@ Pod::Usage   : for the -help option</code></pre>
 
 <h2 id="Multi-step-processing:-selective-smoothing">Multi-step processing: selective smoothing</h2>
 
-<p>Here is an example where an urban route with reasonably sharp corners, except it followed an oval path around a park. The oval path came out of Strava Route Editor slightly ragged, so I wanted enough smoothing there to make it smooth, but the rest of the route, I wanted less smoothing. For this I used -smoothStart and -smoothEnd, to isolate the oval, but then to get smoothing on the rest of the loop as well, I needed to run the code twice:</p>
+<p>Here is an example where an urban route with reasonably sharp corners, except it followed an oval path around a park. The oval path came out of Strava Route Editor slightly ragged, so I wanted enough smoothing there to make it smooth, but the rest of the route, I wanted less smoothing.</p>
+
+<p>One approach here is to use the -selectiveSmooth option. For example:</p>
+
+<p><code>processGPX -copyPoint -lap -spacing 3 -zsmooth 10 -selectiveSmooth 15 270 5 1540 15 original.gpx -minRadius 6 -out processed.gpx</code></p>
+
+<dl>
+
+<dt id="selectiveSmooth-15-270-5-1540-15"><b><code>-selectiveSmooth 15 270 5 1540 15</code></b></dt>
+<dd>
+
+<p>This says to smooth with a smoothing length up to 270 meter distance, then 5 meters from there up to 1540 meter distance, and from there 15 meters again to the end of the lap.</p>
+
+</dd>
+</dl>
+
+<p>But an alternate approach is to run the code twice, smoothing in two steps.</p>
+
+<p>For this I used -smoothStart and -smoothEnd, to isolate the oval, but then to get smoothing on the rest of the loop as well, I needed to run the code twice:</p>
 
 <p><code>processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -copyPoint -lap -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -minRadius 6 -out processed.gpx</code></p>
 

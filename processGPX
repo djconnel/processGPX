@@ -21,8 +21,9 @@ use Pod::Usage;
 # version 0.44: fixed -join
 # version 0.45: selectiveSmooth, selectiveSmoothZ, fixed append + prepend bug, fixed transition bug, retuned z-autosmoothing
 # version 0.46: efficiency improvements in calling smoothing.
+# version 0.47: added gradient smoothing w/ corner effect.  Simplified -zShift, -zScale, added -zScaleRef.  Added aliases for start/finish circuit distances.
 
-my $version = "0.46";             # make sure this matches pod value
+my $version = "0.47";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -946,13 +947,26 @@ sub smoothing {
   my $sigmaField  = $var{sigmaField} // "";
   my $sigmaFactor = $var{sigmaFactor} // 1;
   my $sigma0      = $var{sigma} // 0;   # uniform smoothing across all points
-  my $courseDistance = $var{courseDistance} // calcCourseDistance(points=> $points, isLoop=> $isLoop);
+  my $weighting   = $var{weighting} // [];
+  my $cornerEffect = $var{cornerEffect} // 0;
 
   my $sigma02 = $sigma0 ** 2;
+
+  note("smoothing proc called...\n");
+  note("smoothing @$fields with σ = $sigma0\n");
+  note("smoothing sigma field = $sigmaField\n")
+    if ($sigmaField ne "");
 
   return $points unless ( (@$fields > 0) && (( $sigma0 > 0) || ((defined $sigmaField) && ($sigmaField ne "") && ($sigmaFactor > 0))) );
 
   my @pNew;
+
+  addCurvatureField(points=> $points, isLoop=> $isLoop)
+    if ( $cornerEffect && (! defined $points->[0]->{curvature}) );
+
+  my $useWeighting = (@$weighting > 0);
+  note("smoothing @$fields with weighting.\n") if ($useWeighting);
+  note("smoothing @$fields with the corner effect = $cornerEffect.\n") if ($cornerEffect > 0);
 
   # step thru the points
   for my $i ( 0 .. $#$points ) {
@@ -967,19 +981,19 @@ sub smoothing {
        sqrt($sigma02 + $sigmap ** 2)
       );
 
-    my $s = $p->{distance};
-
     # create smoothed data: initialize with unsmoothed data
     my %var = %$p;
 
     if ($sigma > 0) {
+      $sigma /= $weighting->[$i]
+        if ($useWeighting && ($weighting->[$i] > 0));
 
-      if (abs($sigma) < 0.01) {
+      if ($sigma < 0.01) {
         push @pNew, $p;
         next;
       }
 
-      my $dsMax = 4 * $sigma;
+      my $dsMax = abs(4 * $sigma);
 
       my $j = $i;
       my $s = 0;
@@ -987,7 +1001,12 @@ sub smoothing {
              ($j > $i - @$points) &&
              ($s  < $dsMax)
             ) {
-        $s += latlngDistance( $points->[$j], $points->[$j - 1] );
+        my $ds = latlngDistance( $points->[$j], $points->[$j - 1] );
+        $s += $ds;
+
+        # a 1 radian turn is the same as 2 sigma for cornerEffect = 1
+        $s += $ds * $cornerEffect * ($points->[$j - 1]->{curvature} + $points->[$j]->{curvature}) * $sigma
+          if ($cornerEffect > 0);
         $j --;
       }
 
@@ -997,7 +1016,12 @@ sub smoothing {
              ($k < $i + @$points) &&
              ($s < $dsMax )
             ) {
-        $s += latlngDistance( $points->[$k % @$points], $points->[($k + 1) % @$points] );
+        my $l = $k % @$points;
+        my $m = ($k + 1) % @$points;
+        my $ds = latlngDistance( $points->[$l], $points->[$m] );
+        $s += $ds;
+        $s += $ds * $cornerEffect * ($points->[$l]->{curvature} + $points->[$m]->{curvature}) * $sigma
+          if ($cornerEffect > 0);
         $k ++;
       }
 
@@ -1005,8 +1029,7 @@ sub smoothing {
       $s = 0;
       my @ss = (0);
       for my $ii ( $j .. $k - 1 ) {
-        my $ds = latlngDistance($points->[($ii + 1) % @$points], $points->[$ii % @$points]);
-        $s += $ds;
+        $s += latlngDistance($points->[($ii + 1) % @$points], $points->[$ii % @$points]);
         push @ss, $s;
       }
 
@@ -1032,9 +1055,9 @@ sub smoothing {
         # weight by distance
         my $du = ($ii > 0) ? $u - $us[$ii - 1] : 0;
         $du += $us[$ii + 1] - $u if ($ii < $#us);
-
         my $w = exp(-($u ** 2) / 2) * $du;
         $sum0 += $w;
+
         for my $field ( @$fields ) {
           $sum1{$field} += $w * $p->{$field};
         }
@@ -1045,6 +1068,14 @@ sub smoothing {
     }
     push @pNew, \%var;
   }
+
+  # delete curvature field if we modified position
+  if (grep(/^lat/, @$fields) || grep(/^lon/, @$fields)) {
+    for my $f ( "curvature", "distance", "gradient", "direction" ) {
+      deleteField(points=> $points, field=> $f);
+    }
+  }
+
   return \@pNew;
 }
 
@@ -2703,6 +2734,9 @@ sub addDistanceField {
   }
 }
 
+#
+# calculate a gradient from altitude
+#
 sub addGradientField {
   my %var = @_;
   my $points = $var{points} // [];
@@ -2727,6 +2761,38 @@ sub addGradientField {
       $points->[$i]->{gradient} = $points->[$i - 1]->{gradient};
       $i ++;
     }
+  }
+}
+
+#
+# integrate gradient to get altitude
+#
+sub integrateGradientField {
+  note("integrating gradient to update altitude...\n");
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $isLoop = $var{isLoop} // 0;
+  next unless (@$points);
+  return unless (defined $points->[0]->{gradient});
+  addDistanceField(points=> $points) unless ((defined $points->[0]->{distance}) && (defined $points->[-1]->{distance}));
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+  my $i = 0;
+  my $iMax = $#$points;
+  $points->[0]->{ele} //= 0;       # default initial ele (this should never be necessary)
+  my $zLast = $points->[$isLoop ? 0 : -1]->{ele};   # remember last altitude
+  while ($i < $iMax) {
+    my $p1 = $points->[$i];
+    my $j = ($i + 1) % @$points;
+    my $di = $p1->{distance};
+    last if ( ($j <= $i)  && (! $isLoop) );
+    my $p2 = $points->[$j];
+    $p2->{ele} = $p1->{ele} + $p1->{gradient} * distanceDifference($p1, $p2, $courseDistance, $isLoop);
+    $i ++;
+  }
+  # adjust altitude to match net climbing
+  my $deltaZ = $zLast - ($points->[-1]->{ele} + ($isLoop ? $points->[-1]->{gradient} * ($courseDistance - $points->[-1]->{distance}) : 0));
+  for my $p ( @$points ) {
+    $p->{ele} += $deltaZ * $p->{distance} / $points->[-1]->{distance};
   }
 }
 
@@ -3201,7 +3267,7 @@ sub calcSmoothingSigma {
 
   # calculate a gradient field (also adds distance)
   note("calculating gradient field...\n");
-  addGradientField(points=> $points);
+  addGradientField(points=> $points, isLoop=> $isLoop);
   my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
 
   my @gVars;                    # gradient variances
@@ -3489,6 +3555,7 @@ my $autoStraightenLength;  # minimum length for auto-straightening
 my $author;         # author, for GPX
 my $copyPoint = 0; # whether to make sure first point and last point in data coincide
 my $copyright;     # copyright field, for GPX
+my $cornerEffect = 1; # corner effect for smoothing
 my $cropMax; # maximum distance of retained data (distance calculated in original coordinates
 my $cropMin; # minimum distance of retained data (distance calculated in original coordinates)
 my $crossingAngle;    # crossings need to cross by at least this angle
@@ -3505,8 +3572,10 @@ my $extendBack = 0;          # amount to extend the route with a loop.
 my $finishCircuits  = 0;     # number of finish circuits
 my $finishCircuitDistance = -1; # km of finish circuit
 my $fixCrossings = 0;           # whether to flatten crossings
+my $gAutoSmooth = 0;            # auto-smoothing based on gradient
 my $gradientPower = 2; # power to raise gradient in evaluating segments for gradient signs
 my $gradientThreshold = 100; # minimum climb @ 10% grade to get a gradient sign
+my $gSmooth = 0;          # smoothing applied additionally to gradient
 my $isLoop = 0;    # whether to apply periodic boundary conditions (smooth around the Loop)
 my $lAutoSmooth = 0;            # auto-smoothing based on position
 my $lSmooth;    # general smoothing, applies to positions and all other fields
@@ -3558,6 +3627,7 @@ my $vFlag = 0;            # print version
 my $zAutoSmooth = 0;      # auto-smoothing based on altitude
 my $zOffset = 0;          # offset for altitude before scaling
 my $zScale = 1;           # scale factor for altitude
+my $zScaleRef = 0;        # reference altitude for altitude scaling
 my $zShift = 0;           # offset for altitude after scaling
 my $zShiftStart;          # where to start applying z shift
 my $zShiftEnd;            # where to end applying z shift
@@ -3571,6 +3641,7 @@ my @circleStart;          # starting point for a circular corner (one per run)
 my @flatten;              # points come in sets of 4: altitude, start point, finish point, lambda
 my @join;                 # GPX file(s) to join to this one
 my @selectiveSmooth;      # alternative to specifying smoothing varying along the course
+my @selectiveSmoothG;     # alternative to specifying gradient smoothing varying along the course
 my @selectiveSmoothZ;     # alternative to specifying altitude smoothing varying along the course
 my @splitDistance;        # locations for splitting route
 my @straight;             # points for straight substitution
@@ -3611,6 +3682,7 @@ GetOptions (
             "closed"        => \$copyPoint,
             "copyPoint"     => \$copyPoint,
             "copyright=s"   => \$copyright,
+            "cornerEffect=f" => \$cornerEffect,
             "crop=f"        => \$cropMax,
             "cropEnd=f"     => \$cropMax,
             "cropMax=f"     => \$cropMax,
@@ -3629,8 +3701,11 @@ GetOptions (
             "extendBack=f"  => \$extendBack,
             "finishCircuits=i"  => \$finishCircuits,
             "finishCircuitDistance=f" => \$finishCircuitDistance,
+            "finishCircuitStart=f" => \$finishCircuitDistance,
             "fixCrossings"      => \$fixCrossings,
             "flatten=f{1,1000}" => \@flatten,
+            "gSmooth=f"     => \$gSmooth,
+            "gSigma=f"      => \$gSmooth,
             "gradientPower=f"   => \$gradientPower,
             "gradientThreshold=f"  => \$gradientThreshold,
             "h"             => \$needHelp,
@@ -3668,7 +3743,9 @@ GetOptions (
             "saveSimplifiedCourse" => \$saveSimplifiedCourse,
             "segment=s"     =>  \$namedSegments,
             "segments=s"    =>  \$namedSegments,
+            "selectiveGSmooth=f{0,1000}" => \@selectiveSmoothG,
             "selectiveSmooth=f{0,1000}" => \@selectiveSmooth,
+            "selectiveSmoothG=f{0,1000}" => \@selectiveSmoothG,
             "selectiveSmoothZ=f{0,1000}" => \@selectiveSmoothZ,
             "selectiveZSmooth=f{0,1000}" => \@selectiveSmoothZ,
             "shiftEnd=f"    => \$shiftEnd,
@@ -3680,6 +3757,7 @@ GetOptions (
             "smoothAngle=f" => \$smoothAngle,
             "smoothEnd=f"   => \$smoothEnd,
             "smoothStart=f" => \$smoothStart,
+            "smoothG=f"     => \$gSmooth,
             "smoothZ=f"     => \$zSmooth,
             "snap=i"        => \$snap,
             "snapDistance=f" => \$snapDistance,
@@ -3691,8 +3769,9 @@ GetOptions (
             "splineMaxDegs=f" => \$splineMaxDegs,
             "splitAt=f{1,100}" => \@splitDistance,
             "splitNumber=i" => \$splitNumber,
-            "startCircuits=i"  => \$startCircuits,
             "startCircuitDistance=f" => \$startCircuitDistance,
+            "startCircuitEnd=f" => \$startCircuitDistance,
+            "startCircuits=i"  => \$startCircuits,
             "startTime=s"   => \$startTime,
             "straight=f{1,1000}" => \@straight,
             "straightStart=f{1,1000}" => \@straightStart,
@@ -3704,6 +3783,8 @@ GetOptions (
             "version"       => \$vFlag,
             "v"             => \$vFlag,
             "zOffset=f"     => \$zOffset,
+            "zScaleRef=f"   => \$zScaleRef,
+            "zScaleReference=f"  => \$zScaleRef,
             "zScale=f"      => \$zScale,
             "zShift=f"      => \$zShift,
             "zShiftEnd=f"   => \$zShiftEnd,
@@ -4163,21 +4244,15 @@ for my $file ( @files ) {
   }
 
   # adjust altitudes if requested
-  if (($zOffset != 0) || ($zScale != 1)) {
-    note("transforming altitude...\n");
-    for my $p ( @$points ) {
-      $p->{ele} = ($p->{ele} + $zOffset) * $zScale;
-    }
-  }
-  if ( (defined $zShift) && ($zShift != 0) ) {
+  if ( ((defined $zShift) && ($zShift != 0)) || ((defined $zScale) && ($zScale != 1)) ) {
     # transition set to change gradient by up to 5%
-    note("applying z shift = $zShift\n");
+    note("applying z shift = $zShift, and z scale = $zScale\n");
     note("zShift start = $zShiftStart\n") if (defined $zShiftStart);
     note("zShift end = $zShiftEnd\n") if (defined $zShiftEnd);
     my $zShiftDistance = 20 * (1 + abs($zShift));
     for my $p ( @$points ) {
       my $s = $p->{distance};
-      my $dz = $zShift;
+      my $dz = ($p->{ele} + $zOffset - $zScaleRef) * $zScale + $zShift + $zScaleRef - $p->{ele};
       if ( (defined $zShiftStart) && (defined $zShiftEnd) && ($zShiftEnd < $zShiftStart) ) {
         $dz *= (transition(($zShiftStart - $s) / $zShiftDistance) * transition(($s - $zShiftEnd) / $zShiftDistance));
       } else {
@@ -4360,25 +4435,29 @@ for my $file ( @files ) {
         ($lAutoSmooth > 0) ||
         ($zAutoSmooth > 0) ||
         @selectiveSmooth   ||
-        @selectiveSmoothZ
+        @selectiveSmoothZ  ||
+        @selectiveSmoothG
        );
 
   # keep track of the first and last points, if anchoring is happening
   my @endPoints  = ($points->[0], $points->[-1]);
 
-  for my $smoothLoop ( 0, 1, 3 ) {
+  for my $smoothLoop ( 0, 1, 2, 4 ) {
     my %fsigma;
     my $smooth;
     my $autoSmooth;
     $smooth = $lSmooth     if ($smoothLoop == 0);
     $smooth = $zSmooth     if ($smoothLoop == 1);
-    $smooth = $lAutoSmooth if ($smoothLoop == 2);
-    $smooth = $zAutoSmooth if ($smoothLoop == 3);
+    $smooth = $gSmooth     if ($smoothLoop == 2);
+    $smooth = $lAutoSmooth if ($smoothLoop == 3);
+    $smooth = $zAutoSmooth if ($smoothLoop == 4);
+    $smooth = $gAutoSmooth if ($smoothLoop == 5);
 
     # selective smoothing
     my $sSmooth =
       ($smoothLoop == 0) ? \@selectiveSmooth :
       ($smoothLoop == 1) ? \@selectiveSmoothZ :
+      ($smoothLoop == 2) ? \@selectiveSmoothG :
       [];
 
     next unless ( ($smooth > 0) || @$sSmooth );
@@ -4386,6 +4465,7 @@ for my $file ( @files ) {
     my $sigma0;
     if ($smoothLoop == 3) {
       # smooth field is generated from data
+      note("calculating auto sigma\n");
       calcSmoothingSigma( points=> $points, sigmaFactor=> $smooth );
       $sigma0 = 0;
     } else {
@@ -4415,8 +4495,10 @@ for my $file ( @files ) {
         note("smoothing...",
              ($smoothLoop==0) ? "position" :
              ($smoothLoop==1) ? "altitude" :
-             ($smoothLoop==2) ? "position(auto)" :
-             ($smoothLoop==3) ? "altitude(auto)" :
+             ($smoothLoop==2) ? "gradient" :
+             ($smoothLoop==3) ? "position(auto)" :
+             ($smoothLoop==4) ? "altitude(auto)" :
+             ($smoothLoop==5) ? "gradient(auto)" :
              "other",
              "\n");
 
@@ -4488,11 +4570,20 @@ for my $file ( @files ) {
     }
 
     my @keys;
-    if ( $smoothLoop % 2 == 0 ) {
+    my $useCornerEffect;
+    if ( $smoothLoop % 3 == 0 ) {
       @keys = ("ele",  "latlon");
-    } elsif ( $smoothLoop % 2 == 1 ) {
+      $useCornerEffect = 0;
+    } elsif ( $smoothLoop % 3 == 1 ) {
       @keys = ("ele");
+      $useCornerEffect = 0;
+    } elsif ( $smoothLoop % 3 == 2 ) {
+      @keys = ("gradient");
+      $useCornerEffect = 1;
     }
+
+    addGradientField(points=> $points, isLoop=> $isLoop)
+      if ($smoothLoop % 3 == 2);
 
     for my $key ( @keys ) {
       $points =
@@ -4501,9 +4592,14 @@ for my $file ( @files ) {
                   isLoop=>      $isLoop,
                   points=>      $points,
                   sigma=>       $sigma0,
+                  cornerEffect=> ($useCornerEffect ? $cornerEffect : 0),
                   fields=>      (($key eq "latlon") ? ["lat", "lon"] : [$key]),
                  );
     }
+
+    integrateGradientField(points=> $points, isLoop => $isLoop)
+      if ($smoothLoop % 3 == 2);
+
   }
 
   # anchoring: return start point and, if not a loop, finish point to original values
@@ -5649,7 +5745,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.46
+0.47
 
 =head1 DESCRIPTION
 
@@ -5938,6 +6034,12 @@ not be applied if it would result in the loss of mandated margin (by
 -autoSegmentMargin) to an adjacent segment, or too close to the start
 (-autoSegmentStartMargin) or finish (-autoSegmentFinishMargin)
 
+=item B<C<-autoSmoothG>>
+
+This invokes gradient autosmoothing selectively along the course,
+using a similar syntax to C<-autoSmooth> and C<-autoSmoothZ>.  For
+details on gradient smoothing, see the C<-smoothG> option.
+
 =item B<C<-autoSmoothZ>> <scale factor>
 
 This invokes an auto-smoothing algorithm whereby more altitude
@@ -5955,8 +6057,8 @@ roughly calibrated so "1" works well, but you can try reducing that to
 0.5, for example, and see if the results are still satisfactory, or
 increasing it to 2 if the gradient is still too spiky.
 
-Consider using C<-sigmaz> instead unless you think there's a reason the
-quality of the data is worse in some areas than in others: that
+Consider using C<-smoothZ> instead unless you think there's a reason
+the quality of the data is worse in some areas than in others: that
 applies uniform smoothing over the whole course.  Or the two can be
 combined.
 
@@ -5993,7 +6095,7 @@ the road deviates laterally no more than the listed amount, each in
 meters.  This is done before any other smoothing.
 
 This may have mixed results. If a minimum deviation is too large,
-you'll potentially lose details of the route. 2 meter is a decent
+you'll potentially lose details of the route. 2 meters is a decent
 number. 4 meters is relatively aggressive.
 
 This is in particular designed for routes generated from bike computer
@@ -6001,8 +6103,8 @@ data, where rider position will move back and forth across the road,
 even for straight sections of road.  However, if the road doesn't have
 long straight sections, then this will likely only decrease accuracy.
 
-it should likely be used in conjunction with some smoothing, for
-example by additionally providing the C<-auto> option.
+This option should likely be used in conjunction with some smoothing,
+for example by additionally providing the C<-auto> option.
 
 =item B<C<-autoStraightenDeviation>> <meters>
 
@@ -6060,7 +6162,7 @@ smoothing.
 If you want to generate multiple circular arcs (for example, the Polo
 fields have circular arcs at each end, separated by straight segments)
 then specify the same number of values for C<-circleStart> and
--circleEnd, for example two values each for an oval like the Polo
+C<-circleEnd>, for example two values each for an oval like the Polo
 Fields.
 
 If multiple values are listed, then multiple sections will be
@@ -6084,6 +6186,18 @@ Cycling will recognize it as a loop course.
 If you want to specify a copyright field in the GPX, list it here.
 The default will preserve the copyright of the source GPX.
 
+=item B<C<-cornerEffect>> <number>
+
+This adjusts the corner effect on gradient smoothing, which maintains
+the original gradient in corners.  The default is 1.  A nonpositive
+number turns off the experimental algorithm.  A number between 0 and 1
+makes is weaker.  A number greater than 1 makes it stronger.  In some
+cases using a value of 2 may help pin down a corner leading into or
+coming out of a steep climb, for example.  However, larger numbers may
+lead to irregularities due to the rapid modification of smoothing.
+
+This is not used in altitude or position smoothing.
+
 =item B<C<-crop>> <meters>
 
 This is a short-cut for the C<-cropMax> option
@@ -6092,15 +6206,15 @@ This is a short-cut for the C<-cropMax> option
 
 A point will be interpolated to this distance, if needed, and all
 points following will be discarded.  Distances are calculated after
-smoothing but before C<-append> or C<-prepend>.  It can be useful to design
-a course beyond the desired length, smooth it, and then crop it, since
-smoothing can have anomalous effects near the boundaries of the data.
-This is especially true for a route ending on a section of road
-previously encountered in the route.  Since smoothing is affected by
-points ahead of and behind the given point, it is good to extend the
-points sufficiently ahead of and behind the finish so that smoothing
-has access to similar points both on the final and on preceding passes
-of that section of road.
+smoothing but before C<-append> or C<-prepend>.  It can be useful to
+design a course beyond the desired length, smooth it, and then crop
+it, since smoothing can have anomalous effects near the boundaries of
+the data.  This is especially true for a route ending on a section of
+road previously encountered in the route.
+
+Since smoothing is affected by points ahead of and behind the given
+point, it is good to extend the points a few smoothing lengths, then
+crop it back to the desired endpoints.
 
 =item B<C<-cropMin>> <meters>
 
@@ -6110,7 +6224,7 @@ GPX route.  See C<-cropMax> for more discussion.
 
 =item B<C<-crossingAngle>> <degees>
 
-If set, then this is the minimum degres by which segments need to
+If set, then this is the minimum degrees by which segments need to
 intercept to be treated as crossings.  If intercepting by less than
 this absolute angle, they are treated as separate.  The default is
 11.25.  This can be increased since the default on twisty out-and-back
@@ -6209,7 +6323,7 @@ B<C<-finishCircuits>> option.
 So if the course goes from A to B, then completes 3 circuits of the
 loop B-C-D, then find the distance in meters to point B, then specify
 that distance as C<-finishCircuitDistance>, and specify C<-finishCircuits> 2.
-This will add two cop`ies of the loop B-C-D to the end of the data.
+This will add two copies of the loop B-C-D to the end of the data.
 
 If the desired finish of the GPX is not at the same point as the end
 of the loop, then you'll need to specify a C<-cropMax> value to remove
@@ -6222,6 +6336,10 @@ B<C<-finishCircuitDistance>> option, in meters, will be appended
 to the initial data this number of times.  A value of 1 here
 implies adding one copy, which will result in two laps of the
 circuit.
+
+=item B<C<-finishCircuitStart>> <meters>
+
+Synonym for C<-finishCircuitDistance>.
 
 =item B<C<-fixCrossings>>
 
@@ -6258,6 +6376,18 @@ Multiple sets of five numbers can be provided, in which case altitude
 flattening is done over each of the specified segments.
 
 Distances are calculated I<after> smoothing but before cropping or extension.
+
+=item B<C<-gAutoSmooth>>
+
+Synonym for C<-autoSmoothG>
+
+=item B<C<-gSmooth>>
+
+Synonym for C<-smoothG>
+
+=item B<C<-gSigma>>
+
+Synonym for C<-smoothG>
 
 =item B<C<-gradientPower>>
 
@@ -6585,7 +6715,13 @@ to merge segments from the input file if the input file has multiple
 segments and you wish to replace them.
 
 If you want multiple named segments, then split them with semicolons
-(";"), so for example C<-segments "1000,2000,segment 1;3000,4000,segment 2">
+(";"), so for example C<-segments "1000,2000,segment
+1;3000,4000,segment 2">
+
+=item B<C<-selectiveGSmooth>> <meters> ...
+
+This is an alias for C<-selectiveSmoothG>, which provides for
+selective gradient smoothing.
 
 =item B<C<-selectiveSmooth>> <meters> ...
 
@@ -6595,15 +6731,20 @@ course.  The next number is a position where the smoothing changes to
 the next smoothing number.  A third number is the smoothing beyond the
 second number.  This can continue.  So you alternate smoothing numbers
 and positions marking the transition between these smoothing numbers.
-So there should be an odd number of numbers following.  If there's an even
-number, a last number of zero is assumed (no smoothing after the listed
-distance).
+So there should be an odd number of numbers following.  If there's an
+even number, a last number of zero is assumed (no smoothing after the
+listed distance).
 
 For example, suppose I want to use 7 meter smoothing up to 2 km, then
 change to 20 meter smoothing from 2 km to 3 km, then back to 7 meters
 past 3 km.
 
 C<-selectiveSmooth 7 2000 20 3000 7>
+
+=item B<C<-selectiveSmoothG>> <meters> ...
+
+This is similar to C<-selectiveSmooth> except it is applied only
+to gradient smoothing.
 
 =item B<C<-selectiveSmoothZ>> <meters> ...
 
@@ -6704,6 +6845,8 @@ approximately this radius, and grade fluctuations over less distance
 than this will be lost.  Typically altitude needs more smoothing than
 position, so additional altitude smoothing is required.
 
+Synonym for C<-smoothZ>
+
 =item B<C<-smoothAngle>> <degrees>
 
 For C<-autoSpacing>, determines how dense to place points such that
@@ -6713,6 +6856,34 @@ the maximum angle between points is no more than approximately this angle.
 
 See C<-smoothStart>.  The default is to continue smoothing to the end of
 the GPX data.
+
+=item B<C<-smoothG>> <meters>
+
+Additional smoothing to be applied to gradient, after smoothing
+applied to position and/or altitude.  Gradient smoothing is very
+similar to altitude smoothing it smooths the gradient, then calculates
+altitude from the new gradient numbers, adjusting slightly to restore
+net altitude change for the route.
+
+There's a few differences from altitude smoothing.  One is that
+altitude smoothing, on point-to-point courses, tends to flatten out
+the beginning and end of the route, while gradient smoothing tends to
+maintain the gradient at the beginning and end.  A second difference
+is that gradient smoothing automatically reduces smoothing in corners
+with the philosophy that on real roads the gradient in corners may
+differ from the gradient on the straight road either before or after,
+and preserving that detail is more realistic.  Altitude smoothing
+smooths corners and straight sections the same.
+
+The corner effect term can be adjusted with the C<-cornerEffect> option.
+
+Altitude smoothing is better at preserving altitudes, while gradient
+smoothing is more focused on gradients, although since the two are
+related by a derivative, the difference is extremely subtle.
+
+This is a more experimental algorithm than altitude smoothing,
+due in part to the error correction at the end, but more for the
+consideration of cornering radius.
 
 =item B<C<-smoothStart>> <meters>
 
@@ -6896,6 +7067,10 @@ If the start/end of the circuit lap is not the same place as the desired
 beginning of the route, then you'll need to specify a C<-cropMin> value to remove
 some of the initial circuit
 
+=item B<C<-startCircuitEnd>> <meters>
+
+Synonym for C<-startCircuitDistance>.
+
 =item B<C<-startCircuits>> <count>
 
 The number of copies of the starting circuit (from distance 0 to the
@@ -6920,12 +7095,13 @@ depend on the road grade, calibrated for a strong rider.
 
 Provide segments to be fit with straights, alternating start distance
 from start of GPX, and finish distance from start of GPX.  This is an
-alternative to providing values via C<-straightStart> and/or C<-straightEnd>.
-IF both methods are used, these will be processed first.  So for
-example, C<-straight 400 500 100 200> will fit straights for points between
-400 and 500 meters from the start, then between 100 and 200 meters from
-the start.  Not ethe further points are listed first so the fit of a
-straight to these points does not affect the distance to the nearer points.
+alternative to providing values via C<-straightStart> and/or
+C<-straightEnd>.  IF both methods are used, these will be processed
+first.  So for example, C<-straight 400 500 100 200> will fit
+straights for points between 400 and 500 meters from the start, then
+between 100 and 200 meters from the start.  Note the further points
+are listed first so the fit of a straight to these points does not
+affect the distance to the nearer points.  This is recommended.
 
 =item B<C<-straightEnd>> <meters> (1 or more)
 
@@ -6987,19 +7163,7 @@ Synonym for C<-autoSmoothZ>
 
 =item B<C<-zOffset>> <meters>
 
-Add this to the altitudes in the original file.  This is useful for
-"fantasy courses", or where altitude is recorded by an improperly
-zeroed altimeter.
-
-For example, you might prefer using data from a bike
-computer due to superior resolution of gradient, but note that the
-starting and finishing altitudes differ from map data.  In this instance,
-a combination of C<-ZShift> and C<-ZOffset> can bring the computer data
-closer to the net altitude gain from the map data, while providing
-better resolution of gradients.
-
-This is applied I<before scaling>.  Use C<-zShift> for changing altitude
-after scaling.
+This is like C<-zShift>, but is applied I<before> scaling.
 
 =item B<C<-zScale>> <factor>
 
@@ -7008,24 +7172,32 @@ shift>.  This is useful for fantasy routes where climbing should be
 adjusted, or potentially for data from a poorly calibrated barometer
 where I want to perfectly tune the net altitude change of a climb.
 
+=item B<C<-zScaleRef>> <meters>
+
+This is the reference altitude which will not be affected by C<-zScale>.
+So if you have a course which starts at 100 meters and extends to 600 meters,
+but it should go from 100 meters to 700 meters, you would specify
+C<-zScaleRef 100 -zScale 1.2>.
+
 =item B<C<-zShift>> <meters>
 
 Add this to the altitudes in the original file.  This is useful for
 "fantasy courses", or where altiude is recorded by an improperly
-zeroed altimeter.  This is applied I<after scaling>.  Use C<-zOffset> for
-before scaling.
+zeroed altimeter.  This is applied I<after scaling>.  So, for example,
+C<-zScale 2 -zShift 100> will change an altitude 0 to an altitude
+200, and an altitude 100 to an altitude 400.
 
-=item B<C<-zShift>> <meters>
+=item B<C<-zShiftEnd>> <meters>
 
-Add this to the altitudes in the original file.  This is useful for
-"fantasy courses", or where altiude is recorded by an improperly
-zeroed altimeter.  This is applied I<after scaling>.  Use C<-zOffset> for
-before scaling.
+Distance on the route to end altitude shift.  There will be a transition
+outside of this range.  This is also used for C<-zScale> and C<-zOffset>
+(it affects all)..
 
 =item B<C<-zShiftStart>> <meters>
 
 Distance on the route to start altitude shift.  There will be a transition
-outside of this range.
+outside of this range.  This is also used for C<-zScale> and C<-zOffset>
+(it affects all)..
 
 =item B<C<-zSmooth>>
 
@@ -7376,7 +7548,26 @@ Here is an example where an urban route with reasonably sharp corners,
 except it followed an oval path around a park.  The oval path came out
 of Strava Route Editor slightly ragged, so I wanted enough smoothing
 there to make it smooth, but the rest of the route, I wanted less
-smoothing.  For this I used -smoothStart and -smoothEnd, to isolate
+smoothing.
+
+One approach here is to use the -selectiveSmooth option.  For example:
+
+C<processGPX -copyPoint -lap -spacing 3 -zsmooth 10 -selectiveSmooth 15 270 5 1540 15 original.gpx -minRadius 6 -out processed.gpx>
+
+=over
+
+=item B<C<-selectiveSmooth 15 270 5 1540 15>>
+
+This says to smooth with a smoothing length up to 270 meter distance,
+then 5 meters from there up to 1540 meter distance, and from there 15
+meters again to the end of the lap.
+
+=back
+
+But an alternate approach is to run the code twice, smoothing in two
+steps.
+
+For this I used -smoothStart and -smoothEnd, to isolate
 the oval, but then to get smoothing on the rest of the loop as well, I
 needed to run the code twice:
 
