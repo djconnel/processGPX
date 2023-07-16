@@ -86,7 +86,7 @@
 
 <p>This code uses the following Perl modules, which must be installed, for example with the &quot;cpan&quot; command-line tool:</p>
 
-<pre><code>Getopt::Long : used for processing comamnd-line options
+<pre><code>Getopt::Long : used for processing command-line options
 Geo::Gpx     : parsing and generating GPX files
 XML::Descent : processing XML (required by Geo::Gpx, as well)
 POSIX        : floor function
@@ -181,6 +181,38 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Since RGT tends to create loop courses when start and finish points are close, the code may put a bend in the road it creates with this command, if both <code>-append</code> and <code>-prepend</code> are specified (perhaps via <code>-extend</code>).</p>
 
 <p>Negative values crop the course by the negative distance. So &quot;<code>-append -100</code>&quot; will move the finish line back 100 meters. This is useful for preventing RGT from connecting the finish and start points, which has a 100 meter threshold, as this is written.</p>
+
+</dd>
+<dt id="arcFitDegs-degrees"><b><code>-arcFitDegs</code></b> &lt;degrees&gt;</dt>
+<dd>
+
+<p>If arc fits are desired, specifying this will cause arc fit interpolation to be done for corners turning at least this much, but less than the <code>-arcFitMaxDegs</code> option. A typical value is 5 degrees. This angle is the angle between interpolated course points</p>
+
+<p>For a given 4 points i&lt;a&gt;, i&lt;b&gt;, i&lt;c&gt;, and i&lt;d&gt;, it interpolates between points b and c by fitting a circle through points i&lt;a&gt;, i&lt;b&gt;, and i&lt;c&gt;, fitting a second circle between points -&lt;b&gt;, i&lt;c&gt;, and i&lt;d&gt;, and then doing a weighted average of these two fits based on the relative distance of the interpolated point from points i&lt;b&gt; and i&lt;c&gt;. If starting with points forming the vertices of a polygon, for example, the resulting interpolation will yield a circular course, which may or may not be what you want.</p>
+
+<p>This algorithm tends to result in more sweeping corners than spline interpolation, which may or may not reflect reality. Also if there are any anomalous points then there&#39;s the chance this algorithm will exaggerate these anomalies. It&#39;s recommended you very carefully check the results of applying this option. It&#39;s perhaps best for circuits with sweeping corners rather than straights connected with tighter turns.</p>
+
+<p>See also &lt;<code>-arcFitMaxDegs</code>.</p>
+
+</dd>
+<dt id="arcFitEnd-meters"><b><code>-arcFitEnd</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Where to end arc fitting, if any. The default is to end any arc fitting at the end of the course.</p>
+
+</dd>
+<dt id="arcFitMaxDegs-degrees"><b><code>-arcFitMaxDegs</code></b> &lt;degrees&gt;</dt>
+<dd>
+
+<p>If a <code>-arcFitDegs</code> option is specified, specifying this limit the maximum angle corner for which arc fit interpolation will be applied. ArcFits are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. ArcFits have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using arc fit interpolation: verty strange results can occur if the corner is too sharp.</p>
+
+<p>Arc fitting is a variation on spline fitting where corners are fit to circles rather than splines. If this option is set too large then there&#39;s a risk of getting dramatically incorrect trajectors for sharp corners. See also the notes in <code>-arcFitDegs</code>.</p>
+
+</dd>
+<dt id="arcFitStart-meters"><b><code>-arcFitStart</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Where to start arc fitting, if any. The default is to start any arc fitting at the start of the course. This can be after <code>-arcFitEnd</code> and the region will wrap-around.</p>
 
 </dd>
 <dt id="author-string"><b><code>-author</code></b> &lt;string&gt;</dt>
@@ -569,6 +601,18 @@ Pod::Usage   : for the -help option</code></pre>
 <p>The course is considered a loop course, or a circuit, and so smoothing and other operations can take place between the beginning and end of the loop.</p>
 
 </dd>
+<dt id="loopLeft"><b><code>-loopLeft</code></b></dt>
+<dd>
+
+<p>Specify that turnaround loops should loop to the left (UK, for example). The default is to base it on the <code>-laneShift</code> (left for a negative lane shift, else positive).</p>
+
+</dd>
+<dt id="loopRight"><b><code>-loopRight</code></b></dt>
+<dd>
+
+<p>Specify that turnaround loops should loop to the right (US, for example). The default is to base it on the <code>-laneShift</code> (left for a negative lane shift, else positive).</p>
+
+</dd>
 <dt id="maxSlope"><b><code>-maxSlope</code></b> &lt;%&gt;</dt>
 <dd>
 
@@ -931,10 +975,22 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If splines are desired, specifying this will cause spline interpolation to be done for corners turning at least this much, but less than the <code>-splineMaxDegs</code> option. A typical value is 5 degrees. This angle is the angle between course points, not an angle of a total turn: the algorithm only looks at points ahead of and behind a given point.</p>
 
 </dd>
+<dt id="splineEnd-meters"><b><code>-splineEnd</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Where to end spline fitting, if any. The default is to end any spline fitting at the end of the course. This can &quot;wrap around&quot;.</p>
+
+</dd>
 <dt id="splineMaxDegs-degrees"><b><code>-splineMaxDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
-<p>If a <code>-splineDegs</code> option is specified, specifying this limit the maximum angle corner for which spline interpolation will be applied. Splines are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Splines have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using spline interpolation: verty strange results can occur if the corner is too sharp.</p>
+<p>If a <code>-splineDegs</code> option is specified, specifying this limit the maximum angle corner for which spline interpolation will be applied. Splines are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Splines have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using spline interpolation: strange results can occur if the corner is too sharp.</p>
+
+</dd>
+<dt id="splineStart-meters"><b><code>-splineStart</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Where to start spline fitting, if any. The default is to start any spline fitting at the start of the course. This can be after <code>-splineFitEnd</code> and the region will wrap-around.</p>
 
 </dd>
 <dt id="splitAt-meters"><b><code>-splitAt</code></b> &lt;meters&gt; ...</dt>

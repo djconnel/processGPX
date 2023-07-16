@@ -22,6 +22,7 @@ use Pod::Usage;
 # version 0.45: selectiveSmooth, selectiveSmoothZ, fixed append + prepend bug, fixed transition bug, retuned z-autosmoothing
 # version 0.46: efficiency improvements in calling smoothing.
 # version 0.47: added gradient smoothing w/ corner effect.  Simplified -zShift, -zScale, added -zScaleRef.  Added aliases for start/finish circuit distances.
+# version 0.48: added arc fitting, loopLeft, loopRight.  Added loopLeft and loopRight options.  Improved splines
 
 my $version = "0.47";             # make sure this matches pod value
 
@@ -93,6 +94,12 @@ sub latlngDistance {
   return $d;
 }
 
+sub deltaxy {
+  my $p1 = shift;
+  my $p2 = shift;
+  return( [$p2->[0] - $p1->[0], $p2->[1] - $p1->[1]] );
+}
+
 sub pointsAreClose {
   my $p1 = shift;
   my $p2 = shift;
@@ -147,6 +154,20 @@ sub latlngCrossProduct {
   return ( ($denom == 0) ? undef : ($dx12 * $dy34 - $dx34 * $dy12) / $denom );
 }
 
+# vector cross product sign:
+# right turn => 1
+# left turn => -1
+sub turnDirection {
+  my $v1 = shift;
+  my $v2 = shift;
+  my $v3 = shift;
+  my $dv1 = deltaxy($v1, $v2);
+  my $dv2 = deltaxy($v2, $v3);
+  return ($dv1->[1] * $dv2->[0] <=> $dv1->[0] * $dv2->[1]);
+}
+
+
+# given 3 points, return the subtended angle
 sub latlngAngle {
   my $p1 = shift;
   my $p2 = shift;
@@ -339,120 +360,17 @@ sub pointAtPosition {
 }
 
 # for splines...
-# start at p1 aiming at p2, and from p2 to p3
-# p2 is never reached (the corner is rounded)
+# p1 projects to p4, p2 rojects to p4
+# interpolate and do a weighted average
 sub interpolateCorner {
   my $points = shift;
   my $f = shift;
 
-  my ($p1, $p2, $p3) = @$points;
-  my $g = 1 - $f;
-
-  my %var = ();
-  my $f1 = $g ** 2;
-  my $f2 = 2 * $f * $g;
-  my $f3 = $f ** 2;
-  for my $k ( keys %$p2 ) {
-    if ((defined $p1->{$k}) && (defined $p2->{$k}) && (defined $p3->{$k})) {
-      if ($k eq "segment" ) {
-        if ( $p1->{$k} eq $p3->{$k} ) {
-          $var{$k} = $p1->{$k};
-        } else {
-          $var{$k} = 0;
-        }
-      } elsif ((($p1->{$k} =~ /^$number_regexp$/o) && ($p2->{$k} =~ /^$number_regexp$/o))) {
-        $var{$k} =
-          $f1 * $p1->{$k} +
-          $f2 * $p2->{$k} +
-          $f3 * $p3->{$k}
-        } else {
-          $var{$k} = ($f1 > $f3) ? $p1->{$k} : $p3->{$k};
-        }
-    }
-  }
-  return \%var;
-}
-
-# two-point corner interpolation
-# corner is between p2 and p3
-sub interpolateCorner4 {
-  my $points = shift;
   my ($p1, $p2, $p3, $p4) = @$points;
-  my $f  = shift;
-  my $d2 = pointDirection($p1, $p2, $p3);
-  my $d3 = pointDirection($p2, $p3, $p4);
-  my ($dxi, $dyi) = pointIntercept($p2, $p3, $d2, $d3);
-  my $pi = addVectorToPoint($p2, [$dxi, $dyi]);
-  return interpolateCorner([$p2, $pi, $p3], $f);
-}
-
-
-#
-# point intercept
-#
-# given two points p1 and p2, and two directions, d1 and d2, calculate
-# the intercept of the lines in these directions passing thru these
-# points
-#
-# parameteric formula for line:
-# -s (x - x0) + c (y - y0) = 0
-# if c = 1, s = 0 : y = y0
-# if s = 1, c = 0 : x = y0
-# if c = 1, s = 1 : (x - x0) = (y - y0)
-# calculate intercept
-# -s1 (x - x1) + c1 (y - y1) = 0
-# -s2 (x - x2) + c2 (y - y2) = 0
-# eliminate y...
-# -s1 c2 (x - x1) + c1 c2 (y - y1) = 0
-# +s2 c1 (x - x2) - c2 c1 (y - y2) = 0
-# sum:
-# s2 c1 (x - x2) - s1 c2 (x - x1) + c1 c2 (y1 - y2) = 0
-# x =  ( s2 c1 x2 - s1 c2 x1 - c1 c2 (y2 - y1) ) / (s2 c1 - s1 c2)
-# eliminate x...
-# -s1 s2 (x - x1) + c1 s2 (y - y1) = 0
-# +s2 s1 (x - x2) - c2 s1 (y - y2) = 0
-# sum:
-# y = ( s1 s2 (x2 - x1) - y2 c2 s1 + y1 c1 s2 ) / (s2 c1 - s1 c2)
-#
-# test 1:
-# x1 = x2, y1 = y2
-# x = (s2 c1 - s1 c2) x1 / (s2 c1 - s1 c2) = x1
-# y = (s2 c1 - s1 c2) y1 / (s2 c1 - s1 c2) = y1
-# pass!
-#
-# test 2:
-# y1 = 0, x1 = 1, c1 = 0, s1 = 1, x2 = 0, y2 = 1, s2 = 0, c2 = 1
-# x =   -1  / -1 = 1
-# y =  - 1 / -1 = 1
-# pass!
-#
-# test 3:
-# x1 = -1, y1 = 0, x2 = 1, y2 = 0, s1 = 1, c1 = 1, s2 = 1, c2 = -1
-# x =  0 / 2 = 0
-# y = 2 / 2 =  1
-# pass!
-#
-# test 4:
-# y1 = -1, x1 = 0, y2 = 1, x2 = 0, s1 = 1, c1 = 1, s2 = -1, c2 = 1
-# x = -2 / -2 =  1
-# y = 0
-# pass!
-
-# inputs: GPX points
-# outputs: distances from the first point
-# two points, two directions, find intercept
-sub pointIntercept {
-  my $p1 = shift;
-  my $p2 = shift;
-  my $d1 = shift;
-  my $d2 = shift;
-  my ($c1, $s1) = ( cos($d1), sin($d1) );
-  my ($c2, $s2) = ( cos($d2), sin($d2) );
-  my ($dx, $dy) = latlng2dxdy($p1, $p2);
-  my $denom = $s2 * $c1 - $s1 * $c2;
-  my $dxi = ( $c1 * $s2 * $dx - $c1 * $c2 * $dy ) / $denom;
-  my $dyi = ( $s1 * $s2 * $dx - $s1 * $c2 * $dy ) / $denom;
-  return ($dxi, $dyi);
+  my $px1 = interpolatePoint($p1, $p3, $f);
+  my $px2 = interpolatePoint($p4, $p2, $f);
+  my $px  = interpolatePoint($px1, $px2, $f);
+  return $px;
 }
 
 # given two segments, each with two points, return the normalized positions on
@@ -540,33 +458,36 @@ sub splineInterpolation {
 
   # calculate number of points based on the angle
   my $deltad  = reduceAngle($d2 - $d1);
-  my $npoints = floor(abs($deltad) / $dd);
+  my $NPoints = floor(abs($deltad) / $dd);
 
   # if the points are close, reduce the number of points: 1 point per 10 cm separation
-  my $npointsMax = floor(latlngDistance($p1, $p2) / 0.1);
-  $npoints = $npointsMax if ($npoints > $npointsMax);
+  my $NPointsMax = floor(latlngDistance($p1, $p2) / 0.1);
+  $NPoints = $NPointsMax if ($NPoints > $NPointsMax);
 
-  return [] unless ($npoints > 0);
+  return [] unless ($NPoints > 0);
 
   my @points;
 
-  # distance between the points
-  my $r = latlngDistance($p1, $p2);
+  # distance to control points
+  my $r = latlngDistance($p1, $p2) * 0.707;
 
-  my ($dxi, $dyi) =  pointIntercept($p1, $p2, $d1, $d2);
-  my $px = addVectorToPoint($p1, [$dxi, $dyi]);
+  # find projections of points along the directions
+  my $dx1 = cos($d1) * $r;
+  my $dy1 = sin($d1) * $r;
+  my $dx2 = -cos($d2) * $r;
+  my $dy2 = -sin($d2) * $r;
+  my $px1 = addVectorToPoint($p1, [$dx1, $dy1]);
+  my $px2 = addVectorToPoint($p2, [$dx2, $dy2]);
 
   # create points along asymptotes
-  for my $i ( 1 .. $npoints ) {
-    my $f = $i / ($npoints + 1);
-    my $p = interpolateCorner([$p1, $px, $p2], $f);
+  for my $i ( 1 .. $NPoints ) {
+    my $f = $i / ($NPoints + 1);
+    my $p = interpolateCorner([$p1, $p2, $px1, $px2], $f);
     push @points, $p;
   }
 
-  # interpolate points with respect to distance along spline
-  # spline does not in general have equally spaced points, so point
-  # interpolation, which would have been provided by interpolatePoint,
-  # wouldn't work
+  # adjust non-position fields to be linear with distance
+  # since points are not necessarily equally spaced (maybe they are..)
   if (@points > 0) {
     my @ss = ( latlngDistance($p1, $points[0]) );
     for my $i ( 0 .. $#points - 1 ) {
@@ -575,10 +496,10 @@ sub splineInterpolation {
     push @ss, $ss[-1] + latlngDistance($points[-1], $p2);
 
     for my $i ( 0 .. $#points ) {
+      my $f = $ss[$i] / $ss[-1];
       my $p = $points[$i];
       for my $k ( keys %$p1 ) {
         if (($k ne "lat") && ($k ne "lon")) {
-          my $f = $ss[$i] / $ss[-1];
           if ($k eq "segment" ) {
             if ( $p1->{$k} eq $p2->{$k} ) {
               $p->{$k} = $p1->{$k};
@@ -586,8 +507,7 @@ sub splineInterpolation {
               $p->{$k} = 0;
             }
           } elsif ( ($p1->{$k} =~ /^$number_regexp$/o) && ($p2->{$k} =~ /^$number_regexp$/o) ) {
-            $p->{$k} = (1 - $f) * $p1->{$k} + $f
-              * $p2->{$k};
+            $p->{$k} = (1 - $f) * $p1->{$k} + $f * $p2->{$k};
           } else {
             $p->{$k} = $p1->{$k};
           }
@@ -598,6 +518,124 @@ sub splineInterpolation {
 
   return \@points;
 }
+
+# use the arc fitting algorithm to add points between p2 and p3
+sub arcFitInterpolation {
+  my $p1 = shift; # for first circle fit
+  my $p2 = shift; # interpolation starts here
+  my $p3 = shift; # interpolation ends here
+  my $p4 = shift; # for second circle fit
+  my $dd = shift // ($pi / 16); # interpolation angle
+
+  my @xy1 = latlng2dxdy($p2, $p1);
+  my @xy2 = (0, 0);
+  my @xy3 = latlng2dxdy($p2, $p3);
+  my @xy4 = latlng2dxdy($p2, $p4);
+
+  my ($cxy0, $cr0) = circle3PointFit( \@xy1, \@xy2, \@xy3 );
+  my ($cxy1, $cr1) = circle3PointFit( \@xy2, \@xy3, \@xy4 );
+
+  # check the circle is on the right side of the corner
+  my $t1  = turnDirection( \@xy1, \@xy2, \@xy3 );
+  my $t2  = turnDirection( \@xy2, \@xy3, \@xy4 );
+
+  # points: find which circle spans the greatest angle, and divide that angle by
+  # the angle spacing
+  my ($phi11, $phi12, $dphi1, $phi21, $phi22, $dphi2);
+  my $dphiMax = 0;
+  if (defined $cxy0) {
+    return []
+      unless (
+              ( $t1 == turnDirection( \@xy1, \@xy2, $cxy0 ) ) &&
+              ( $t1 == turnDirection( \@xy2, \@xy3, $cxy0 ) )
+             );
+
+    # calculate angles
+    $phi11 = atan2($xy2[1] - $cxy0->[1], $xy2[0] - $cxy0->[0]);
+    $phi12 = atan2($xy3[1] - $cxy0->[1], $xy3[0] - $cxy0->[0]);
+    $dphi1 = deltaAngle($phi11, $phi12);
+    $dphiMax = abs($dphi1) if (abs($dphi1) > $dphiMax);
+  }
+  if (defined $cxy1) {
+    return []
+      unless (
+              ( $t1 == turnDirection( \@xy2, \@xy3, $cxy1 ) ) &&
+              ( $t1 == turnDirection( \@xy3, \@xy4, $cxy1 ) )
+             );
+
+    $phi21 = atan2($xy2[1] - $cxy1->[1], $xy2[0] - $cxy1->[0]);
+    $phi22 = atan2($xy3[1] - $cxy1->[1], $xy3[0] - $cxy1->[0]);
+    $dphi2 = deltaAngle($phi21, $phi22);
+    $dphiMax = abs($dphi2) if (abs($dphi2) > $dphiMax);
+  }
+
+  # find number of points to interpolate
+  my $NPoints = floor($dphiMax / abs($dd));
+  my $NPointsMax = floor(latlngDistance($p2, $p3) / 0.1);
+  $NPoints = $NPointsMax if ($NPoints > $NPointsMax);
+
+  my @points = ();
+  for my $i ( 1 .. $NPoints ) {
+    my $f = $i / ($NPoints + 1);
+    my $phi1 = $phi11 + $dphi1 * $f
+      if (defined $dphi1);
+    my $phi2 = $phi21 + $dphi2 * $f
+      if (defined $dphi2);
+    my ($x1, $y1, $x2, $y2);
+    if (defined $phi1) {
+      $x1 = $cxy0->[0] + $cr0 * cos($phi1);
+      $y1 = $cxy0->[1] + $cr0 * sin($phi1);
+    } else {
+      $x1 = $xy2[0] + $f * ($xy3[0] - $xy2[0]);
+      $y1 = $xy2[1] + $f * ($xy3[1] - $xy2[1]);
+    }
+    if (defined $phi2) {
+      $x2 = $cxy1->[0] + $cr1 * cos($phi2);
+      $y2 = $cxy1->[1] + $cr1 * sin($phi2);
+    } else {
+      $x2 = $xy2[0] + $f * ($xy4[0] - $xy3[0]);
+      $y2 = $xy2[1] + $f * ($xy4[1] - $xy3[1]);
+    }
+    my $dx = (1 - $f) * $x1 + $f * $x2 - $xy2[0];
+    my $dy = (1 - $f) * $y1 + $f * $y2 - $xy2[1];
+    my $p = addVectorToPoint($p2, [$dx, $dy]);
+    push @points, $p;
+  }
+
+  # interpolate points with respect to distance along spline
+  # spline does not in general have equally spaced points, so point
+  # interpolation, which would have been provided by interpolatePoint,
+  # wouldn't work
+  if (@points > 0) {
+    my @ss = ( latlngDistance($p2, $points[0]) );
+    for my $i ( 0 .. $#points - 1 ) {
+      push @ss, $ss[-1] + latlngDistance($points[$i], $points[$i + 1]);
+    }
+    push @ss, $ss[-1] + latlngDistance($points[-1], $p3);
+
+    for my $i ( 0 .. $#points ) {
+      my $f = $ss[$i] / $ss[-1];
+      my $p = $points[$i];
+      for my $k ( keys %$p2 ) {
+        if (($k ne "lat") && ($k ne "lon")) {
+          if ($k eq "segment" ) {
+            if ( $p2->{$k} eq $p3->{$k} ) {
+              $p->{$k} = $p2->{$k};
+            } else {
+              $p->{$k} = 0;
+            }
+          } elsif ( ($p2->{$k} =~ /^$number_regexp$/o) && ($p3->{$k} =~ /^$number_regexp$/o) ) {
+            $p->{$k} = (1 - $f) * $p2->{$k} + $f * $p3->{$k};
+          } else {
+            $p->{$k} = $p2->{$k};
+          }
+        }
+      }
+    }
+  }
+  return \@points;
+}
+
 
 #
 # remove duplicate points of the same segment, and reduce point triplets
@@ -666,54 +704,104 @@ sub removeDuplicatePoints {
 
 #
 # adds splines to points
+# this can also be used for arc fitting
 #
 sub addSplines {
   my %var = @_;
-  my $points = $var{points};
-  my $splineRadians = $var{splineRadians};
-  my $splineMaxRadians = $var{splineMaxRadians};
-  my $isLoop = $var{isLoop} // 0;
+  my $points     = $var{points};
+  my $minRadians = $var{minRadians};
+  my $maxRadians = $var{maxRadians};
+  my $start      = $var{start};
+  my $end        = $var{end};
+  my $isLoop     = $var{isLoop} // 0;
+  my $splineType = $var{splineType} // "spline";
 
-  note("starting spline processing...\n");
+  note("starting $splineType processing...\n");
 
   #
   # create a direction field
   #
   addDirectionField(points=> $points, isLoop=>$isLoop);
 
+  # add a distance field if needed
+  addDistanceField(points=> $points, isLoop=> $isLoop)
+    unless ( (defined $points->[0]->{distance}) || (! ( (defined $start) || (defined $end) )) );
+
   # find corners which meet spline criteria
   # two turns in the same direction, both less than max
   # assume sharper or single-point turns are intentional
   my @pNew = ();
+  my $isArcFit = ($splineType eq "arcFit");
+
+  my $count = 0;
+  
+  # i : first point on interpolation interval
  iLoop: for my $i ( 0 .. $#$points ) {
     push @pNew, $points->[$i];
+
     # add points if appropriate
-    if ($isLoop || (($i > 0) && ($i < $#$points))) {
+    # splines cannot be fit to first or last interval unless it's a loop
+    if ($isLoop || (($i > 0) && ($i < ($#$points - 1)))) {
       my $j = ($i + 1) % @$points;
-      next if (pointsAreClose($points->[$i], $points->[$j]));
+      next iLoop if (pointsAreClose($points->[$i], $points->[$j], 1));
+
+      # if start and stop points are specified, then check these
+      # both points i and j must pass the test
+      if ((defined $start) && (defined $end) && ($end < $start)) {
+        next iLoop if (($points->[$i]->{distance} > $start) || ($points->[$j]->{distance} > $start) );
+        next iLoop if (($points->[$i]->{distance} < $end)   || ($points->[$j]->{distance} < $end) );
+      } else {
+        next iLoop if ((defined $start) && ( ($points->[$i]->{distance} < $start) || ($points->[$j]->{distance} < $start) ) );
+        next iLoop if ((defined $end)   && ( ($points->[$i]->{distance} > $end)   || ($points->[$j]->{distance} > $end) ) );
+      }
 
       my $k = ($i - 1) % @$points;
-      while (pointsAreClose($points->[$i], $points->[$k])) {
-        next iLoop if ($k == ($isLoop ? 0 : $j));
+      while (pointsAreClose($points->[$i], $points->[$k], 1)) {
+        next iLoop if ($k == ($isLoop ? $j : 0));
         $k = ($k - 1) % @$points;
       }
 
-      # turn angle of next point
-      my $a1 = reduceAngle($points->[$j]->{direction} - $points->[$i]->{direction});
-      # turn angle of this point
-      my $a2 = reduceAngle($points->[$i]->{direction} - $points->[$k]->{direction});
-      if ((abs($a1) > $splineRadians) &&
-          (abs($a2) > $splineRadians) &&
-          (abs($a1) <= $splineMaxRadians) &&
-          (abs($a2) <= $splineMaxRadians) &&
-          (($a1 <=> 0) == ($a2 <=> 0))
+      my $l = ($j + 1) % @$points;
+      while (pointsAreClose($points->[$j], $points->[$l], 1)) {
+        $l = ($l + 1) % @$points;
+        if ($isLoop) {
+          next iLoop if ( ($l <= $i) && ($l >= $k) );
+        } else {
+          next iLoop if ($l <= $j);
+        }
+      }
+      if ($isLoop) {
+        next iLoop if ( ($l <= $j) && ($l >= $k) );
+      } else {
+        next if ($l <= $j);
+      }
+
+      # turn angles
+      my $a1 = latlngAngle($points->[$k], $points->[$i], $points->[$j]);
+      my $a2 = latlngAngle($points->[$i], $points->[$j], $points->[$l]);
+      my $turn = ($a1 + $a2) / 2;
+      if (
+          (abs($turn) > $minRadians) &&
+          (abs($turn) <= $maxRadians)
          ) {
-        my $splinePoints = splineInterpolation( $points->[$i], $points->[$j], $points->[$i]->{direction}, $points->[$j]->{direction}, $splineRadians);
-        push @pNew, @$splinePoints;
+        my $newPoints;
+        if ($isArcFit) {
+          $newPoints = arcFitInterpolation( $points->[$k], $points->[$i], $points->[$j], $points->[$l], $minRadians );
+        } else {
+          $newPoints = splineInterpolation( $points->[$i], $points->[$j], $points->[$i]->{direction}, $points->[$j]->{direction}, $minRadians);
+        }
+        $count += scalar(@$newPoints);
+        push @pNew, @$newPoints;
       }
     }
   }
 
+  # remove distance field if we've added any points
+  if (@pNew && ($count > 0)) {
+    for my $f ( qw( direction distance ) ) {
+      deleteField(points=> \@pNew, field => $f) if (defined $pNew[0]->{$f});
+    }
+  }
   return \@pNew;
 }
 
@@ -2253,13 +2341,11 @@ sub circle3PointFit {
   # distances from first point
   my $rs21 = $x21 ** 2 + $y21 ** 2;
   my $rs31 = $x31 ** 2 + $y31 ** 2;
-
   my $denom = 2 * ($y21 * $x31 - $y31 * $x21);
 
-  if ($denom == 0) {
-    # points are colinear
-    die("ERROR: tried to fit circle through colinear points\n");
-  }
+  # linear
+  return (undef, undef)
+    if ($denom == 0);
 
   my $f = ( $rs31 * $x21 - $rs21 * $x31 ) / $denom;
   my $g = ( $rs21 * $y31 - $rs31 * $y21 ) / $denom;
@@ -2276,6 +2362,8 @@ sub circle3PointFit {
 
 #
 # given a set of points, fit a circle to those points
+# it does a 3-point fit thru the first and last points
+# and the center point
 #
 sub fitCircle{
   my %var = @_;
@@ -2386,6 +2474,10 @@ sub processCircle {
 
     # now we have a list of points and distances... create the circle
     my ($xyfit, $rCircle) = fitCircle(points=> \@xys);
+
+    # check if we weren't able to fit circle (colinear points)
+    die("ERROR fitting circle to points (check for colinearity)\n")
+      unless ( (defined $xyfit) && (defined $rCircle) );
 
     # center is relative to first point.
     my $pCenter = addVectorToPoint($points->[$iStart], $xyfit);
@@ -3539,9 +3631,13 @@ my $addDirection = 0;       # whether to not add a direction field
 my $addDistance = 0;        # whether to not add a distance field
 my $addGradient = 0;        # whether to not add a gradient field
 my $addGradientSigns = 0;   # whether to create list of gradient signs
-my $addSigma = 0; # whether to create a sigma field when autosmoothing
-my $anchorSF = 0; # whether to anchor the S/F
-my $append = 0; # distance to append on finish (140 meters allows room for finish): only for point-to-point
+my $addSigma = 0;           # whether to create a sigma field when autosmoothing
+my $anchorSF = 0;           # whether to anchor the S/F
+my $append = 0;             # distance to append on finish (140 meters allows room for finish): only for point-to-point
+my $arcFitDegs;             # maximum degrees use if we use spline interpolation
+my $arcFitEnd;              # where to end arc fitting
+my $arcFitMaxDegs = 60;     # maximum turn angle for spline
+my $arcFitStart;            # where to start arc fitting
 my $autoSegmentMargin = 400; # minimum distance between auto-segments or between segments and start or finish banners
 my $autoSegmentFinishMargin = 20; # the margin forward to the finish line for auto segments
 my $autoSegmentStartMargin = 340; # the margin back to the start line for auto segments
@@ -3614,12 +3710,14 @@ my $snapAltitude = 1;  # how close altitude needs to be for snapping
 my $snapDistance = 2;  # number of meters threshold for point snapping
 my $snapTransition = 0; # whether to transition the altitude around snaps to match the source
 my $spacing;       # target point spacing: linear interpolate between existing points
-my $splineDegs;    # maximum degrees use if we use spline interpolation
-my $splineMaxDegs = 60;         # maximum turn angle for spline
-my $splitNumber;                # number of split to output (default: all)
-my $startCircuits  = 0;         # number of start circuits
-my $startCircuitDistance = -1;  # km of start circuit
-my $startTime;                  # start time for activity
+my $splineDegs;               # minimum degrees use if we use spline interpolation
+my $splineEnd;                # where to stop spline fitting
+my $splineMaxDegs = 60;       # maximum turn angle for spline
+my $splineStart;              # where to start spline fitting
+my $splitNumber;              # number of split to output (default: all)
+my $startCircuits  = 0;       # number of start circuits
+my $startCircuitDistance = -1;# km of start circuit
+my $startTime;                # start time for activity
 my $stripSegments; # eliminate all existing segment definitions on input files
 my $title;         # title, for GPX file
 my $selectedTrack = 0;    # which track to use
@@ -3632,6 +3730,8 @@ my $zShift = 0;           # offset for altitude after scaling
 my $zShiftStart;          # where to start applying z shift
 my $zShiftEnd;            # where to end applying z shift
 my $zSmooth = 0;          # smoothing applied additionally to altitude
+my $loopLeft;             # specify looping to the left
+my $loopRight;            # specify looping to the right
 
 my @autoSegments;         # parameters for auto-segment generation
 my @autoStraighten;       # parameters for auto-straightening
@@ -3660,6 +3760,10 @@ GetOptions (
             "addSigma"      => \$addSigma,
             "anchorSF"      => \$anchorSF,
             "append=f"      => \$append,
+            "arcFitDegs=f"  => \$arcFitDegs,
+            "arcFitEnd=f"   => \$arcFitEnd,
+            "arcFitMaxDegs=f" => \$arcFitMaxDegs,
+            "arcFitStart=f" => \$arcFitStart,
             "author=s"      => \$author,
             "auto"          => \$auto,
             "autoSegments=f{1,2}" =>  \@autoSegments,
@@ -3716,7 +3820,11 @@ GetOptions (
             "laneShift=f"   => \$laneShift,
             "lap"           => \$isLoop,
             "loop"          => \$isLoop,
-            "maxSlope=f" => \$maxSlope,
+            "loopLeft"      => \$loopLeft,
+            "loopRight"     => \$loopRight,
+            "loopL"         => \$loopLeft,
+            "loopR"         => \$loopRight,
+            "maxSlope=f"    => \$maxSlope,
             "minRadius=f"   => \$minRadius,
             "minRadiusStart=f" => \$minRadiusStart,
             "minRadiusEnd=f"   => \$minRadiusEnd,
@@ -3766,7 +3874,9 @@ GetOptions (
             "snapZ=f"       => \$snapAltitude,
             "spacing=f"     => \$spacing,
             "splineDegs=f"  => \$splineDegs,
+            "splineEnd=f"   => \$splineEnd,
             "splineMaxDegs=f" => \$splineMaxDegs,
+            "splineStart=f"   => \$splineStart,
             "splitAt=f{1,100}" => \@splitDistance,
             "splitNumber=i" => \$splitNumber,
             "startCircuitDistance=f" => \$startCircuitDistance,
@@ -3804,6 +3914,10 @@ if ($vFlag ) {
   exit 0;
 }
 
+# check loopLeft and loopRight
+if ($loopLeft && $loopRight) {
+  die("ERROR: you cannot specify both -loopLeft and -loopRight\n");
+}
 
 # short-cut for out-and-back
 if ( $outAndBack || $outAndBackLap ) {
@@ -3820,7 +3934,7 @@ if ( $outAndBack || $outAndBackLap ) {
   $rTurnaround //= 8;
   $rUTurn //= 8;
   $spacing //= 10;
-  $splineDegs //= 25;
+  $splineDegs //= 20;
 } else {
   $lSmooth //= 0;
   $laneShift //= 0;
@@ -3829,8 +3943,11 @@ if ( $outAndBack || $outAndBackLap ) {
   $rLap //= 0;
   $rTurnaround //= 0;
   $spacing //= 0;
-  $splineDegs //= ($auto ? 25 : 0);
+  $splineDegs //= ($auto ? 20 : 0);
 }
+
+# loop sign
+my $loopSign = $loopLeft ? -1 : $loopRight ? 1 : ((defined $laneShift) && ($laneShift < 0)) ? -1 : 1;
 
 # auto-straighten
 $autoStraightenDeviation //= $autoStraighten[0] // 0;
@@ -3891,6 +4008,10 @@ if ($autoSpacing) {
 
 my $splineRadians = $splineDegs * $deg2rad;
 my $splineMaxRadians = $splineMaxDegs * $deg2rad;
+
+$arcFitDegs //= 0;
+my $arcFitRadians = $arcFitDegs * $deg2rad;
+my $arcFitMaxRadians = $arcFitMaxDegs * $deg2rad;
 
 my @files = @ARGV;
 @files = ("-") unless (@files);
@@ -4351,7 +4472,13 @@ for my $file ( @files ) {
   # spline of corners
   if ( $splineRadians > 0 ) {
     note("corner splines, pre-smoothing...\n");
-    $points = addSplines(points=> $points, splineRadians=> $splineRadians, splineMaxRadians=> $splineMaxRadians, isLoop=> $isLoop);
+    $points = addSplines(points=> $points, minRadians=> $splineRadians, maxRadians=> $splineMaxRadians, isLoop=> $isLoop, splineType=> "spline", start=> $splineStart, end=> $splineEnd);
+  }
+
+  # arc fit of corners
+  if ( $arcFitRadians > 0 ) {
+    note("corner arcFits, pre-smoothing...\n");
+    $points = addSplines(points=> $points, minRadians=> $arcFitRadians, maxRadians=> $arcFitMaxRadians, isLoop=> $isLoop, splineType=> "arcFit", start=> $arcFitStart, end=> $arcFitEnd);
   }
 
   # add distance field
@@ -4617,7 +4744,7 @@ for my $file ( @files ) {
 
       # if autosmoothing is used, then add that in
       $sigma{ele} = sqrt($sigma{ele} ** 2 + ($points->[$i0]->{sigma} * $zAutoSmooth) ** 2)
-        if ($zAutoSmooth > 0);
+        if ( (defined $points->[$i0]->{sigma}) && ($zAutoSmooth > 0) );
 
       # this is from BEFORE smoothing since we've not updated the distance field: this is important
       my $courseDistance = $points->[-1]->{distance} - $points->[0]->{distance};
@@ -4653,7 +4780,12 @@ for my $file ( @files ) {
   # spline again post-smoothing, if requested
   if ( ($splineRadians > 0) && (($lSmooth > 1) || ($zSmooth > 0)) ) {
     note("corner splines, post-smoothing...\n");
-    my $points = addSplines(points=> $points, splineRadians=> $splineRadians, splineMaxRadians=> $splineMaxRadians, isLoop=> $isLoop);
+    my $points = addSplines(points=> $points, minRadians=> $splineRadians, maxRadians=> $splineMaxRadians, isLoop=> $isLoop, splineType=> "spline", start=> $splineStart, end=> $splineEnd);
+  }
+
+  if ( ($arcFitRadians > 0) && (($lSmooth > 1) || ($zSmooth > 0)) ) {
+    note("corner arcFit, post-smoothing...\n");
+    $points = addSplines(points=> $points, minRadians=> $arcFitRadians, maxRadians=> $arcFitMaxRadians, isLoop=> $isLoop, splineType => "arcFit", start=> $arcFitStart, end=> $arcFitEnd);
   }
 
   #
@@ -5070,7 +5202,7 @@ for my $file ( @files ) {
 
     # create the loop
     note("creating turn-around loop...\n");
-    my $loop = makeLoop(points=> [$ps1->[-1], $ps2->[0]], direction=> $dir, radius=> $R, defaultSign=> (($laneShift < 0) ? -1 : 1), segmentNames=> \%segmentName);
+    my $loop = makeLoop(points=> [$ps1->[-1], $ps2->[0]], direction=> $dir, radius=> $R, defaultSign=> $loopSign, segmentNames=> \%segmentName);
     push @$ps1, @$loop;
   }
 
@@ -5147,7 +5279,7 @@ for my $file ( @files ) {
                "   3: point ", $j + 1, " of ", scalar(@$points), " ($points->[$j]->{lon}, $points->[$j]->{lat})\n",
                "   directions = ", $d1 / $deg2rad, ", ", $d2 / $deg2rad, "\n");
           my $dir = averageAngles($d1, $d2);
-          my $loop = makeLoop(points=> [$points->[$i], $points->[$i]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1), segmentNames=> \%segmentName);
+          my $loop = makeLoop(points=> [$points->[$i], $points->[$i]], direction=> $dir, radius=> $rUTurn, defaultSign=> $loopSign, segmentNames=> \%segmentName);
           push @pNew, @$loop;
           push @pNew, \%{$points->[$i]}; # put a copy of the turn-around point here
         } elsif (
@@ -5167,7 +5299,7 @@ for my $file ( @files ) {
                "   4: point ", $k + 1, " of ", scalar(@$points), " ($points->[$k]->{lon}, $points->[$k]->{lat})\n",
                "   directions = ", $d1 / $deg2rad, ", ", $d2 / $deg2rad, "\n");
           my $dir = averageAngles($d1, $d2);
-          my $loop = makeLoop(points=> [$points->[$i], $points->[$j]], direction=> $dir, radius=> $rUTurn, defaultSign=> (($laneShift < 0) ? -1 : 1), segmentNames=> \%segmentName);
+          my $loop = makeLoop(points=> [$points->[$i], $points->[$j]], direction=> $dir, radius=> $rUTurn, defaultSign=> $loopSign, segmentNames=> \%segmentName);
           push @pNew, @$loop;
         }
         $i ++;
@@ -5846,7 +5978,7 @@ detection of distinct, non-overlapping climbs in the route.
 This code uses the following Perl modules, which must be installed,
 for example with the "cpan" command-line tool:
 
- Getopt::Long : used for processing comamnd-line options
+ Getopt::Long : used for processing command-line options
  Geo::Gpx     : parsing and generating GPX files
  XML::Descent : processing XML (required by Geo::Gpx, as well)
  POSIX        : floor function
@@ -5971,6 +6103,60 @@ Negative values crop the course by the negative distance.  So
 "C<-append -100>" will move the finish line back 100 meters.  This is
 useful for preventing RGT from connecting the finish and start points,
 which has a 100 meter threshold, as this is written.
+
+=item B<C<-arcFitDegs>> <degrees>
+
+If arc fits are desired, specifying this will cause arc fit
+interpolation to be done for corners turning at least this much, but
+less than the C<-arcFitMaxDegs> option.  A typical value is 5 degrees.
+This angle is the angle between interpolated course points
+
+For a given 4 points i<a>, i<b>, i<c>, and i<d>, it interpolates between points b
+and c by fitting a circle through points i<a>, i<b>, and i<c>, fitting a second
+circle between points -<b>, i<c>, and i<d>, and then doing a weighted average
+of these two fits based on the relative distance of the interpolated
+point from points i<b> and i<c>.  If starting with points forming the
+vertices of a polygon, for example, the resulting interpolation will
+yield a circular course, which may or may not be what you want.
+
+
+This algorithm tends to result in more sweeping corners than spline
+interpolation, which may or may not reflect reality.  Also if there
+are any anomalous points then there's the chance this algorithm will
+exaggerate these anomalies.  It's recommended you very carefully check
+the results of applying this option.  It's perhaps best for circuits
+with sweeping corners rather than straights connected with tighter
+turns.
+
+See also <C<-arcFitMaxDegs>.
+
+=item B<C<-arcFitEnd>> <meters>
+
+Where to end arc fitting, if any.  The default is to end any arc
+fitting at the end of the course.
+
+=item B<C<-arcFitMaxDegs>> <degrees>
+
+If a C<-arcFitDegs> option is specified, specifying this limit the
+maximum angle corner for which arc fit interpolation will be applied.
+ArcFits are good for gradual, rounded corners but are not good for
+sharp corners, so an upper bound in the 60 degree range (which is the
+default) works generally well.  ArcFits have the advantage of rounding
+corners without "blunting" them, but sometimes they create "S" shapes
+where they are not wanted.  Make sure to check the results if using
+arc fit interpolation: verty strange results can occur if the corner
+is too sharp.
+
+Arc fitting is a variation on spline fitting where corners are fit to
+circles rather than splines.  If this option is set too large then there's
+a risk of getting dramatically incorrect trajectors for sharp corners.
+See also the notes in C<-arcFitDegs>.
+
+=item B<C<-arcFitStart>> <meters>
+
+Where to start arc fitting, if any.  The default is to start any arc
+fitting at the start of the course.  This can be after C<-arcFitEnd>
+and the region will wrap-around.
 
 =item B<C<-author>> <string>
 
@@ -6466,6 +6652,18 @@ Synonym for C<-loop>
 
 The course is considered a loop course, or a circuit, and so smoothing and other operations
 can take place between the beginning and end of the loop.
+
+=item B<C<-loopLeft>>
+
+Specify that turnaround loops should loop to the left (UK, for example).
+The default is to base it on the C<-laneShift> (left for a negative
+lane shift, else positive).
+
+=item B<C<-loopRight>>
+
+Specify that turnaround loops should loop to the right (US, for example).
+The default is to base it on the C<-laneShift> (left for a negative
+lane shift, else positive).
 
 =item B<C<-maxSlope>> <%>
 
@@ -7014,6 +7212,11 @@ This angle is the angle between course points, not an angle of a total
 turn: the algorithm only looks at points ahead of and behind a given
 point.
 
+=item B<C<-splineEnd>> <meters>
+
+Where to end spline fitting, if any.  The default is to end any spline
+fitting at the end of the course. This can "wrap around".
+
 =item B<C<-splineMaxDegs>> <degrees>
 
 If a C<-splineDegs> option is specified, specifying this limit the
@@ -7023,8 +7226,14 @@ sharp corners, so an upper bound in the 60 degree range (which is the
 default) works generally well.  Splines have the advantage of rounding
 corners without "blunting" them, but sometimes they create "S" shapes
 where they are not wanted.  Make sure to check the results if using
-spline interpolation: verty strange results can occur if the corner
-is too sharp.
+spline interpolation: strange results can occur if the corner is too
+sharp.
+
+=item B<C<-splineStart>> <meters>
+
+Where to start spline fitting, if any.  The default is to start any
+spline fitting at the start of the course.  This can be after
+C<-splineFitEnd> and the region will wrap-around.
 
 =item B<C<-splitAt>> <meters> ...
 
