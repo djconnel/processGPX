@@ -24,7 +24,7 @@ use Pod::Usage;
 # version 0.47: added gradient smoothing w/ corner effect.  Simplified -zShift, -zScale, added -zScaleRef.  Added aliases for start/finish circuit distances.
 # version 0.48: added arc fitting, loopLeft, loopRight.  Added loopLeft and loopRight options.  Improved splines
 
-my $version = "0.47";             # make sure this matches pod value
+my $version = "0.48";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
