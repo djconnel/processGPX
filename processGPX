@@ -23,8 +23,9 @@ use Pod::Usage;
 # version 0.46: efficiency improvements in calling smoothing.
 # version 0.47: added gradient smoothing w/ corner effect.  Simplified -zShift, -zScale, added -zScaleRef.  Added aliases for start/finish circuit distances.
 # version 0.48: added arc fitting, loopLeft, loopRight.  Added loopLeft and loopRight options.  Improved splines
+# version 0.49: some clean-up, bug fixes, reduced smoothAngle from 20 to 15.  Added -selectiveLaneShift, -repeat, -laneShiftTransition
 
-my $version = "0.47";             # make sure this matches pod value
+my $version = "0.49";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -55,8 +56,8 @@ sub setFileNameSuffix {
 # find distance between lat, lng points
 my $pi          = atan2(0, -1);
 my $twopi       = 2 * $pi;
-my $sqrt2       = sqrt(2);
 my $ln2         = log(2);
+my $sqrt2       = sqrt(2);
 my $sqrt2pi     = sqrt(2 * $pi);
 my $rEarth      = 20037392 / $pi;
 my $deg2rad     = $pi / 180;
@@ -107,16 +108,6 @@ sub pointsAreClose {
   my $zMax = shift // 1;
   my $dz = ((defined $p1->{ele}) && (defined $p2->{ele})) ? ($p2->{ele} - $p1->{ele}) : 0;
   return (abs($dz < $zMax) && (latlngDistance($p1, $p2) < $sMax));
-}
-
-sub dotProduct {
-  my $p1 = shift;
-  my $p2 = shift;
-  my $p3 = shift;
-  my $p4 = shift;
-  my $dot = (($p2->[1] - $p1->[1]) * ($p4->[1] - $p3->[1]) + ($p2->[0] - $p1->[0]) * ($p4->[0] - $p3->[0])) /
-    sqrt( ( ($p2->[1] - $p1->[1]) ** 2 + ($p2->[0] - $p1->[0]) ** 2 ) * ( ($p4->[1] - $p3->[1]) ** 2 + ($p4->[0] - $p3->[0]) ** 2 ) );
-  return $dot;
 }
 
 sub latlngDotProduct {
@@ -242,7 +233,7 @@ sub shiftVertex {
   my $denom = $c1 * $s2 - $c2 * $s1;
   my ($dx, $dy);
   if (abs($denom) < 0.001) {
-    $dx = ($s1 + $s2) * $distance / 2;
+    $dx =  ($s1 + $s2) * $distance / 2;
     $dy = -($c1 + $c2) * $distance / 2;
   } else {
     $dx = ($c1 - $c2) / $denom * $distance;
@@ -268,10 +259,8 @@ sub latlng2dxdy {
   my $dlon = $p2->{lon} - $p1->{lon};
   $dlon -= 360 * floor(0.5 + $dlon / 360);
   my $dlat = $p2->{lat} - $p1->{lat};
-  # note this allows for a 180 degree difference in latitude, which
-  # is obviously problematic near a pole...  but it's a first
-  # approximation
   $dlat -= 360 * floor(0.5 + $dlat / 360);
+  # linear approximation not valid near a pole
   my $dx = ($c1 + $c2) * $lat2y * $dlon / 2;
   my $dy = $lat2y * $dlat;
   return ($dx, $dy);
@@ -298,10 +287,10 @@ sub interpolatePoint {
         } else {
           $var{$k} = 0;
         }
-      } elsif ((! (($p1->{$k} =~ /^$number_regexp$/o) && ($p2->{$k} =~ /^$number_regexp$/o)))) {
-        $var{$k} = ($f < 0.5) ? $p1->{$k} : $p2->{$k};
-      } else {
+      } elsif (($p1->{$k} =~ /^$number_regexp$/o) && ($p2->{$k} =~ /^$number_regexp$/o)) {
         $var{$k} = $p1->{$k} * (1 - $f) + $p2->{$k} * $f;
+      } else {
+        $var{$k} = ($f < 0.5) ? $p1->{$k} : $p2->{$k};
       }
     }
   }
@@ -330,7 +319,7 @@ sub pointAtPosition {
   my $pIndex;
   for ( my $i = 1 ; $i <= $#$points; $i ++ ) {
     push @pNew, $points->[$i - 1];
-    if ( ($s0 > 0) && ($points->[$i]->{distance} > $s0) && ($points->[$i - 1]->{distance} < $s0) ) {
+    if ( ($s0 > 0) && ($points->[$i]->{distance} >= $s0) && ($points->[$i - 1]->{distance} < $s0) ) {
       my $ds = $points->[$i]->{distance} - $points->[$i - 1]->{distance};
       my $f = ($s0 - $points->[$i - 1]->{distance}) / $ds;
       my $d1 = $f * $ds;
@@ -356,11 +345,13 @@ sub pointAtPosition {
 
   # add the last point unless it was added here for interpolation
   push @pNew, $points->[-1] unless ($pointAdded);
+
+  # return
   return (\@pNew, $pIndex);
 }
 
 # for splines...
-# p1 projects to p4, p2 rojects to p4
+# p1 projects to p3, p2 rojects to p4
 # interpolate and do a weighted average
 sub interpolateCorner {
   my $points = shift;
@@ -441,7 +432,7 @@ sub addVectorToPoint {
   my $c = cos($deg2rad * ($lat0 + $dlat / 2));
   my $dlon = $dx / $c / $lat2y;
   my $lon = $lon0 + $dlon;
-  $lon -= 360 * floor( 0.5 + $lat / 360);
+  $lon -= 360 * floor( 0.5 + $lon / 360);
   $p2{lat} = $lat;
   $p2{lon} = $lon;
   return \%p2;
@@ -469,7 +460,7 @@ sub splineInterpolation {
   my @points;
 
   # distance to control points
-  my $r = latlngDistance($p1, $p2) * 0.707;
+  my $r = latlngDistance($p1, $p2) / $sqrt2;
 
   # find projections of points along the directions
   my $dx1 = cos($d1) * $r;
@@ -559,8 +550,8 @@ sub arcFitInterpolation {
   if (defined $cxy1) {
     return []
       unless (
-              ( $t1 == turnDirection( \@xy2, \@xy3, $cxy1 ) ) &&
-              ( $t1 == turnDirection( \@xy3, \@xy4, $cxy1 ) )
+              ( $t2 == turnDirection( \@xy2, \@xy3, $cxy1 ) ) &&
+              ( $t2 == turnDirection( \@xy3, \@xy4, $cxy1 ) )
              );
 
     $phi21 = atan2($xy2[1] - $cxy1->[1], $xy2[0] - $cxy1->[0]);
@@ -734,7 +725,7 @@ sub addSplines {
   my $isArcFit = ($splineType eq "arcFit");
 
   my $count = 0;
-  
+
   # i : first point on interpolation interval
  iLoop: for my $i ( 0 .. $#$points ) {
     push @pNew, $points->[$i];
@@ -1017,6 +1008,7 @@ sub applyLaneShift {
     push @pNew, shiftVertex(point=> $points->[$i], directions=> [$dir1, $dir2], distance=> $points->[$i]->{shift});
   }
 
+  deleteDerivedFields( \@pNew );
   return \@pNew;
 }
 
@@ -1159,9 +1151,7 @@ sub smoothing {
 
   # delete curvature field if we modified position
   if (grep(/^lat/, @$fields) || grep(/^lon/, @$fields)) {
-    for my $f ( "curvature", "distance", "gradient", "direction" ) {
-      deleteField(points=> $points, field=> $f);
-    }
+    deleteDerivedFields(\@pNew);
   }
 
   return \@pNew;
@@ -1211,7 +1201,7 @@ sub doAutoSpacing {
             $i1 %= scalar(@$points);
           }
           while (($d2 = latlngDistance($points->[$i2], $points->[$i])) < 0.01) {
-            $i2 --;
+            $i2 ++;
             next iLoop
               if (((! $isLoop) && ($i2 > $#$points)) || ($i2 == $i));
             $i1 %= scalar(@$points);
@@ -1323,7 +1313,7 @@ sub snapPoints {
   my $points = $var{points} // [];
   my $snap   = $var{snap}   // 0;
   my $snapTransition  = $var{snapTransition} // 0;
-  my $snapDistance    = $var{snapTransition} // 2;
+  my $snapDistance    = $var{snapDistance} // 2;
   my $snapAltitude    = $var{snapAltitude} // 1;
   my $spacing         = $var{spacing} // 0;
 
@@ -2760,9 +2750,8 @@ sub autoStraighten {
 sub shiftCircuit {
   my $points = shift;
   my $startIndex = shift;
-  my $dsConnect = latlngDistance($points->[-1], $points->[0]);
-  my $copyPoint = ( $dsConnect  < 0.1 );
-  my $lastPoint = $copyPoint ? $#$points -1 : $#$points;
+  my $copyPoint = pointsAreClose($points->[-1], $points->[0]) && ($points->[-1]->{segment} eq $points->[0]->{segment});
+  my $lastPoint = $copyPoint ? $#$points - 1 : $#$points;
   my @newPoints = @$points[$startIndex .. $lastPoint];
   push @newPoints, @$points[0 .. $startIndex - 1];
   push @newPoints, \%{$newPoints[0]} if $copyPoint;
@@ -2833,7 +2822,7 @@ sub addGradientField {
   my %var = @_;
   my $points = $var{points} // [];
   my $isLoop = $var{isLoop} // 0;
-  next unless (@$points);
+  return unless (@$points);
   addDistanceField(points=> $points) unless ((defined $points->[0]->{distance}) && (defined $points->[-1]->{distance}));
   my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
   my $i = 0;
@@ -2864,8 +2853,7 @@ sub integrateGradientField {
   my %var = @_;
   my $points = $var{points} // [];
   my $isLoop = $var{isLoop} // 0;
-  next unless (@$points);
-  return unless (defined $points->[0]->{gradient});
+  return unless (@$points && (defined $points->[0]->{gradient}));
   addDistanceField(points=> $points) unless ((defined $points->[0]->{distance}) && (defined $points->[-1]->{distance}));
   my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
   my $i = 0;
@@ -3013,6 +3001,17 @@ sub deleteField {
   return unless (defined $field);
   for my $p ( @$points ) {
     delete $p->{$field} if (exists $p->{$field});
+  }
+}
+
+#
+# strip fields which are derived: needed if route has been changed by processing
+#
+sub deleteDerivedFields {
+  my $points = shift;
+  my $fields = shift // ["curvature", "distance", "gradient", "direction"];
+  for my $f ( @$fields ) {
+    deleteField(points=> $points, field=> $f);
   }
 }
 
@@ -3333,7 +3332,7 @@ sub splitPoints {
     push @splits, \@ps;
   }
 
-  # distance field is invalid now
+  # distance field is invalid now: curvature, etc, are still fine
   foreach my $s ( @splits ) {
     deleteField(field=> "distance", points=> $s);
   }
@@ -3676,6 +3675,7 @@ my $isLoop = 0;    # whether to apply periodic boundary conditions (smooth aroun
 my $lAutoSmooth = 0;            # auto-smoothing based on position
 my $lSmooth;    # general smoothing, applies to positions and all other fields
 my $laneShift; # how much to shift lanes right (positive) or left (negative)
+my $shiftTransition; # length over which to transition lane shift (to each side)
 my $maxSlope = 30; # maximum gradient for RGT, in percent (if <1, will be converted to %)
 my $minRadius;     # a minimum radius for corners: correct with lane shift
 my $minRadiusStart;  # where to begin applying minimum radius (meters)
@@ -3694,13 +3694,15 @@ my $pruneX = 0.001;   # maximum cross product for pruning
 my $prunedg = 0.0005; # maximum difference in grade for point pruning
 my $quiet = 0;        # suppressed notes to standard error
 my $rCrossings = 6;   # how much lenth to flatten crossings, each side
+my $repeat = 0;       # number of copies of the course to add to the course
 my $reverse = 0;      # whether to reverse the course
 my $rLap;   # if the route is turned into an out-and-back, the radius of the return loop
 my $rTurnaround; # if the route is turned into an out-and-back, the radius of the outer loop
 my $rUTurn; # if the route is turned into an out-and-back, the radius of the two loops
 my $saveSimplifiedCourse = 0;   # whether to save a CSV file of a simplfied course, if generated (debugging)
 my $shiftEnd;      # where to end land shifting (define: don't end it)
-my $shiftSF = -60; # amount to shift the S/F if a loop course: RGT puts the start line 60 meters after start of course, so -60 works here
+my $shiftSFDefault = -60;
+my $shiftSF = $shiftSFDefault; # amount to shift the S/F if a loop course: RGT puts the start line 60 meters after start of course, so -60 works here
 my $shiftStart; # where to start lane shifting (default: don't start it)
 my $smoothAngle; # angle at which direction changes trigger point interpolation
 my $smoothStart; # where to start smoothing (default: beginning)
@@ -3740,6 +3742,7 @@ my @circleEnd;            # ending point (meters) for a circular corner (one per
 my @circleStart;          # starting point for a circular corner (one per run)
 my @flatten;              # points come in sets of 4: altitude, start point, finish point, lambda
 my @join;                 # GPX file(s) to join to this one
+my @selectiveLaneShift;   # allow lane shift to be specified in segments along the course
 my @selectiveSmooth;      # alternative to specifying smoothing varying along the course
 my @selectiveSmoothG;     # alternative to specifying gradient smoothing varying along the course
 my @selectiveSmoothZ;     # alternative to specifying altitude smoothing varying along the course
@@ -3818,6 +3821,10 @@ GetOptions (
             "keywords=s"    => \$newKeywords,
             "interpolate=f" => \$spacing,
             "laneShift=f"   => \$laneShift,
+            "laneShiftEnd=f"    => \$shiftEnd,
+            "laneShiftSF=f"     => \$shiftSF,
+            "laneShiftStart=f"  => \$shiftStart,
+            "laneShiftTransition=f" => \$shiftTransition,
             "lap"           => \$isLoop,
             "loop"          => \$isLoop,
             "loopLeft"      => \$loopLeft,
@@ -3844,6 +3851,7 @@ GetOptions (
             "pruneGradient=f"  => \$prunedg,
             "quiet"         => \$quiet,
             "rCrossings=f"  => \$rCrossings,
+            "repeat=i"      => \$repeat,
             "reverse"       => \$reverse,
             "rLap=f"        => \$rLap,
             "rTurnaround=f" => \$rTurnaround,
@@ -3851,6 +3859,7 @@ GetOptions (
             "saveSimplifiedCourse" => \$saveSimplifiedCourse,
             "segment=s"     =>  \$namedSegments,
             "segments=s"    =>  \$namedSegments,
+            "selectiveLaneShift=f{0,1000}" => \@selectiveLaneShift,
             "selectiveGSmooth=f{0,1000}" => \@selectiveSmoothG,
             "selectiveSmooth=f{0,1000}" => \@selectiveSmooth,
             "selectiveSmoothG=f{0,1000}" => \@selectiveSmoothG,
@@ -3859,6 +3868,7 @@ GetOptions (
             "shiftEnd=f"    => \$shiftEnd,
             "shiftSF=f"     => \$shiftSF,
             "shiftStart=f"  => \$shiftStart,
+            "shiftTransition=f" => \$shiftTransition,
             "sigma=f"       => \$lSmooth,
             "sigmaz=f"      => \$zSmooth,
             "smooth=f"      => \$lSmooth,
@@ -3914,6 +3924,10 @@ if ($vFlag ) {
   exit 0;
 }
 
+# make sure repeat is in range
+die("-repeat limited to range 0 to 99\n")
+  if ($repeat > 99);
+
 # check loopLeft and loopRight
 if ($loopLeft && $loopRight) {
   die("ERROR: you cannot specify both -loopLeft and -loopRight\n");
@@ -3928,7 +3942,7 @@ if ( $outAndBack || $outAndBackLap ) {
   }
   $autoSpacing //= 1;
   $lSmooth //= 7;
-  $laneShift //= 6;
+  $laneShift //= (@selectiveLaneShift ? 0 : 6);
   $minRadius //= 6;
   $prune //= 1;
   $rTurnaround //= 8;
@@ -3999,11 +4013,11 @@ $append  += $extend;
 # autospacing triggered if max angle specified
 my $smoothRadians;
 if ((defined $smoothAngle) && ($smoothAngle <= 0)) {
-  $smoothAngle = 20;
+  $smoothAngle = 15;
   $autoSpacing //= 1;
 }
 if ($autoSpacing) {
-  $smoothAngle //= 20;
+  $smoothAngle //= 15;
 }
 
 my $splineRadians = $splineDegs * $deg2rad;
@@ -4104,6 +4118,19 @@ for my $file ( @files ) {
 
   # eliminate duplicate x,y points
   $points = removeDuplicatePoints(points=> $points, isLoop=> $isLoop);
+
+  # if repeat is specified, then create replicates
+  if ( $repeat > 0 ) {
+    deleteField(points=> $points, field=> "distance");
+    my @pNew = @$points;
+    for my $i ( 1 .. $repeat ) {
+      for my $p ( @$points ) {
+        my %p2 = %$p;
+        push @pNew, \%p2;
+      }
+    }
+    $points = \@pNew;
+  }
 
   # if join was specified, join points from a second file
   for my $join ( @join ) {
@@ -4254,6 +4281,10 @@ for my $file ( @files ) {
       if ($d > 150);
   }
 
+  # if shiftSF is specified but not loop, that's an error
+  die("ERROR: -shiftSF is only compatible with the -lap (or -loop) option.\n")
+    unless ( ($shiftSF == $shiftSFDefault) || $isLoop );
+
   #
   # zig-zags: pairs of 180 degree turns within a certain distance are probably misplaced control points
   # this is just a warning for now... easy to fix if it's along a line, but what if it goes around a corner?
@@ -4389,9 +4420,7 @@ for my $file ( @files ) {
   if ($reverse) {
     note("reversing course direction..\n");
     @$points = reverse @$points;
-    deleteField(points=> $points, field=> "distance") if (exists $points->[0]->{distance});
-    deleteField(points=> $points, field=> "direction") if (exists $points->[0]->{direction});
-
+    deleteDerivedFields($points);
   }
 
   # auto-straighten
@@ -4732,6 +4761,8 @@ for my $file ( @files ) {
   # anchoring: return start point and, if not a loop, finish point to original values
   # if anchoring requested
   if ( $anchorSF && (! $isLoop) ) {
+    addDistanceField(points=> $points) unless (exists $points->[0]->{distance});
+
     for my $d ( 1, -1 ) {
       my %sigma = (
                    ele => sqrt($lSmooth ** 2 + $zSmooth ** 2),
@@ -5118,7 +5149,7 @@ for my $file ( @files ) {
       push @pNew, $points->[-1];
       @pNew = reverse @pNew;
       $points = \@pNew;
-      deleteField(points=> $points, field=> "distance");
+      deleteDerivedFields($points);
       note("prune loop $n: pruned $pruneCount points.\n");
     }
   }
@@ -5129,21 +5160,101 @@ for my $file ( @files ) {
   # shiftStart < shiftEnd: shifting between shiftStart and shiftEnd
   # shiftStart > shiftEnd: shifting up to shiftEnd, then after shiftStart
   #
-  if ( $laneShift != 0) {
+  if ( ($laneShift != 0) || (@selectiveLaneShift > 0) ) {
     note("lane shift...\n");
-    my $shiftDistance = 20 * abs($laneShift) ** (2/3);
-    my $s = 0;
-    for my $i ( 0 .. $#$points ) {
-      $s += latlngDistance($points->[$i - 1], $points->[$i])
-        if ( $i > 0 );
-      my $shift = $laneShift;
-      if ( (defined $shiftStart) && (defined $shiftEnd) && ($shiftEnd < $shiftStart) ) {
-        $shift *= (transition(($shiftStart - $s) / $shiftDistance) * transition(($s - $shiftEnd) / $shiftDistance));
-      } else {
-        $shift *= transition(($shiftStart - $s) / $shiftDistance) if (defined $shiftStart);
-        $shift *= transition(($s - $shiftEnd) / $shiftDistance)   if (defined $shiftEnd);
+    addDistanceField(points=> $points) unless (defined $points->[0]->{distance});
+    # process lane shift
+    if ( $laneShift != 0 ) {
+      my $shiftDistance = $shiftTransition // 20 * abs($laneShift) ** (2/3);
+      for my $p ( @$points ) {
+        my $s = $p->{distance};
+        my $shift = $laneShift;
+        if ( (defined $shiftStart) && (defined $shiftEnd) && ($shiftEnd < $shiftStart) ) {
+          $shift *= (transition(($shiftStart - $s) / $shiftDistance) * transition(($s - $shiftEnd) / $shiftDistance));
+        } else {
+          $shift *= transition(($shiftStart - $s) / $shiftDistance) if (defined $shiftStart);
+          $shift *= transition(($s - $shiftEnd) / $shiftDistance)   if (defined $shiftEnd);
+        }
+        $p->{shift} = $shift;
       }
-      $points->[$i]->{shift} = $shift;
+    } else {
+      for my $p ( @$points ) {
+        $p->{shift} = 0;
+      }
+    }
+
+    # process selective lane shift
+    if (@selectiveLaneShift > 0) {
+      my $i = 0;
+      my @shifts;
+      my @positions;
+      my $sPrev;
+      while ($i < @selectiveLaneShift) {
+        my $shift = $selectiveLaneShift[$i];  # value
+        push @shifts, $shift;
+        $i ++;
+        last if ($i >= @selectiveLaneShift);
+        my $s = $selectiveLaneShift[$i]; # position
+        die("position values in selective smoothing list must be in non-decreasing order\n")
+          if ( (defined $sPrev) && ($s < $sPrev) );
+        push @positions, $s;
+        $sPrev = $s;
+        $i ++;
+      }
+
+      # if it's a loop, we may need to add a transition at the wrap-around point
+      my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop)
+        if ($isLoop);
+
+      # shift transition length.... use a fixed value for selective shift
+      my $shiftDistance = $shiftTransition // 20;
+
+      # build the course segment by segment
+      my $firstShift;
+      my $lastShift;
+      for ( my $i = 0; $i < @shifts; $i ++ ) {
+        if ($shifts[$i] != 0) {
+          for my $p ( @$points ) {
+            my $s = $p->{distance};
+            my $f = 1;
+
+            # segment start
+            my $s1;
+            $s1 = $positions[$i - 1] if ($i > 0);
+            $s1 //= 0 if ($isLoop);
+            $s1 = 0 if ($isLoop && ($s1 < 0));
+            $firstShift = $shifts[$i] if ($isLoop && ($s1 == 0));
+
+            # segment end
+            my $s2;
+            $s2 = $positions[$i] if ($i < @positions);
+            $s1 //= $courseDistance if ($isLoop);
+            $s2 = $courseDistance if ($isLoop && ($s2 > $courseDistance));
+            $lastShift //= $shifts[$i] if ($isLoop && ($s2 == $courseDistance));
+
+            last if ($s2 <= $s1);
+
+            $f *= transition(($s1 - $s) / $shiftDistance) if (defined $s1);
+            $f *= transition(($s - $s2) / $shiftDistance) if (defined $s2);
+
+            $p->{shift} += $shifts[$i] * $f;
+          }
+        }
+      }
+
+      # handle wrap-around
+      # this assumes the only shift within transition distance is the last one (may not be true)
+      if ($isLoop && (defined $firstShift) && ($firstShift != 0)) {
+        for my $p ( reverse @$points ) {
+          last if ($courseDistance - $p->{distance} > $shiftDistance);
+          $p->{shift} += $firstShift * transition(($courseDistance - $p->{distance}) / $shiftDistance);
+        }
+      }
+      if ($isLoop && (defined $lastShift) && ($lastShift != 0)) {
+        for my $p ( @$points ) {
+          $p->{shift} += $lastShift * transition($p->{distance} / $shiftDistance);
+        }
+      }
     }
   }
 
@@ -5160,17 +5271,21 @@ for my $file ( @files ) {
       my %h = %$p;
       push @$rPoints, \%h;
     }
+    deleteDerivedFields($rPoints);
   }
 
   #
   # lane shift:
   # shift lanes to the right (positive) or left (negative)
   #
-  if ( $laneShift != 0 ) {
+  if ( ($laneShift != 0) || (@selectiveLaneShift > 0) ) {
     $points  = applyLaneShift(points=> $points, isLoop=> $isLoop);
     deleteField(points=> $points, field=> "shift");
-    $rPoints = applyLaneShift(points=> $rPoints, isLoop=> $isLoop);
-    deleteField(points=> $rPoints, field=> "shift");
+    deleteDerivedFields($points);
+    if (@$rPoints) {
+      $rPoints = applyLaneShift(points=> $rPoints, isLoop=> $isLoop);
+      deleteField(points=> $rPoints, field=> "shift");
+    }
   }
 
   # for extendback, we calculate the crop crop position here: the loop counts as part
@@ -5877,7 +5992,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.47
+0.49
 
 =head1 DESCRIPTION
 
@@ -6644,6 +6759,18 @@ with the opposite direction.  A 6 meter lane-shift is the minimum
 recommended, or even more to avoid issues with the large tents.
 Hopefully RGT will fix this problem.
 
+=item B<C<-laneShiftEnd>> <meters>
+
+This is an alias for C<-shiftEnd>.
+
+=item B<C<-laneShiftStart>> <meters>
+
+This is an alias for C<-shiftStart>.
+
+=item B<C<-laneShiftTransition>> <meters>
+
+This is an alias for C<-shiftTransition>.
+
 =item B<C<-lap>>
 
 Synonym for C<-loop>
@@ -6833,6 +6960,21 @@ is too large, the transitions too and from the flat section may be too
 steep, or the influence of crossings could overlap, which the
 algorithm does not handle well.
 
+=item B<C<-repeat>> <count>
+
+Number of copies of the route to append to the end of the course.
+This should naturally be applied to a route which is a lappable
+course.  Normally lappable courses in RGT are modeled with only a
+single lap, but there are several reasons one might want to
+artificially create multiple laps by repeating the lap.  One might be
+if one is going to add a lead-in or finishing leg to the course, for
+example with the C<-join> option, which would be applied after this
+command is executed.  Another might be if you wanted timed segments only
+on selective laps, or overlapping the boundary between laps. But in most
+cases multi-lap races are better modeled by specifying the number of laps
+at event creation and using a magic road which covers only one of the
+laps.
+
 =item B<C<-reverse>>
 
 This reverses a course immediately after loading the file.  So all
@@ -6921,13 +7063,52 @@ If you want multiple named segments, then split them with semicolons
 This is an alias for C<-selectiveSmoothG>, which provides for
 selective gradient smoothing.
 
+=item B<C<-selectiveLaneShift>> <meters> ...
+
+This allows for a lane shift which is varied throughout the course.
+The first number is the lane shift for the first part of the course.
+The next number is a position where the lane shift changes to the next
+smoothing number.  A third number is the lane shift beyond the second
+number.  This can continue.  You alternate smoothing numbers and
+positions marking the transition between these smoothing numbers.  So
+there should be an odd number of numbers following.  If there's an
+even number, a last number of zero is assumed (no smoothing after the
+listed distance).
+
+For example, suppose I want to use 7 meter smoothing up to 2 km, then
+change to 20 meter smoothing from 2 km to 3 km, then back to 7 meters
+past 3 km.
+
+the lane shift will be smoothly varied between values at the boundaries
+ using a cosine transition.
+
+If this is a lapped course, and there are multiple lane shift values,
+then there will be an implicit transition at the S/F of the lap unless
+the last number matches the first.
+
+Example:
+C<-selectiveLaneShift 0 2000 -5 2500 5 3000 0>
+
+This would have no lane shift from the start of the course to 2000
+meters, then there would be a 5 meter lane shift to the left until
+2500 meters, then the lane shift will shift to 5 meters to the right
+until 3000 meters, and then the lane shift will return to zero through
+the end of the course.  If this was a loop course, note the first and
+last values match, so as long as the course was at least 2500 meters,
+there would be no need for an implicit transition at the end of the
+lap.
+
+If you specify lane shift as well as selective lane shift, then both
+are applied simultaneously (distances refer to positions before lane
+shifting is applied).
+
 =item B<C<-selectiveSmooth>> <meters> ...
 
 This allows for smoothing to be varied throughout the course.  The
 first number is the smoothing distance for the first part of the
 course.  The next number is a position where the smoothing changes to
 the next smoothing number.  A third number is the smoothing beyond the
-second number.  This can continue.  So you alternate smoothing numbers
+second number.  This can continue.  You alternate smoothing numbers
 and positions marking the transition between these smoothing numbers.
 So there should be an odd number of numbers following.  If there's an
 even number, a last number of zero is assumed (no smoothing after the
@@ -7003,6 +7184,15 @@ The position on the course where lane shifting starts.  See C<-shiftEnd>
 for details, except this marks the start of the lane shift zone.
 
 The C<-laneShift> option still needs to be specified.
+
+=item B<C<-shiftTransition>> <meters>
+
+The distance to each side of lane shift transition points to taper the
+lane shift.  Defaults are normally fine for this, so this option may
+never need to be specified.  For C<-shiftStart> and C<-shiftEnd>,
+which are applied to C<-laneShift>, the transition is calculated based
+on the lane shift magnitude.  For C<-selectedLaneShift>C, the default
+is 20 meters.
 
 =item B<C<-shiftSF>> <meters>
 

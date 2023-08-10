@@ -48,7 +48,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.48</p>
+<p>0.49</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -589,6 +589,24 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Back in the day a 4 meter laneshift was sufficient. But then RGT added road-side assets to magic roads, so a 4-lane shift with abutting roads will result in riding through tents, fences, etc, associated with the opposite direction. A 6 meter lane-shift is the minimum recommended, or even more to avoid issues with the large tents. Hopefully RGT will fix this problem.</p>
 
 </dd>
+<dt id="laneShiftEnd-meters"><b><code>-laneShiftEnd</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is an alias for <code>-shiftEnd</code>.</p>
+
+</dd>
+<dt id="laneShiftStart-meters"><b><code>-laneShiftStart</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is an alias for <code>-shiftStart</code>.</p>
+
+</dd>
+<dt id="laneShiftTransition-meters"><b><code>-laneShiftTransition</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is an alias for <code>-shiftTransition</code>.</p>
+
+</dd>
 <dt id="lap"><b><code>-lap</code></b></dt>
 <dd>
 
@@ -741,6 +759,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If <code>-fixCrossings</code> is invoked, then how far to each side of the crossing the road should be leveled. A transition of three times this length will be used, over which the altitude will be restored to the unaltered value. The default is 6 meters, which works fairly well with the RGT road width of 8 meters, althouugh if the intersection is at a particularly acute value, or if the roads will be wider than the RGT standard of 8 meters, a larger value may be better. If the value is too large, the transitions too and from the flat section may be too steep, or the influence of crossings could overlap, which the algorithm does not handle well.</p>
 
 </dd>
+<dt id="repeat-count"><b><code>-repeat</code></b> &lt;count&gt;</dt>
+<dd>
+
+<p>Number of copies of the route to append to the end of the course. This should naturally be applied to a route which is a lappable course. Normally lappable courses in RGT are modeled with only a single lap, but there are several reasons one might want to artificially create multiple laps by repeating the lap. One might be if one is going to add a lead-in or finishing leg to the course, for example with the <code>-join</code> option, which would be applied after this command is executed. Another might be if you wanted timed segments only on selective laps, or overlapping the boundary between laps. But in most cases multi-lap races are better modeled by specifying the number of laps at event creation and using a magic road which covers only one of the laps.</p>
+
+</dd>
 <dt id="reverse"><b><code>-reverse</code></b></dt>
 <dd>
 
@@ -791,10 +815,28 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This is an alias for <code>-selectiveSmoothG</code>, which provides for selective gradient smoothing.</p>
 
 </dd>
+<dt id="selectiveLaneShift-meters"><b><code>-selectiveLaneShift</code></b> &lt;meters&gt; ...</dt>
+<dd>
+
+<p>This allows for a lane shift which is varied throughout the course. The first number is the lane shift for the first part of the course. The next number is a position where the lane shift changes to the next smoothing number. A third number is the lane shift beyond the second number. This can continue. You alternate smoothing numbers and positions marking the transition between these smoothing numbers. So there should be an odd number of numbers following. If there&#39;s an even number, a last number of zero is assumed (no smoothing after the listed distance).</p>
+
+<p>For example, suppose I want to use 7 meter smoothing up to 2 km, then change to 20 meter smoothing from 2 km to 3 km, then back to 7 meters past 3 km.</p>
+
+<p>the lane shift will be smoothly varied between values at the boundaries using a cosine transition.</p>
+
+<p>If this is a lapped course, and there are multiple lane shift values, then there will be an implicit transition at the S/F of the lap unless the last number matches the first.</p>
+
+<p>Example: <code>-selectiveLaneShift 0 2000 -5 2500 5 3000 0</code></p>
+
+<p>This would have no lane shift from the start of the course to 2000 meters, then there would be a 5 meter lane shift to the left until 2500 meters, then the lane shift will shift to 5 meters to the right until 3000 meters, and then the lane shift will return to zero through the end of the course. If this was a loop course, note the first and last values match, so as long as the course was at least 2500 meters, there would be no need for an implicit transition at the end of the lap.</p>
+
+<p>If you specify lane shift as well as selective lane shift, then both are applied simultaneously (distances refer to positions before lane shifting is applied).</p>
+
+</dd>
 <dt id="selectiveSmooth-meters"><b><code>-selectiveSmooth</code></b> &lt;meters&gt; ...</dt>
 <dd>
 
-<p>This allows for smoothing to be varied throughout the course. The first number is the smoothing distance for the first part of the course. The next number is a position where the smoothing changes to the next smoothing number. A third number is the smoothing beyond the second number. This can continue. So you alternate smoothing numbers and positions marking the transition between these smoothing numbers. So there should be an odd number of numbers following. If there&#39;s an even number, a last number of zero is assumed (no smoothing after the listed distance).</p>
+<p>This allows for smoothing to be varied throughout the course. The first number is the smoothing distance for the first part of the course. The next number is a position where the smoothing changes to the next smoothing number. A third number is the smoothing beyond the second number. This can continue. You alternate smoothing numbers and positions marking the transition between these smoothing numbers. So there should be an odd number of numbers following. If there&#39;s an even number, a last number of zero is assumed (no smoothing after the listed distance).</p>
 
 <p>For example, suppose I want to use 7 meter smoothing up to 2 km, then change to 20 meter smoothing from 2 km to 3 km, then back to 7 meters past 3 km.</p>
 
@@ -843,6 +885,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p>The position on the course where lane shifting starts. See <code>-shiftEnd</code> for details, except this marks the start of the lane shift zone.</p>
 
 <p>The <code>-laneShift</code> option still needs to be specified.</p>
+
+</dd>
+<dt id="shiftTransition-meters"><b><code>-shiftTransition</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>The distance to each side of lane shift transition points to taper the lane shift. Defaults are normally fine for this, so this option may never need to be specified. For <code>-shiftStart</code> and <code>-shiftEnd</code>, which are applied to <code>-laneShift</code>, the transition is calculated based on the lane shift magnitude. For <code>-selectedLaneShift</code>C, the default is 20 meters.</p>
 
 </dd>
 <dt id="shiftSF-meters"><b><code>-shiftSF</code></b> &lt;meters&gt;</dt>
