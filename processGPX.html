@@ -48,7 +48,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.49</p>
+<p>0.50</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -401,6 +401,18 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Points prior to this will be stripped, and if needed, a point will be interpolated to this position. This shifts the start position of the GPX route. See <code>-cropMax</code> for more discussion.</p>
 
 </dd>
+<dt id="cropStart-meters"><b><code>-cropStart</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Alias for <code>-cropMin</code></p>
+
+</dd>
+<dt id="cropStop-meters"><b><code>-cropStop</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Alias for <code>-cropMax</code></p>
+
+</dd>
 <dt id="crossingAngle-degees"><b><code>-crossingAngle</code></b> &lt;degees&gt;</dt>
 <dd>
 
@@ -423,6 +435,22 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>Specifies the output will be CSV rather than GPX. This is ignored if an output file is specified with either a &quot;csv&quot; or &quot;gpx&quot; suffix (case insensitive), in which case the suffix is used to determine the format. Other suffixes are ignored.</p>
+
+</dd>
+<dt id="deleteRange-meters-meters"><b><code>-deleteRange</code></b> &lt;meters&gt; &lt;meters&gt; ...&gt;</dt>
+<dd>
+
+<p>This allows the specification of position pairs marking ranges over which points should be deleted. If two points are provided, then the route is deleted starting at the first position and ending at the second position. Additional pairs may be provided to provide additional delete ranges. This deleting, unlike the deleting specified with <code>-deleteMin</code> and/or <code>-deleteMax</code>, is done before point interpolation, but after file joining. This is because it is likely that smoothing will need to be done after the delete. Additional clean-up with a GPX editor like GPXMagic may be useful.</p>
+
+<p>This would be useful, for example, if a GPX file has an out-and-back portion that you want to remove from the route.</p>
+
+<p>If multiple segments are provided the distances are not adjusted between deleting operations. So for example, if <code>-deleteMax 1000 2000 3000 4000</code> were specified, the section from 1000 meters to 2000 meters would be first deleted. This would reduce the distance to the point which was originally at 3000 meters. However, the point at 3000 meters is determined using the distances calculating before any deleting was done. Delete segments should not overlap. Distances should be specified with extreme care, ideally to provide a small gap between the end of what precedes the start of the delete, and what follows the end of the delete, to allow a smooth transition.</p>
+
+<p>If there is only a single position provided, or if there are an odd number of positions, then the only or odd position will be considered a minimum position for deleting. So, for example, <code>-deleteRange 10000</code> would delete the route starting at 10 km, where positions are determined on the unprocessed GPX data.</p>
+
+<p>If the second point of a range is less than the starting point of the range, then the range wraps around, so points at the end of the route (after the start point) and at the beginning of the route (before the finish point) may be deleted.</p>
+
+<p>Deleting ranges doesn&#39;t create gaps in the route, of course. It deletes the control points within a given distance range. So the points at either end of the range will be connected. So for example, sppose I have a stright-line course with points at 0 meters, 500 meters, and 1000 meters. I then delete in the range 250 meters to 750 meters. I will now have points at 0, 250 meters, 750 meters, and 1000 meters. The points at 250 meters and 750 meters have been interpolated to define the deletion range, and the point at 500 meters has been deleted.</p>
 
 </dd>
 <dt id="description-string"><b><code>-description</code></b> &lt;string&gt;</dt>

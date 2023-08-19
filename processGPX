@@ -24,8 +24,9 @@ use Pod::Usage;
 # version 0.47: added gradient smoothing w/ corner effect.  Simplified -zShift, -zScale, added -zScaleRef.  Added aliases for start/finish circuit distances.
 # version 0.48: added arc fitting, loopLeft, loopRight.  Added loopLeft and loopRight options.  Improved splines
 # version 0.49: some clean-up, bug fixes, reduced smoothAngle from 20 to 15.  Added -selectiveLaneShift, -repeat, -laneShiftTransition
+# version 0.50: added -deleteRange; fixed -join problem not merging segments
 
-my $version = "0.49";             # make sure this matches pod value
+my $version = "0.50";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -313,7 +314,7 @@ sub pointAtPosition {
   # handling of open loop
   my $courseDistance = $points->[-1]->{distance};
   $courseDistance += latlngDistance( $points->[-1], $points->[0] ) if ($isLoop);
-  return ($points, undef) if (($s0 < 0) || ($s0 > $courseDistance));
+  return ($points, undef) if (($s0 < $points->[0]->{distance}) || ($s0 > $courseDistance));
 
   my $pointAdded = 0;
   my $pIndex;
@@ -3018,40 +3019,131 @@ sub deleteDerivedFields {
 sub cropPoints {
   my %vars = @_;
   my $points = $vars{points} // die;
-  my $cropMin = $vars{min} // 0;
-  my $cropMax = $vars{max} // 0;
+  my $cropMin = $vars{min};
+  my $cropMax = $vars{max};
+  my $deleteRange = $vars{deleteRange} // [];
+  my $isLoop = $vars{isLoop} // 0;
 
-  note("cropping ", (defined $cropMin) ? "from $cropMin " : "", (defined $cropMax) ? "to $cropMax " : "", "meters...\n");
+  my @ranges = ();
 
-  addDistanceField(points=> $points);
+  my $courseDistance = calcCourseDistance(points=>$points, isLoop=> $isLoop);
 
-  my $s = 0;
+  # if cropMin and cropMax are reversed, treat them as a delete range
+  if ((defined $cropMin) && (defined $cropMax) && ($cropMax < $cropMin)) {
+    push @ranges, [$cropMax, $cropMin];
+    undef $cropMin;
+    undef $cropMax;
+  }
+
+  for (my $i = 0; $i < $#$deleteRange;) {
+    my $r1 = $deleteRange->[$i ++];
+    my $r2 = $deleteRange->[$i ++];
+
+    # points reversed: acts like cropMin, cropMax
+    if ((! (defined $r1)) || (! (defined $r2)) || ($r2 < $r1)) {
+      $cropMax = $r1 if ((defined $r1) && ((! defined $cropMax) || ($r1 < $cropMax)));
+      $cropMin = $r2 if ((defined $r2) && ((! defined $cropMin) || ($r2 > $cropMin)));
+    } else {
+      # check to see if range overlaps beginning or end of the course
+      my $s1 = $points->[0]->{distance};
+      $s1 = $cropMin if ((defined $cropMin) && ($cropMin > $s1));
+      my $s2 = $courseDistance;
+      $s2 = $cropMax if ((defined $cropMax) && ($cropMax < $s2));
+
+      # skip if range outside of course
+      next if ((($r1 < $s1) && ($r2 < $s1)) || (($r1 > $s2) && ($r2 > $s2)));
+
+      # adjust crop limits if range overlaps edge of course
+      my $overlap = 0;
+      if ($r1 < $s1) {
+        $cropMin = $r2;
+        $overlap ++;
+      }
+      if ($r2 > $s2) {
+        $cropMax = $r1;
+        $overlap ++;
+      }
+      next if ($overlap);
+
+      # check if existing points overlap any ranges so far
+    doOverlaps: while(1) {
+        for my $j ( 0 .. $#ranges ) {
+          my $r = $ranges[$j];
+          my $r3 = $r->[0];
+          my $r4 = $r->[1];
+
+          my $overlap = 0;
+          # new range straddles beginning of old range: extend start of old range
+          if (($r1 < $r3) && ($r2 > $r3)) {
+            # new range overlaps first point in existing range
+            $overlap ++;
+            # possibly extend existing range
+            $r2 = $r4 if ($r4 > $r2);
+          } elsif (($r2 < $r4) && ($r2 > $r4)) {
+            # extend existing range
+            $r1 = $r3;
+            $overlap ++;
+          }
+          # if overlap, then delete the existing range
+          if ($overlap) {
+            splice(@ranges, $j, 1);
+            next doOverlaps;
+          }
+        }
+        last doOverlaps;
+      }
+      push @ranges, [$r1, $r2];
+    }
+  }
+  note("cropping ", (defined $cropMin) ? "from $cropMin " : "", (defined $cropMax) ? "to $cropMax " : "", "meters...\n")
+    if ((defined $cropMin) || (defined $cropMax));
+
+  for my $r ( @ranges ) {
+    note("deleting range from $r->[0] meters to $r->[1] meters.\n");
+  }
+
+  # interpolate needed points
+  # if this is cropMin, this may be followed by including the point
+  # if this is cropMax, then the point will be excluded
+  my @interpolatePoints;
+  for my $s ( $cropMin, $cropMax ) {
+    push @interpolatePoints, $s if (defined $s);
+  }
+  for my $r ( @ranges ) {
+    for my $j ( 0, 1 ) {
+      push @interpolatePoints, $r->[$j] if (defined $r->[$j]);
+    }
+  }
+
   my @pNew = ();
-  for my $i (0 .. $#$points) {
+  my $s;
+ pointLoop: for my $i ( 0 .. $#$points ) {
+    my $p = $points->[$i];
+    my $sPrev = $s;
+    $s = $p->{distance};
 
-    # interpolate a point for cropMin, cropMax
-    # if this is cropMin, this may be followed by including the point
-    # if this is cropMax, then the point will be excluded
-    for my $s0 ( $cropMin, $cropMax ) {
-      if ( ($i > 0) && ($s0 > 0) && ($points->[$i]->{distance} > $s0) && ($points->[$i - 1]->{distance} < $s0) ) {
-        my $ds = $points->[$i]->{distance} - $points->[$i - 1]->{distance};
-        my $f = ($s0 - $points->[$i - 1]->{distance}) / $ds;
+    for my $s0 ( @interpolatePoints ) {
+      if ( ($i > 0) && ($s0 > 0) && ($s > $s0) && ($sPrev < $s0) ) {
+        my $ds = $s - $sPrev;
+        my $f = ($s0 - $sPrev) / $ds;
         my $d1 = $f * $ds;
         my $d2 = (1 - $f) * $ds;
         if (($d1 > 0.01) && ($d2 > 0.01)) {
-          push @pNew, interpolatePoint($points->[$i - 1], $points->[$i], $f);
+          push @pNew, interpolatePoint($points->[$i - 1], $p, $f);
         }
       }
     }
 
-    if (((! defined $cropMin) || ($s >= $cropMin)) &&
-        ((! defined $cropMax) || ($cropMax <= 0) || ($s <= $cropMax))) {
-      push @pNew, $points->[$i];
+    next pointLoop if ((defined $cropMin) && ($s < $cropMin));
+    next pointLoop if ((defined $cropMax) && ($s > $cropMax));
+    for my $r ( @ranges ) {
+      next pointLoop if (($s > $r->[0]) && ($s < $r->[1]));
     }
 
-    $s += latlngDistance($points->[$i], $points->[$i + 1])
-      if ($i < $#$points);
+    push @pNew, $p;
   }
+
+  deleteDerivedFields(\@pNew);
   return \@pNew;
 }
 
@@ -3740,6 +3832,7 @@ my @autoStraighten;       # parameters for auto-straightening
 my @circle;               # points for circle substitution
 my @circleEnd;            # ending point (meters) for a circular corner (one per run)
 my @circleStart;          # starting point for a circular corner (one per run)
+my @deleteRange;          # pairs of positions for deleting points
 my @flatten;              # points come in sets of 4: altitude, start point, finish point, lambda
 my @join;                 # GPX file(s) to join to this one
 my @selectiveLaneShift;   # allow lane shift to be specified in segments along the course
@@ -3794,11 +3887,13 @@ GetOptions (
             "cropEnd=f"     => \$cropMax,
             "cropMax=f"     => \$cropMax,
             "cropMin=f"     => \$cropMin,
-            "cropStart=f"     => \$cropMin,
+            "cropStart=f"    => \$cropMin,
+            "cropStop=f"     => \$cropMax,
             "crossingAngle=f" => \$crossingAngle,
             "crossingHeight=f" => \$crossingHeight,
             "crossingTransition=f" => \$crossingTransition,
             "csv"           => \$csv,
+            "deleteRange=f{1,100}" => \@deleteRange,
             "description=s" => \$description,
             "disableAdvancedSmoothing=i" => \$disableAdvancedSmoothing,
             "disableElevationFixes=i"    => \$disableElevationFixes,
@@ -4135,13 +4230,14 @@ for my $file ( @files ) {
   # if join was specified, join points from a second file
   for my $join ( @join ) {
 
+    my $nTrack    = 1;
     my $trkIndex2 = 0;
 
     if (my ($f, $t) = ($join =~ /(.*)\:(\d+)$/)) {
       $join = $f;
       $trkIndex2 = ($t > 0) ? $t - 1: 0;
+      $nTrack = $t;
     }
-
     note("joining file $join to the end of tfile $file...\n");
     open my $fjoin, "<$join"
       or die("ERROR opening file $join");
@@ -4175,6 +4271,7 @@ for my $file ( @files ) {
     for my $segment ( @$segments2 ) {
       $nSegment ++;
 
+      # make sure we have a new copy of all points
       for my $p ( @{$segment->{points}} ) {
         $p->{segment} = ($stripSegments ? 0 : $nSegment);
         push @$points2, $p;
@@ -4182,19 +4279,31 @@ for my $file ( @files ) {
     }
 
     # add in segment extensions to the main extensions
-    if ((! $stripSegments) && (defined $extensions2) && (defined $extensions2->{segmentName}->{1})) {
-      for my $s ( keys %{$extensions2->{segmentName}->{1}} ) {
+    if ((! $stripSegments) && (defined $extensions2) && (defined $extensions2->{segmentName}->{$nTrack})) {
+      for my $s ( keys %{$extensions2->{segmentName}->{$nTrack}} ) {
         my $nS = $nSegment0 + $s;
-        $segmentName{$nS} = $extensions2->{segmentName}->{1}->{$s};
+        $segmentName{$nS} = $extensions2->{segmentName}->{$nTrack}->{$s};
         $segmentDefined{$nS} ++;
       }
     }
 
     push @$points, @$points2;
+    note("points after joining with $join = ", scalar(@$points), "\n");
   }
-  note("points in joined GPX track = ", scalar(@$points), "\n");
 
+  # unnamed segments get converted to 0 so they can be merged if contiguius
+  for my $p ( @$points ) {
+    unless (defined $segmentName{$p->{segment}}) {
+      $segmentDefined{$p->{segment}} = 0;
+      $p->{segment} = 0;
+    }
+  }
 
+  #
+  # crop ranges if specified
+  # this is done before auto-options since it may change whether the course is a loop, for example
+  #
+  $points = cropPoints(points=> $points, isLoop=> $isLoop, deleteRange=> \@deleteRange);
 
   #
   # auto: auto option will turn on options based on the course
@@ -4204,6 +4313,8 @@ for my $file ( @files ) {
     note("auto-setting options...\n");
     if (
         (! $isLoop) &&
+        (! defined $cropMin) &&
+        (! defined $cropMax) &&
         (latlngDistance($points->[0], $points->[-1]) < 150) &&
         (@$points > 3) &&
         (latlngDotProduct($points->[-2], $points->[-1], $points->[0], $points->[1]) > -0.1)
@@ -5122,7 +5233,7 @@ for my $file ( @files ) {
   }
 
   if ( ((defined $cropMin) && ($cropMin > 0)) || ((defined $cropMax) && ($cropMax > 0)) ) {
-    $points = cropPoints(points=> $points, min=> $cropMin, max=> $cropMax);
+    $points = cropPoints(points=> $points, isLoop=> $isLoop, min=> $cropMin, max=> $cropMax);
     note("points remaining after cropping = ", scalar(@$points), "\n");
   }
 
@@ -5343,7 +5454,7 @@ for my $file ( @files ) {
   }
 
   # for -extendBack, crop it here:
-  $points = cropPoints(points=> $points, max=> $cropBack)
+  $points = cropPoints(points=> $points, isLoop=> $isLoop, max=> $cropBack)
     if ($cropBack > 0);
 
   #
@@ -5992,7 +6103,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.49
+0.50
 
 =head1 DESCRIPTION
 
@@ -6523,6 +6634,14 @@ Points prior to this will be stripped, and if needed, a point will be
 interpolated to this position.  This shifts the start position of the
 GPX route.  See C<-cropMax> for more discussion.
 
+=item B<C<-cropStart>> <meters>
+
+Alias for C<-cropMin>
+
+=item B<C<-cropStop>> <meters>
+
+Alias for C<-cropMax>
+
 =item B<C<-crossingAngle>> <degees>
 
 If set, then this is the minimum degrees by which segments need to
@@ -6556,6 +6675,53 @@ Specifies the output will be CSV rather than GPX.  This is ignored if
 an output file is specified with either a "csv" or "gpx" suffix (case
 insensitive), in which case the suffix is used to determine the
 format.  Other suffixes are ignored.
+
+=item B<C<-deleteRange>> <meters> <meters> ...>
+
+This allows the specification of position pairs marking ranges over
+which points should be deleted.  If two points are provided, then the
+route is deleted starting at the first position and ending at the
+second position.  Additional pairs may be provided to provide
+additional delete ranges.  This deleting, unlike the deleting
+specified with C<-deleteMin> and/or C<-deleteMax>, is done before
+point interpolation, but after file joining.  This is because it is
+likely that smoothing will need to be done after the delete.
+Additional clean-up with a GPX editor like GPXMagic may be useful.
+
+This would be useful, for example, if a GPX file has an out-and-back
+portion that you want to remove from the route.
+
+If multiple segments are provided the distances are not adjusted
+between deleting operations.  So for example, if C<-deleteMax 1000
+2000 3000 4000> were specified, the section from 1000 meters to 2000
+meters would be first deleted.  This would reduce the distance to the
+point which was originally at 3000 meters.  However, the point at 3000
+meters is determined using the distances calculating before any
+deleting was done.  Delete segments should not overlap.  Distances
+should be specified with extreme care, ideally to provide a small gap
+between the end of what precedes the start of the delete, and what
+follows the end of the delete, to allow a smooth transition.
+
+If there is only a single position provided, or if there are an odd
+number of positions, then the only or odd position will be considered
+a minimum position for deleting.  So, for example, C<-deleteRange
+10000> would delete the route starting at 10 km, where positions are
+determined on the unprocessed GPX data.
+
+If the second point of a range is less than the starting point of the
+range, then the range wraps around, so points at the end of the route
+(after the start point) and at the beginning of the route (before the
+finish point) may be deleted.
+
+Deleting ranges doesn't create gaps in the route, of course.  It
+deletes the control points within a given distance range.  So the
+points at either end of the range will be connected.  So for example,
+sppose I have a stright-line course with points at 0 meters, 500
+meters, and 1000 meters.  I then delete in the range 250 meters to 750
+meters.  I will now have points at 0, 250 meters, 750 meters, and
+1000 meters.  The points at 250 meters and 750 meters have been
+interpolated to define the deletion range, and the point at 500 meters
+has been deleted.
 
 =item B<C<-description>> <string>
 
