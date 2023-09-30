@@ -886,18 +886,16 @@ my $gpx  = Geo::Gpx->new();
 
 my $name = ($hexagon) ? "hexagonRoute" : "triangleRoute";
 
-my $tracks = [
-              {
-               'name' => $name,
-               'segments' => [
-                              {
-                               'points' => \@GPXpoints
-                              }
-                             ]
-              }
-             ];
-
-$gpx->tracks( $tracks );
+$gpx->tracks_add(
+		{
+		 'name' => $name,
+		 'segments' => [
+				{
+				 'points' => \@GPXpoints
+				}
+			       ]
+		}
+	       );
 
 my $fName = (defined $out) ? $out : "triangleRoute.gpx";
 warn("writing GPX to file $fName\n");
