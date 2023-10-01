@@ -21,12 +21,14 @@ use Pod::Usage;
 # version 0.44: fixed -join
 # version 0.45: selectiveSmooth, selectiveSmoothZ, fixed append + prepend bug, fixed transition bug, retuned z-autosmoothing
 # version 0.46: efficiency improvements in calling smoothing.
-# version 0.47: added gradient smoothing w/ corner effect.  Simplified -zShift, -zScale, added -zScaleRef.  Added aliases for start/finish circuit distances.
+# version 0.47: added gradient smoothing w/ corner effect.  Simplified -zShift, -zScale, added -zScaleRef.
+#               added aliases for start/finish circuit distances.
 # version 0.48: added arc fitting, loopLeft, loopRight.  Added loopLeft and loopRight options.  Improved splines
 # version 0.49: some clean-up, bug fixes, reduced smoothAngle from 20 to 15.  Added -selectiveLaneShift, -repeat, -laneShiftTransition
 # version 0.50: added -deleteRange; fixed -join problem not merging segments
+# version 0.51: added circuitFromPosition, circuitToPosition
 
-my $version = "0.50";             # make sure this matches pod value
+my $version = "0.51";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -105,6 +107,7 @@ sub deltaxy {
 sub pointsAreClose {
   my $p1 = shift;
   my $p2 = shift;
+
   my $sMax = shift // 0.05;
   my $zMax = shift // 1;
   my $dz = ((defined $p1->{ele}) && (defined $p2->{ele})) ? ($p2->{ele} - $p1->{ele}) : 0;
@@ -157,7 +160,6 @@ sub turnDirection {
   my $dv2 = deltaxy($v2, $v3);
   return ($dv1->[1] * $dv2->[0] <=> $dv1->[0] * $dv2->[1]);
 }
-
 
 # given 3 points, return the subtended angle
 sub latlngAngle {
@@ -305,7 +307,7 @@ sub interpolatePoint {
 sub pointAtPosition {
   my $s0     = shift;
   my $points = shift;
-  my $isLoop = shift;
+  my $isLoop = shift // 0;
 
   my @pNew = ();
 
@@ -314,6 +316,7 @@ sub pointAtPosition {
   # handling of open loop
   my $courseDistance = $points->[-1]->{distance};
   $courseDistance += latlngDistance( $points->[-1], $points->[0] ) if ($isLoop);
+  return ($points, 0)     if (abs($s0 - $points->[0]->{distance}) < 0.001);
   return ($points, undef) if (($s0 < $points->[0]->{distance}) || ($s0 > $courseDistance));
 
   my $pointAdded = 0;
@@ -716,7 +719,7 @@ sub addSplines {
   addDirectionField(points=> $points, isLoop=>$isLoop);
 
   # add a distance field if needed
-  addDistanceField(points=> $points, isLoop=> $isLoop)
+  addDistanceField(points=> $points)
     unless ( (defined $points->[0]->{distance}) || (! ( (defined $start) || (defined $end) )) );
 
   # find corners which meet spline criteria
@@ -943,6 +946,123 @@ sub roadTest {
            );
 
   return ( isPointOnRoadCorner($points->[$j], $points->[$k], $points->[$l], $points->[$m], $points->[$i]) );
+}
+
+#
+# zig-zags: pairs of 180 degree turns within a certain distance are probably misplaced control points
+# this is just a warning for now... easy to fix if it's along a line, but what if it goes around a corner?
+#
+
+sub fixZigZags {
+  my $points = shift;
+  note("checking for zig-zags...\n");
+  my $dzigzag = 100;
+  my @UTurns = ();
+  for my $i ( 1 .. $#$points - 1 ) {
+    push @UTurns, $i
+      if (UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1], -0.9));
+  }
+
+  addDistanceField(points=> $points);
+  if (@UTurns) {
+    my $zigzagCount = 0;
+    while ( @UTurns > 1 ) {
+      my $U1 = shift @UTurns;
+      my $U2 = $UTurns[0];
+      my $p1 = $points->[$U1];
+      my $p2 = $points->[$U2];
+
+      if ($p2->{distance} - $p1->{distance} < $dzigzag) {
+	warn("WARNING: zig-zag found on points (0, 2, 3 ...) : ",
+	     $U1, " and ", $U2, " : ",
+	     sprintf("%.4f km: (%g, %g)", 0.001 * $p1->{distance}, $p1->{lon}, $p1->{lat}),
+	     " to ",
+	     sprintf("%.4f km: (%g, %g)", 0.001 * $p2->{distance}, $p2->{lon}, $p2->{lat}),
+	     " : separation = ", sprintf("%.4f", $p2->{distance} - $p1->{distance}), " meters\n");
+
+	# repairing zig-zags...
+	# zig-zags are two U-turns within a specified distance
+	# p1 -> p2 -> ... ->  p3 -> p4
+	# U-turn @ p2, and U-turn @ p3
+	# 1. eliminate all points between p2 and p3
+	# 2. as long as P3 has a U-turn, delete it... there will be a new P3
+	# 3. as long as P2 has a U-turn, delete it...
+	# 4. go back step 2 if we deleted any U-turns
+
+	# eliminate points between
+	warn("repairing zig-zag...\n");
+	my $u = $U1;		# keep points up to u
+	my $v = $U2 + 1;	# keep points starting with v
+	$v ++
+	  while (
+		 ($v < $#$points) &&
+		 UTurnCheck($points->[$u], $points->[$v], $points->[$v], $points->[$v + 1])
+		);
+
+	warn("eliminating ", $v - $u - 1, " points\n");
+	$zigzagCount ++;
+
+	my @pNew = @$points[0 .. $u];
+	push @pNew, @$points[$v .. $#$points];
+
+	# if we ran out of points, something is wrong
+	die("repairing zig-zags eliminated entire route\n")
+	  if (@pNew < 2);
+
+	$points = \@pNew;
+
+	# adjust U-turn coordinates
+	# We've eliminated the next Uturn, so pop it
+	shift @UTurns;
+
+	# adjust coordinates of remaining U-turns
+	for my $U ( @UTurns ) {
+	  $U += $u - $v + 1;
+	}
+
+	# get rid of obsolete U-turns
+	shift @UTurns
+	  while (@UTurns && ( $UTurns[0] < 0));
+      }
+    }
+    # may need to redo distance if zig-zag repair
+    addDistanceField(points=> $points)
+      if ($zigzagCount > 0);
+  }
+  return $points;
+}
+
+#
+# look for loops
+#
+sub findLoops  {
+  my $points = shift;
+  my $isLoop = shift;
+  note("checking for loops...\n");
+  my $loopDistance = 100;
+  # add direction field: distance field was just calculated by zig-zag check
+  addDirectionField(points=> $points, isLoop=> $isLoop);
+  my $u = 0;
+  my $v = 0;
+  my $loopAngle = 0.7 * $twopi;
+  while ($v < $#$points) {
+    my $p = $points->[$u];
+    $v ++ while (($v < $#$points) && ($points->[$v + 1]->{distance} < $p->{distance} + $loopDistance));
+    if (abs($p->{direction} - $points->[$v]->{direction}) > $loopAngle) {
+      $u ++ while (($u + 1 < $v) && (abs($points->[$u + 1]->{direction} - $points->[$v]->{direction}) > $loopAngle));
+      warn(
+	   "WARNING: loop between distance: ",
+	   sprintf("%.3f km and %.3f km",
+		   $points->[$u]->{distance} / 1000,
+		   $points->[$v]->{distance} / 1000
+		  ),
+	   "\n");
+      $u = $v;
+      next;
+    }
+    $u ++;
+  }
+  deleteField(field=> "direction", points=> $points);
 }
 
 sub applyLaneShift {
@@ -2745,6 +2865,90 @@ sub autoStraighten {
 
 
 #
+# circuitFromPosition:
+# from the given point (distance from start) 
+#
+
+sub circuitFromPosition {
+  my %var = @_;
+
+  my $points   = $var{points}   // [];
+  my $position = $var{position} // 0;
+  my $isLoop   = $var{isLoop} // 0;
+  my $circuits = $var{circuits} // 0;
+  $circuits = int($circuits);
+  my $repeats  = $var{repeats} // 1;
+  $repeats = int($repeats);
+
+  if ($repeats <= 0) {
+    warn("CircuitFromPosition called with non-poisitive repeats -- ignoring option.\n");
+    return $points;
+  }
+
+  my $startIndex;
+  ($points, $startIndex) = pointAtPosition( $position, $points, $isLoop );
+  return $points unless (defined $startIndex);
+
+  # search ahead for next point close to this point
+  # search on invervals
+  my $stopIndex = ($isLoop) ? $startIndex : $#$points;
+  warn("startIndex = $startIndex; stopIndex = $stopIndex\n");
+
+  my $p0 = $points->[$startIndex];
+
+  my $flag = 0;
+  my $count = 0;
+  for (my $i = ($startIndex + 1) % @$points; $i != $stopIndex;) {
+    my $p1 = $points->[$i];
+    my $index = $i;
+
+    $i = ($i + 1) % @$points;
+
+    # for a circuit, we need to get at least a nominal distance from the first point
+    unless ($flag) {
+      next if (pointsAreClose($points->[$startIndex], $points->[$index], 25));
+      $flag = 1;
+    }
+
+    my $p2 = $points->[$i];
+
+    next if (pointsAreClose($p1, $p2));
+
+    my $pMatch;
+    if ( isPointOnRoad($p1, $p2, $p0) ) {
+      # the start point falls ont he segment from p1 to p2, so the circuit ends at p1
+      $count ++;
+      if ($count >= $repeats) {
+	# circuit identified with the required number of counts
+	# circuit goes from startIndex to endIUndex inclusive
+	my $endIndex = $index;
+	my @pNew;
+	push @pNew, @$points[0 .. $startIndex - 1] if ($endIndex > $startIndex);  # add points at start if not part of circuit
+	for my $c ( 1 .. $circuits ) {
+	  for (my $j = $startIndex; $j != $endIndex; $j = ($j + 1) % @$points) {
+	    my $p;
+	    if ($c == 1) {
+	      $p = $points->[$j];
+	    } else {
+	      my %p = %{$points->[$j]};
+	      $p = \%p;
+	    }
+	    push @pNew, $p;
+	  }
+	}
+	push @pNew, @$points[$endIndex + 1 .. $#$points] if ($endIndex > $startIndex);  # add points at end if not part of circuit
+	deleteDerivedFields(\@pNew);
+	return \@pNew;
+      }
+    }
+  }
+
+  # nothing found: return original points
+  warn("warning: no circuit found at position $position with $repeats point crossing", ($repeats > 1) ? "s" : "", ".\n");
+  return $points;
+}
+
+#
 #
 # shiftCircuit: shift a circuit to start at a particular point
 #
@@ -3016,6 +3220,32 @@ sub deleteDerivedFields {
   }
 }
 
+#
+# reverse points and adjust distance, direction, curvature and laneshift fields, if present
+#
+sub reversePoints {
+  for my $points ( @_ ) {
+    @$points = reverse @$points;
+    next unless (@$points);
+    if (exists $points->[0]->{distance}) {
+      my $dLast = $points->[-1]->{distance};
+      for my $p ( @$points ) {
+	$p->{distance} = $dLast - $p->{distance};
+      }
+    }
+    foreach my $f ( "direction", "curvature", "laneShift" ) {
+      if (exists $points->[0]->{$f}) {
+	for my $p ( @$points ) {
+	  $p->{$f} = -$p->{$f};
+	}
+      }
+    }
+  }
+}
+
+#
+# crop points
+#
 sub cropPoints {
   my %vars = @_;
   my $points = $vars{points} // die;
@@ -3832,6 +4062,8 @@ my @autoStraighten;       # parameters for auto-straightening
 my @circle;               # points for circle substitution
 my @circleEnd;            # ending point (meters) for a circular corner (one per run)
 my @circleStart;          # starting point for a circular corner (one per run)
+my @circuitFromPosition;  # find circuits starting at a given position
+my @circuitToPosition;    # find circuits finish at a given position
 my @deleteRange;          # pairs of positions for deleting points
 my @flatten;              # points come in sets of 4: altitude, start point, finish point, lambda
 my @join;                 # GPX file(s) to join to this one
@@ -3879,6 +4111,14 @@ GetOptions (
             "circleEnd=f{1,1000}" => \@circleEnd,
             "circleStop=f{1,1000}" => \@circleEnd,
             "circle=f{1,1000}" => \@circle,
+	    "circuitFromPosition=f{1,30}"  => \@circuitFromPosition,
+	    "circuitsFromPosition=f{1,30}" => \@circuitFromPosition,
+	    "circuitFromPoint=f{1,30}"     => \@circuitFromPosition,
+	    "circuitsFromPoint=f{1,30}"    => \@circuitFromPosition,
+	    "circuitToPosition=f{1,30}"    => \@circuitToPosition,
+	    "circuitsToPosition=f{1,3}"    => \@circuitToPosition,
+	    "circuitToPoint=f{1,30}"       => \@circuitToPosition,
+	    "circuitsToPoint=f{1,30}"      => \@circuitToPosition,
             "closed"        => \$copyPoint,
             "copyPoint"     => \$copyPoint,
             "copyright=s"   => \$copyright,
@@ -3965,6 +4205,7 @@ GetOptions (
             "shiftStart=f"  => \$shiftStart,
             "shiftTransition=f" => \$shiftTransition,
             "sigma=f"       => \$lSmooth,
+	    "sigmag=f"      => \$gSmooth,
             "sigmaz=f"      => \$zSmooth,
             "smooth=f"      => \$lSmooth,
             "smoothAngle=f" => \$smoothAngle,
@@ -4147,6 +4388,9 @@ for my $file ( @files ) {
     $/ = $tmp;
   }
   close $fin;
+
+  die("ERROR: file $file is empty\n")
+    unless (defined $xml);
 
   # Parse GPX from open file
   my $gpx = Geo::Gpx->new( xml => $xml );
@@ -4396,115 +4640,11 @@ for my $file ( @files ) {
   die("ERROR: -shiftSF is only compatible with the -lap (or -loop) option.\n")
     unless ( ($shiftSF == $shiftSFDefault) || $isLoop );
 
-  #
-  # zig-zags: pairs of 180 degree turns within a certain distance are probably misplaced control points
-  # this is just a warning for now... easy to fix if it's along a line, but what if it goes around a corner?
-  #
-  {
-    note("checking for zig-zags...\n");
-    my $dzigzag = 100;
-    my @UTurns = ();
-    for my $i ( 1 .. $#$points - 1 ) {
-      push @UTurns, $i
-        if (UTurnCheck($points->[$i - 1], $points->[$i], $points->[$i], $points->[$i + 1], -0.9));
-    }
-
-    addDistanceField(points=> $points);
-    if (@UTurns) {
-      my $zigzagCount = 0;
-      while ( @UTurns > 1 ) {
-        my $U1 = shift @UTurns;
-        my $U2 = $UTurns[0];
-        my $p1 = $points->[$U1];
-        my $p2 = $points->[$U2];
-
-        if ($p2->{distance} - $p1->{distance} < $dzigzag) {
-          warn("WARNING: zig-zag found on points (0, 2, 3 ...) : ",
-               $U1, " and ", $U2, " : ",
-               sprintf("%.4f km: (%g, %g)", 0.001 * $p1->{distance}, $p1->{lon}, $p1->{lat}),
-               " to ",
-               sprintf("%.4f km: (%g, %g)", 0.001 * $p2->{distance}, $p2->{lon}, $p2->{lat}),
-               " : separation = ", sprintf("%.4f", $p2->{distance} - $p1->{distance}), " meters\n");
-
-          # repairing zig-zags...
-          # zig-zags are two U-turns within a specified distance
-          # p1 -> p2 -> ... ->  p3 -> p4
-          # U-turn @ p2, and U-turn @ p3
-          # 1. eliminate all points between p2 and p3
-          # 2. as long as P3 has a U-turn, delete it... there will be a new P3
-          # 3. as long as P2 has a U-turn, delete it...
-          # 4. go back step 2 if we deleted any U-turns
-
-          # eliminate points between
-          warn("repairing zig-zag...\n");
-          my $u = $U1;          # keep points up to u
-          my $v = $U2 + 1;      # keep points starting with v
-          $v ++
-            while (
-                   ($v < $#$points) &&
-                   UTurnCheck($points->[$u], $points->[$v], $points->[$v], $points->[$v + 1])
-                  );
-
-          warn("eliminating ", $v - $u - 1, " points\n");
-          $zigzagCount ++;
-
-          my @pNew = @$points[0 .. $u];
-          push @pNew, @$points[$v .. $#$points];
-
-          # if we ran out of points, something is wrong
-          die("repairing zig-zags eliminated entire route\n")
-            if (@pNew < 2);
-
-          $points = \@pNew;
-
-          # adjust U-turn coordinates
-          # We've eliminated the next Uturn, so pop it
-          shift @UTurns;
-
-          # adjust coordinates of remaining U-turns
-          for my $U ( @UTurns ) {
-            $U += $u - $v + 1;
-          }
-
-          # get rid of obsolete U-turns
-          shift @UTurns
-            while (@UTurns && ( $UTurns[0] < 0));
-        }
-      }
-      # may need to redo distance if zig-zag repair
-      addDistanceField(points=> $points)
-        if ($zigzagCount > 0);
-    }
-  }
+  # look for zig-zags
+  $points = fixZigZags($points);
 
   # look for loops
-  {
-    note("checking for loops...\n");
-    my $loopDistance = 100;
-    # add direction field: distance field was just calculated by zig-zag check
-    addDirectionField(points=> $points, isLoop=> $isLoop);
-    my $u = 0;
-    my $v = 0;
-    my $loopAngle = 0.7 * $twopi;
-    while ($v < $#$points) {
-      my $p = $points->[$u];
-      $v ++ while (($v < $#$points) && ($points->[$v + 1]->{distance} < $p->{distance} + $loopDistance));
-      if (abs($p->{direction} - $points->[$v]->{direction}) > $loopAngle) {
-        $u ++ while (($u + 1 < $v) && (abs($points->[$u + 1]->{direction} - $points->[$v]->{direction}) > $loopAngle));
-        warn(
-             "WARNING: loop between distance: ",
-             sprintf("%.3f km and %.3f km",
-                     $points->[$u]->{distance} / 1000,
-                     $points->[$v]->{distance} / 1000
-                    ),
-             "\n");
-        $u = $v;
-        next;
-      }
-      $u ++;
-    }
-    deleteField(field=> "direction", points=> $points);
-  }
+  findLoops($points, $isLoop);
 
   # adjust altitudes if requested
   if ( ((defined $zShift) && ($zShift != 0)) || ((defined $zScale) && ($zScale != 1)) ) {
@@ -4530,8 +4670,7 @@ for my $file ( @files ) {
   # points reference segments so segments order is also reversed
   if ($reverse) {
     note("reversing course direction..\n");
-    @$points = reverse @$points;
-    deleteDerivedFields($points);
+    reversePoints($points);
   }
 
   # auto-straighten
@@ -4543,6 +4682,32 @@ for my $file ( @files ) {
                    minLength=> $autoStraightenLength,
                    maxDeviation=> $autoStraightenDeviation,
                   );
+  }
+
+  # circuits at position
+  my $i = 0;
+  my @a = @circuitFromPosition;
+  while (@a) {
+    my $pos = shift @a;
+    my $circuits = shift @a // 1;
+    my $repeats = shift @a  // 1;
+    note("processing circuitFromPosition $pos...\n");
+    $points = circuitFromPosition(points=> $points, position=> $pos, circuits=> $circuits, repeats=> $repeats, isLoop=> $isLoop);
+  }
+
+  # circuits from position
+  if (@circuitToPosition) {
+    reversePoints($points);
+    deleteField(points=> $points, field=> "distance");
+    my @a = @circuitToPosition;
+    while (@a) {
+      my $pos = shift @a;
+      my $circuits = shift @a // 1;
+      my $repeats = shift  @a // 1;
+      note("processing circuitToPosition $pos...\n");
+      $points = circuitFromPosition(points=> $points, position=> $pos, circuits=> $circuits, repeats=> $repeats, isLoop=> $isLoop);
+    }
+    reversePoints($points);
   }
 
   # start and finish circuits
@@ -4592,7 +4757,7 @@ for my $file ( @files ) {
       }
     }
   }
-  addDistanceField(points=> $points) if ($circuitsAdded > 0);
+  deleteField(points=> $points, field=> "distance") if ($circuitsAdded > 0);
 
   # check for snapping
   if ( ($snap > 0) && ($snapDistance >= 0) ) {
@@ -5545,7 +5710,7 @@ for my $file ( @files ) {
   if ( (defined $minRadius) && ($minRadius > 0) ) {
     note("setting minimum radius to $minRadius...\n");
     addCurvatureField(points=> $points, isLoop=> $isLoop);
-    addDistanceField(points=> $points, isLoop=> $isLoop);
+    addDistanceField(points=> $points);
     my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
 
     # calculate a lane shift field
@@ -6103,7 +6268,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.50
+0.51
 
 =head1 DESCRIPTION
 
@@ -6241,16 +6406,32 @@ The options are the following:
 
 =over
 
+=item B<C<-addCurvature>>
+
+This option adds a "curvature" field (in meters) to the GPX file.
+Curvature is calculated as the ratio of the rate of change of angle
+with distance.  Note for a unit circle (radius = 1) the rate of change
+of angle (in radians) with position (along the perimeter) is 1.
+In general this is the reciprical of the circle radius.
+
 =item B<C<-addDirection>>
 
 This option adds a "direction" field relative to east (in degrees) to
 the GPX file.
 
 examples:
-0 degrees: east
-90 degrees: north
-180 degrees: west
-270 degrees south
+
+=over
+
+=item 0 degrees: east
+
+=item 90 degrees: north
+
+=item 180 degrees: west
+
+=item 270 degrees south
+
+=back
 
 Note this is not "heading", as it is relative to east.
 
@@ -6264,14 +6445,6 @@ positive, negative, and outside the range from -360 to +360 degrees.
 For example, if a route started east (0) then lapped around
 counterclockwise 10 times, the final direction would be approximately
 3600 degrees.
-
-=item B<C<-addCurvature>>
-
-This option adds a "curvature" field (in meters) to the GPX file.
-Curvature is calculated as the ratio of the rate of change of angle
-with distance.  Note for a unit circle (radius = 1) the rate of change
-of angle (in radians) with position (along the perimeter) is 1.
-In general this is the reciprical of the circle radius.
 
 =item B<C<-addDistance>>
 
@@ -6289,11 +6462,10 @@ checking whether altitude smoothing is sufficient.
 
 =item B<C<-addGradientSigns>>
 
-This flag is an i<experimental> option to calculate regions of
+This flag is an I<experimental> option to calculate regions of
 exceptional gradient and place "gradient signs" in the GPX as
-waypoints.  RGT Cycling at present ignores waypoints, but perhaps
-support will be provided in the future, in which case this feature
-will need to be tuned to the appropriate specification.
+waypoints.  An enhancement request was submitted to RGT to support
+these but it was never implemented.
 
 =item B<C<-addSigma>>
 
@@ -6310,7 +6482,7 @@ points to shift somewhat.
 =item B<C<-append>> <meters>
 
 A distance in meters which should be added to point-to-point
-courses. In RGT, the finish line is typically places 140 meters prior
+courses. In RGT, the finish line is typically placed 140 meters prior
 to the end of a point-to-point course, so if for example you design a
 course to be exactly 10 miles, (a typical UK time trial distance),
 then to put the finish line at the end of those 10 miles, the option
@@ -6337,11 +6509,11 @@ interpolation to be done for corners turning at least this much, but
 less than the C<-arcFitMaxDegs> option.  A typical value is 5 degrees.
 This angle is the angle between interpolated course points
 
-For a given 4 points i<a>, i<b>, i<c>, and i<d>, it interpolates between points b
-and c by fitting a circle through points i<a>, i<b>, and i<c>, fitting a second
-circle between points -<b>, i<c>, and i<d>, and then doing a weighted average
+For a given 4 points I<a>, I<b>, I<c>, and I<d>, it interpolates between points b
+and c by fitting a circle through points I<a>, I<b>, and I<c>, fitting a second
+circle between points I<b>, I<c>, and I<d>, and then doing a weighted average
 of these two fits based on the relative distance of the interpolated
-point from points i<b> and i<c>.  If starting with points forming the
+point from points I<b> and I<c>.  If starting with points forming the
 vertices of a polygon, for example, the resulting interpolation will
 yield a circular course, which may or may not be what you want.
 
@@ -6354,7 +6526,7 @@ the results of applying this option.  It's perhaps best for circuits
 with sweeping corners rather than straights connected with tighter
 turns.
 
-See also <C<-arcFitMaxDegs>.
+See also C<-arcFitMaxDegs>.
 
 =item B<C<-arcFitEnd>> <meters>
 
@@ -6370,12 +6542,12 @@ sharp corners, so an upper bound in the 60 degree range (which is the
 default) works generally well.  ArcFits have the advantage of rounding
 corners without "blunting" them, but sometimes they create "S" shapes
 where they are not wanted.  Make sure to check the results if using
-arc fit interpolation: verty strange results can occur if the corner
-is too sharp.
+arc fit interpolation: strange results can occur if the corner is too
+sharp.
 
 Arc fitting is a variation on spline fitting where corners are fit to
 circles rather than splines.  If this option is set too large then there's
-a risk of getting dramatically incorrect trajectors for sharp corners.
+a risk of getting dramatically incorrect trajectories for sharp corners.
 See also the notes in C<-arcFitDegs>.
 
 =item B<C<-arcFitStart>> <meters>
@@ -6521,28 +6693,28 @@ for example by additionally providing the C<-auto> option.
 =item B<C<-autoStraightenDeviation>> <meters>
 
 This is an alternative approach to specifying the maximum deviation
-for auto-straightening.  See C<-autoStraighten> for details.  The default
-is 0 (do not do auto-straightening).  Good options are 1 to 4 meters,
-from less aggressive to more aggressive.
+for auto-straightening.  See C<-autoStraighten> for details.  The
+default is 0 (do not do auto-straightening).  Good options are 1 to 4
+meters, from less aggressive to more aggressive.
 
 =item B<C<-autoStraightenLength>> <meters>
 
-The minimum length of a road section to be auto-straightened, in meters.
-This is an alternative to providing a second argument to an C<-autoStraighten>
-option. It can be used in conjunction with C<-autoStraightenDeviation> to request
-auto-straightening.
+The minimum length of a road section to be auto-straightened, in
+meters.  This is an alternative to providing a second argument to an
+C<-autoStraighten> option. It can be used in conjunction with
+C<-autoStraightenDeviation> to request auto-straightening.
 
 =item B<C<-circle>> <meters> (1 or more)
 
 Provide segments to be fit with circles, alternating start distance
 from start of GPX, and finish distance from start of GPX.  This is an
-alternative to providing values via C<-circleStart> and/or C<-circleEnd>.
-IF both methods are used, these will be processed first.  So for
-example, C<-circle> 400 500 100 200 will fit circles for points between
-400 and 500 meters from the start, then between 100 and 200 meters
-from the start.  Not the further points are listed first so the fit of
-a circle to these points does not affect the distance to the nearer
-points.
+alternative to providing values via C<-circleStart> and/or
+C<-circleEnd>.  IF both methods are used, these will be processed
+first.  So for example, C<-circle> 400 500 100 200 will fit circles
+for points between 400 and 500 meters from the start, then between 100
+and 200 meters from the start.  Not the further points are listed
+first so the fit of a circle to these points does not affect the
+distance to the nearer points.
 
 =item B<C<-circleEnd>> <meters> (1 or more)
 
@@ -6554,21 +6726,22 @@ See C<-circleStart>
 
 Set one or more start distances for circle fitting.
 
-This is an option which should be used with care.  For the special case
-where a route includes circular sections, for example laps of the
-San Francisco Polo Fields, you can move points to a circle which passes
-thru the end-points of an interval, and a point approximately mid-way
-between the end-points.  This should be followed up with a bit of smoothing
-over the interval to clean up the transitions to and from the circular
-arc.  Be careful in defining the endpoints so the direction doesn't change
-suddenly.  For example, you don't want the circular arc to overshoot,
-requiring the direction to correct in the opposite direction.  Consider
-only fitting the circular arc to a center portion of the curve.
+This is an option which should be used with care.  For the special
+case where a route includes circular sections, for example laps of the
+San Francisco Polo Fields, you can move points to a circle which
+passes thru the end-points of an interval, and a point approximately
+mid-way between the end-points.  This should be followed up with a bit
+of smoothing over the interval to clean up the transitions to and from
+the circular arc.  Be careful in defining the endpoints so the
+direction doesn't change suddenly.  For example, you don't want the
+circular arc to overshoot, requiring the direction to correct in the
+opposite direction.  Consider only fitting the circular arc to a
+center portion of the curve.
 
 The circular arc is fit between points starting at C<-circleStart> and
-ending at C<-circleEnd> from the start.  If the C<-isLoop> option is used,
-the start may come after the end in which case it wraps around.  The
-circular arc is generated after point interpolation but before
+ending at C<-circleEnd> from the start.  If the C<-isLoop> option is
+used, the start may come after the end in which case it wraps around.
+The circular arc is generated after point interpolation but before
 smoothing.
 
 If you want to generate multiple circular arcs (for example, the Polo
@@ -6582,6 +6755,37 @@ replaced.  Distances will be updated after each circular segment
 replacement.  So if you want to do multiple circular replacements,
 list them from further to closer relative to the start to avoid the
 distances for later fits being affected by earlier fits.
+
+=item B<C<-circuitFromPoint>> <meters> <circuits> [<repeats>] [<meters> ..]
+
+This is an alias for C<-circuitFromPosition>.
+
+=item B<C<-circuitFromPosition>> <meters> <circuits> [<repeats>] [<meters> ..]
+
+This option allows you to specify a circuit starting at a certain
+distance from the start of the track.  The code will go to a point
+that distance from the start. It will then search forward to where the
+course returns to the specified point and define that as a circuit.
+
+If the number of circuits is greater than 1, it will repeat thse
+points to create multiple circuits.  If the number is zero, it will
+delete the points.  If the number is one, then nothing will change.
+
+An optional number of repeats may be specified if the circuit returns
+to this point more than once, in which case it must return to the
+original point the specified number of times.
+
+=item B<C<-circuitToPoint>> <meters> <circuits> [<repeats>] [<meters> ..]
+
+This is an alias for C<-circuitToPosition>.
+
+=item B<C<-circuitToPosition>> <meters> <circuits> [<repeats>] [<meters> ..]
+
+This is like circuitFromPosition, except the distance specified is
+from the end of the course rather than the beginning, and the circuit
+ends at the specified point rather than starts there.  So for example
+specifying a distance of 0 would search for a circuit which ends at
+the end of the track.
 
 =item B<C<-closed>>
 
@@ -6660,6 +6864,11 @@ with this parameter.  If the GPX file has an altitude difference
 between zero and this number, it will force whichever is closer, and
 transition the altitude to either side, maintaining the same mean.
 
+Altitude adjustment is handled by checking if the crossing elevations
+are close.  If they are close, then they are averaged to make them
+equal.  If they are not sufficiently close, they are stretched apart
+if they are not close enough for a reasonable overpass.
+
 =item B<C<-crossingTransition>> <meters>
 
 If C<-fixCrossings> is invoked, then the altitude at crossings will be
@@ -6716,7 +6925,7 @@ finish point) may be deleted.
 Deleting ranges doesn't create gaps in the route, of course.  It
 deletes the control points within a given distance range.  So the
 points at either end of the range will be connected.  So for example,
-sppose I have a stright-line course with points at 0 meters, 500
+suppose I have a straight-line course with points at 0 meters, 500
 meters, and 1000 meters.  I then delete in the range 250 meters to 750
 meters.  I will now have points at 0, 250 meters, 750 meters, and
 1000 meters.  The points at 250 meters and 750 meters have been
@@ -6795,6 +7004,12 @@ This will add two copies of the loop B-C-D to the end of the data.
 If the desired finish of the GPX is not at the same point as the end
 of the loop, then you'll need to specify a C<-cropMax> value to remove
 some of the final circuit.
+
+An alternative to this option is the newer C<-circuitToPosition> which
+if specified with a position of 0 will generate finishing circuits
+without having to identify the position where the circuits begin.  So
+for example C<-circuitToPosition 0 3> would generate three finishing
+circuits automatically.
 
 =item B<C<-finishCircuits>> <count>
 
@@ -7170,14 +7385,16 @@ the turn-around point.  This may be done in conjunction with
 C<-laneShift> to have the return road shifted from the outward road.
 If the distance is less than the laneShift value, then the loop will
 have 3 parts: for example a right, then a left, then another right to
-turn 180 degrees.  The turn The main turn will be to the left if
-laneShift is negative (UK, for example), or to the right if laneShift
-is positive (US, for example) with a default (for no laneShift) to the
-right.
+turn 180 degrees.
 
-The C<-outAndBack> option is an alternative, specifying other smoothing
-options in addition to a lane shift and this option to create an
-out-and-back course more simply.
+The default behavior is for the loop to be to the left if laneShift is
+negative (UK, for example), otherwise positive (US, for example).  The
+direction can alternately be specified with C<-loopLeft> or
+C<-loopRight>.
+
+The C<-outAndBack> option is an alternative, specifying other
+smoothing options in addition to a lane shift and this option to
+create an out-and-back course more simply.
 
 =item B<C<-rUTurn>> <meters>
 
@@ -7200,29 +7417,37 @@ for debugging why.
 
 Define one or more non-overlapping named segments for the route.
 These are defined immediately before the C<-shiftSF> option is
-applied.  segments are specified with groups of 3 options separated by
-comma: a first coordinate specifying the starting distance in meters
-or "start", a second ccoordinate specifying the ending distance in
-meters or "end", and a name.  The starting coordinate instead be
-"start" to begin at the course start, and the ending coordinate can
-instead be "end" to end at the course end.  It is not recommended to
-use these options with a loop course, since for loops, the course will
-not start or finish at the GPX end.  In any case, RGT requires that
-segments start a sufficient distance from the beginning of the route,
-and end a sufficient distance from the end of the route, and also be
-separated by a sufficient distance.  However, this code only checks
-that they not overlap.  There is no way to define segments which
-overlap the S/F of a lapped course.  Segments already defined in the
-GPX file, for example from GPX Magic or previous runs of this code,
-are honored, and so new segments may not overlap previously defined
-segments.  Points are interpolated to get an essentially exact match
-to the specified coordinates.  Consider the C<-stripSegments> option
-to merge segments from the input file if the input file has multiple
-segments and you wish to replace them.
+applied.
+
+Segments are specified with groups of 3 options separated by comma: a
+first coordinate specifying the starting distance in meters or
+"C<start>", a second ccoordinate specifying the ending distance in
+meters or "C<end>", and a name.  The starting coordinate instead be
+"C<start>" to begin at the course start, and the ending coordinate can
+instead be "C<end>" to end at the course end.  It is not recommended
+to use "C<start>" or "C<end>" with a loop course, since for loops, the
+course will not start or finish at the GPX end.
+
+RGT requires that segments start a sufficient distance from the
+beginning of the route, and end a sufficient distance from the end of
+the route, and also be separated by a sufficient distance.  However,
+this code only checks that they not overlap.  There is no way to
+define segments which overlap the S/F of a lapped course.
+
+Segments already defined in the GPX file, for example from GPX Magic
+or previous runs of this code, are honored, and so new segments may
+not overlap previously defined segments.  Points are interpolated to
+get an essentially exact match to the specified coordinates.  Consider
+the C<-stripSegments> option to merge segments from the input file if
+the input file has multiple segments and you wish to replace them.
 
 If you want multiple named segments, then split them with semicolons
 (";"), so for example C<-segments "1000,2000,segment
 1;3000,4000,segment 2">
+
+In many cases, the C<-autoSegments> option is a better option, since
+this will automatically find segments by searching for climbs within a
+track.
 
 =item B<C<-selectiveGSmooth>> <meters> ...
 
@@ -7386,6 +7611,10 @@ the default -60 meter shift.  You want to apply this shift only once.
 =item B<C<-sigma>> <meters>
 
 Synonym for C<-smooth>
+
+=item B<C<-sigmag>> <meters>
+
+Synonym for C<-smoothG>
 
 =item B<C<-sigmaz>> <meters>
 
@@ -7612,12 +7841,12 @@ pieces, then see the C<-autoSplit> option instead.
 
 =item B<C<-splitNumber>> <1, 2, 3..>
 
-If there are multiple splits (C<-splitAt> or C<-autoSplits>), which splits
-to output.  The default is to output all splits if a filename is
-specified for the output (using a _split with the split number as a
-suffix) or just the first split if it's to standard output ("C<->").  The
-default can be specifed with a non-positive number, or just omitting
-this option.
+If there are multiple splits (C<-splitAt> or C<-autoSplits>), which
+splits to output.  The default is to output all splits if a filename
+is specified for the output (using a C<_split> with the split number
+as a suffix) or just the first split if it's to standard output
+("C<->").  The default can be specifed with a non-positive number, or
+just omitting this option.
 
 =item B<C<-startCircuitDistance>> <meters>
 
@@ -7631,6 +7860,12 @@ circuit should be prepended to the route at the beginning.
 If the start/end of the circuit lap is not the same place as the desired
 beginning of the route, then you'll need to specify a C<-cropMin> value to remove
 some of the initial circuit
+
+An alternative to this option is the newer C<-circuitFromPosition>
+which if specified with a position of 0 will generate starting
+circuits without having to identify the position where the circuits
+end.  So for example C<-circuitToPosition 0 3> would generate three
+starting circuits automatically.
 
 =item B<C<-startCircuitEnd>> <meters>
 
@@ -7661,7 +7896,7 @@ depend on the road grade, calibrated for a strong rider.
 Provide segments to be fit with straights, alternating start distance
 from start of GPX, and finish distance from start of GPX.  This is an
 alternative to providing values via C<-straightStart> and/or
-C<-straightEnd>.  IF both methods are used, these will be processed
+C<-straightEnd>.  If both methods are used, these will be processed
 first.  So for example, C<-straight 400 500 100 200> will fit
 straights for points between 400 and 500 meters from the start, then
 between 100 and 200 meters from the start.  Note the further points
@@ -7966,14 +8201,16 @@ it as a circuit
 
 =item B<C<-lap>>
 
-It is a multi-lap race, so assure a smooth transition from the end of a lap
-to the beginning of a next.  This is also necessary for C<-copyPoint> to work.
+It is a multi-lap race, so assure a smooth transition from the end of
+a lap to the beginning of a next.  This is also necessary for
+C<-copyPoint> to work.
 
 =back
 
 =head2 out-and-back course
 
-This example uses the -outAndBack shortcut to create an out-and-back course starting from a simple point-to-point GPX file:
+This example uses the -outAndBack shortcut to create an out-and-back
+course starting from a simple point-to-point GPX file:
 
 C<processGPX -outAndBack outSection.gpx -out outAndBack.gpx>
 
@@ -7981,22 +8218,24 @@ C<processGPX -outAndBack outSection.gpx -out outAndBack.gpx>
 
 =item B<C<-outAndBack>>
 
-This specifies that the route should loop around at the turn-around, then return, with a default lane shift.
+This specifies that the route should loop around at the turn-around,
+then return, with a default lane shift.
 
 =back
 
 =head2 out-and-back circuit
 
-This example uses the -outAndBackLap shortcut to create an out-and-back circuit with loops at both ends
-to create a circuit.
+This example uses the -outAndBackLap shortcut to create an
+out-and-back circuit with loops at both ends to create a circuit.
 
 C<processGPX -outAndBackLap outSection.gpx -out outAndBackCircuit.gpx>
 
 =over
 
-=item B<C<-outAndBack>>
+=item B<C<-outAndBackLap>>
 
-This specifies that the route should loop around at the turn-around, then return, with a default lane shift.
+This specifies that the route should loop around at the turn-around,
+then return, then loop again, with a default lane shift.
 
 =back
 

@@ -4,7 +4,7 @@
 <head>
 <title>processGPX</title>
 <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<link rev="made" href="mailto:root@montereyx.internal.macports.net" />
+<link rev="made" href="mailto:root@venturaa.local" />
 </head>
 
 <body>
@@ -48,7 +48,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.50</p>
+<p>0.51</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -123,22 +123,42 @@ Pod::Usage   : for the -help option</code></pre>
 
 <dl>
 
+<dt id="addCurvature"><b><code>-addCurvature</code></b></dt>
+<dd>
+
+<p>This option adds a &quot;curvature&quot; field (in meters) to the GPX file. Curvature is calculated as the ratio of the rate of change of angle with distance. Note for a unit circle (radius = 1) the rate of change of angle (in radians) with position (along the perimeter) is 1. In general this is the reciprical of the circle radius.</p>
+
+</dd>
 <dt id="addDirection"><b><code>-addDirection</code></b></dt>
 <dd>
 
 <p>This option adds a &quot;direction&quot; field relative to east (in degrees) to the GPX file.</p>
 
-<p>examples: 0 degrees: east 90 degrees: north 180 degrees: west 270 degrees south</p>
+<p>examples:</p>
+
+<dl>
+
+<dt id="degrees:-east">0 degrees: east</dt>
+<dd>
+
+</dd>
+<dt id="degrees:-north">90 degrees: north</dt>
+<dd>
+
+</dd>
+<dt id="degrees:-west">180 degrees: west</dt>
+<dd>
+
+</dd>
+<dt id="degrees-south">270 degrees south</dt>
+<dd>
+
+</dd>
+</dl>
 
 <p>Note this is not &quot;heading&quot;, as it is relative to east.</p>
 
 <p>Direction is calculated for each point as the average of the directions ahead and behind. The direction of the first or last points in a point-to-point course are calculated in only one direction. Directions for loop courses are calculated assuming the loop. The direction never changes by more than +/- 180 degrees from one point to the next, so the direction has no limits: it can be positive, negative, and outside the range from -360 to +360 degrees. For example, if a route started east (0) then lapped around counterclockwise 10 times, the final direction would be approximately 3600 degrees.</p>
-
-</dd>
-<dt id="addCurvature"><b><code>-addCurvature</code></b></dt>
-<dd>
-
-<p>This option adds a &quot;curvature&quot; field (in meters) to the GPX file. Curvature is calculated as the ratio of the rate of change of angle with distance. Note for a unit circle (radius = 1) the rate of change of angle (in radians) with position (along the perimeter) is 1. In general this is the reciprical of the circle radius.</p>
 
 </dd>
 <dt id="addDistance"><b><code>-addDistance</code></b></dt>
@@ -156,7 +176,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="addGradientSigns"><b><code>-addGradientSigns</code></b></dt>
 <dd>
 
-<p>This flag is an i&lt;experimental&gt; option to calculate regions of exceptional gradient and place &quot;gradient signs&quot; in the GPX as waypoints. RGT Cycling at present ignores waypoints, but perhaps support will be provided in the future, in which case this feature will need to be tuned to the appropriate specification.</p>
+<p>This flag is an <i>experimental</i> option to calculate regions of exceptional gradient and place &quot;gradient signs&quot; in the GPX as waypoints. An enhancement request was submitted to RGT to support these but it was never implemented.</p>
 
 </dd>
 <dt id="addSigma"><b><code>-addSigma</code></b></dt>
@@ -174,7 +194,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="append-meters"><b><code>-append</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>A distance in meters which should be added to point-to-point courses. In RGT, the finish line is typically places 140 meters prior to the end of a point-to-point course, so if for example you design a course to be exactly 10 miles, (a typical UK time trial distance), then to put the finish line at the end of those 10 miles, the option &quot;<code>-append 140</code>&quot; would add 140 meters. This buffer is needed by RGT because riders group along the road-side after crossing the finish. Note the start line would also need to be extended, via <code>-prepend</code>, by 60 meters, in this case.</p>
+<p>A distance in meters which should be added to point-to-point courses. In RGT, the finish line is typically placed 140 meters prior to the end of a point-to-point course, so if for example you design a course to be exactly 10 miles, (a typical UK time trial distance), then to put the finish line at the end of those 10 miles, the option &quot;<code>-append 140</code>&quot; would add 140 meters. This buffer is needed by RGT because riders group along the road-side after crossing the finish. Note the start line would also need to be extended, via <code>-prepend</code>, by 60 meters, in this case.</p>
 
 <p>Extended points will be set to the altitude of the final point.</p>
 
@@ -188,11 +208,11 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>If arc fits are desired, specifying this will cause arc fit interpolation to be done for corners turning at least this much, but less than the <code>-arcFitMaxDegs</code> option. A typical value is 5 degrees. This angle is the angle between interpolated course points</p>
 
-<p>For a given 4 points i&lt;a&gt;, i&lt;b&gt;, i&lt;c&gt;, and i&lt;d&gt;, it interpolates between points b and c by fitting a circle through points i&lt;a&gt;, i&lt;b&gt;, and i&lt;c&gt;, fitting a second circle between points -&lt;b&gt;, i&lt;c&gt;, and i&lt;d&gt;, and then doing a weighted average of these two fits based on the relative distance of the interpolated point from points i&lt;b&gt; and i&lt;c&gt;. If starting with points forming the vertices of a polygon, for example, the resulting interpolation will yield a circular course, which may or may not be what you want.</p>
+<p>For a given 4 points <i>a</i>, <i>b</i>, <i>c</i>, and <i>d</i>, it interpolates between points b and c by fitting a circle through points <i>a</i>, <i>b</i>, and <i>c</i>, fitting a second circle between points <i>b</i>, <i>c</i>, and <i>d</i>, and then doing a weighted average of these two fits based on the relative distance of the interpolated point from points <i>b</i> and <i>c</i>. If starting with points forming the vertices of a polygon, for example, the resulting interpolation will yield a circular course, which may or may not be what you want.</p>
 
 <p>This algorithm tends to result in more sweeping corners than spline interpolation, which may or may not reflect reality. Also if there are any anomalous points then there&#39;s the chance this algorithm will exaggerate these anomalies. It&#39;s recommended you very carefully check the results of applying this option. It&#39;s perhaps best for circuits with sweeping corners rather than straights connected with tighter turns.</p>
 
-<p>See also &lt;<code>-arcFitMaxDegs</code>.</p>
+<p>See also <code>-arcFitMaxDegs</code>.</p>
 
 </dd>
 <dt id="arcFitEnd-meters"><b><code>-arcFitEnd</code></b> &lt;meters&gt;</dt>
@@ -204,9 +224,9 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="arcFitMaxDegs-degrees"><b><code>-arcFitMaxDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
-<p>If a <code>-arcFitDegs</code> option is specified, specifying this limit the maximum angle corner for which arc fit interpolation will be applied. ArcFits are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. ArcFits have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using arc fit interpolation: verty strange results can occur if the corner is too sharp.</p>
+<p>If a <code>-arcFitDegs</code> option is specified, specifying this limit the maximum angle corner for which arc fit interpolation will be applied. ArcFits are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. ArcFits have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using arc fit interpolation: strange results can occur if the corner is too sharp.</p>
 
-<p>Arc fitting is a variation on spline fitting where corners are fit to circles rather than splines. If this option is set too large then there&#39;s a risk of getting dramatically incorrect trajectors for sharp corners. See also the notes in <code>-arcFitDegs</code>.</p>
+<p>Arc fitting is a variation on spline fitting where corners are fit to circles rather than splines. If this option is set too large then there&#39;s a risk of getting dramatically incorrect trajectories for sharp corners. See also the notes in <code>-arcFitDegs</code>.</p>
 
 </dd>
 <dt id="arcFitStart-meters"><b><code>-arcFitStart</code></b> &lt;meters&gt;</dt>
@@ -355,6 +375,34 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If multiple values are listed, then multiple sections will be replaced. Distances will be updated after each circular segment replacement. So if you want to do multiple circular replacements, list them from further to closer relative to the start to avoid the distances for later fits being affected by earlier fits.</p>
 
 </dd>
+<dt id="circuitFromPoint-meters-circuits-repeats-meters"><b><code>-circuitFromPoint</code></b> &lt;meters&gt; &lt;circuits&gt; [&lt;repeats&gt;] [&lt;meters&gt; ..]</dt>
+<dd>
+
+<p>This is an alias for <code>-circuitFromPosition</code>.</p>
+
+</dd>
+<dt id="circuitFromPosition-meters-circuits-repeats-meters"><b><code>-circuitFromPosition</code></b> &lt;meters&gt; &lt;circuits&gt; [&lt;repeats&gt;] [&lt;meters&gt; ..]</dt>
+<dd>
+
+<p>This option allows you to specify a circuit starting at a certain distance from the start of the track. The code will go to a point that distance from the start. It will then search forward to where the course returns to the specified point and define that as a circuit.</p>
+
+<p>If the number of circuits is greater than 1, it will repeat thse points to create multiple circuits. If the number is zero, it will delete the points. If the number is one, then nothing will change.</p>
+
+<p>An optional number of repeats may be specified if the circuit returns to this point more than once, in which case it must return to the original point the specified number of times.</p>
+
+</dd>
+<dt id="circuitToPoint-meters-circuits-repeats-meters"><b><code>-circuitToPoint</code></b> &lt;meters&gt; &lt;circuits&gt; [&lt;repeats&gt;] [&lt;meters&gt; ..]</dt>
+<dd>
+
+<p>This is an alias for <code>-circuitToPosition</code>.</p>
+
+</dd>
+<dt id="circuitToPosition-meters-circuits-repeats-meters"><b><code>-circuitToPosition</code></b> &lt;meters&gt; &lt;circuits&gt; [&lt;repeats&gt;] [&lt;meters&gt; ..]</dt>
+<dd>
+
+<p>This is like circuitFromPosition, except the distance specified is from the end of the course rather than the beginning, and the circuit ends at the specified point rather than starts there. So for example specifying a distance of 0 would search for a circuit which ends at the end of the track.</p>
+
+</dd>
 <dt id="closed"><b><code>-closed</code></b></dt>
 <dd>
 
@@ -424,6 +472,8 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>If <code>-fixCrossings</code> is invoked, then the code will attempt to identify crossings and adjust the altitude at them. Typically crossings will be either level (same altitude each direction) or at some minimum height. That minumum height defaults to 2 meters, but can be adjusted with this parameter. If the GPX file has an altitude difference between zero and this number, it will force whichever is closer, and transition the altitude to either side, maintaining the same mean.</p>
 
+<p>Altitude adjustment is handled by checking if the crossing elevations are close. If they are close, then they are averaged to make them equal. If they are not sufficiently close, they are stretched apart if they are not close enough for a reasonable overpass.</p>
+
 </dd>
 <dt id="crossingTransition-meters"><b><code>-crossingTransition</code></b> &lt;meters&gt;</dt>
 <dd>
@@ -450,7 +500,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>If the second point of a range is less than the starting point of the range, then the range wraps around, so points at the end of the route (after the start point) and at the beginning of the route (before the finish point) may be deleted.</p>
 
-<p>Deleting ranges doesn&#39;t create gaps in the route, of course. It deletes the control points within a given distance range. So the points at either end of the range will be connected. So for example, sppose I have a stright-line course with points at 0 meters, 500 meters, and 1000 meters. I then delete in the range 250 meters to 750 meters. I will now have points at 0, 250 meters, 750 meters, and 1000 meters. The points at 250 meters and 750 meters have been interpolated to define the deletion range, and the point at 500 meters has been deleted.</p>
+<p>Deleting ranges doesn&#39;t create gaps in the route, of course. It deletes the control points within a given distance range. So the points at either end of the range will be connected. So for example, suppose I have a straight-line course with points at 0 meters, 500 meters, and 1000 meters. I then delete in the range 250 meters to 750 meters. I will now have points at 0, 250 meters, 750 meters, and 1000 meters. The points at 250 meters and 750 meters have been interpolated to define the deletion range, and the point at 500 meters has been deleted.</p>
 
 </dd>
 <dt id="description-string"><b><code>-description</code></b> &lt;string&gt;</dt>
@@ -507,6 +557,8 @@ Pod::Usage   : for the -help option</code></pre>
 <p>So if the course goes from A to B, then completes 3 circuits of the loop B-C-D, then find the distance in meters to point B, then specify that distance as <code>-finishCircuitDistance</code>, and specify <code>-finishCircuits</code> 2. This will add two copies of the loop B-C-D to the end of the data.</p>
 
 <p>If the desired finish of the GPX is not at the same point as the end of the loop, then you&#39;ll need to specify a <code>-cropMax</code> value to remove some of the final circuit.</p>
+
+<p>An alternative to this option is the newer <code>-circuitToPosition</code> which if specified with a position of 0 will generate finishing circuits without having to identify the position where the circuits begin. So for example <code>-circuitToPosition 0 3</code> would generate three finishing circuits automatically.</p>
 
 </dd>
 <dt id="finishCircuits-count"><b><code>-finishCircuits</code></b> &lt;count&gt;</dt>
@@ -810,7 +862,9 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="rTurnaround-meters"><b><code>-rTurnaround</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Create an out-and-back course, with a turn of this radius generated at the turn-around point. This may be done in conjunction with <code>-laneShift</code> to have the return road shifted from the outward road. If the distance is less than the laneShift value, then the loop will have 3 parts: for example a right, then a left, then another right to turn 180 degrees. The turn The main turn will be to the left if laneShift is negative (UK, for example), or to the right if laneShift is positive (US, for example) with a default (for no laneShift) to the right.</p>
+<p>Create an out-and-back course, with a turn of this radius generated at the turn-around point. This may be done in conjunction with <code>-laneShift</code> to have the return road shifted from the outward road. If the distance is less than the laneShift value, then the loop will have 3 parts: for example a right, then a left, then another right to turn 180 degrees.</p>
+
+<p>The default behavior is for the loop to be to the left if laneShift is negative (UK, for example), otherwise positive (US, for example). The direction can alternately be specified with <code>-loopLeft</code> or <code>-loopRight</code>.</p>
 
 <p>The <code>-outAndBack</code> option is an alternative, specifying other smoothing options in addition to a lane shift and this option to create an out-and-back course more simply.</p>
 
@@ -832,9 +886,17 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="segment-start-end-name"><b><code>-segment</code></b> &lt;start&gt;,&lt;end&gt;,&lt;name&gt;; ...</dt>
 <dd>
 
-<p>Define one or more non-overlapping named segments for the route. These are defined immediately before the <code>-shiftSF</code> option is applied. segments are specified with groups of 3 options separated by comma: a first coordinate specifying the starting distance in meters or &quot;start&quot;, a second ccoordinate specifying the ending distance in meters or &quot;end&quot;, and a name. The starting coordinate instead be &quot;start&quot; to begin at the course start, and the ending coordinate can instead be &quot;end&quot; to end at the course end. It is not recommended to use these options with a loop course, since for loops, the course will not start or finish at the GPX end. In any case, RGT requires that segments start a sufficient distance from the beginning of the route, and end a sufficient distance from the end of the route, and also be separated by a sufficient distance. However, this code only checks that they not overlap. There is no way to define segments which overlap the S/F of a lapped course. Segments already defined in the GPX file, for example from GPX Magic or previous runs of this code, are honored, and so new segments may not overlap previously defined segments. Points are interpolated to get an essentially exact match to the specified coordinates. Consider the <code>-stripSegments</code> option to merge segments from the input file if the input file has multiple segments and you wish to replace them.</p>
+<p>Define one or more non-overlapping named segments for the route. These are defined immediately before the <code>-shiftSF</code> option is applied.</p>
+
+<p>Segments are specified with groups of 3 options separated by comma: a first coordinate specifying the starting distance in meters or &quot;<code>start</code>&quot;, a second ccoordinate specifying the ending distance in meters or &quot;<code>end</code>&quot;, and a name. The starting coordinate instead be &quot;<code>start</code>&quot; to begin at the course start, and the ending coordinate can instead be &quot;<code>end</code>&quot; to end at the course end. It is not recommended to use &quot;<code>start</code>&quot; or &quot;<code>end</code>&quot; with a loop course, since for loops, the course will not start or finish at the GPX end.</p>
+
+<p>RGT requires that segments start a sufficient distance from the beginning of the route, and end a sufficient distance from the end of the route, and also be separated by a sufficient distance. However, this code only checks that they not overlap. There is no way to define segments which overlap the S/F of a lapped course.</p>
+
+<p>Segments already defined in the GPX file, for example from GPX Magic or previous runs of this code, are honored, and so new segments may not overlap previously defined segments. Points are interpolated to get an essentially exact match to the specified coordinates. Consider the <code>-stripSegments</code> option to merge segments from the input file if the input file has multiple segments and you wish to replace them.</p>
 
 <p>If you want multiple named segments, then split them with semicolons (&quot;;&quot;), so for example <code>-segments &quot;1000,2000,segment 1;3000,4000,segment 2&quot;</code></p>
+
+<p>In many cases, the <code>-autoSegments</code> option is a better option, since this will automatically find segments by searching for climbs within a track.</p>
 
 </dd>
 <dt id="selectiveGSmooth-meters"><b><code>-selectiveGSmooth</code></b> &lt;meters&gt; ...</dt>
@@ -937,6 +999,12 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>Synonym for <code>-smooth</code></p>
+
+</dd>
+<dt id="sigmag-meters"><b><code>-sigmag</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Synonym for <code>-smoothG</code></p>
 
 </dd>
 <dt id="sigmaz-meters"><b><code>-sigmaz</code></b> &lt;meters&gt;</dt>
@@ -1082,7 +1150,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="splitNumber-1-2-3"><b><code>-splitNumber</code></b> &lt;1, 2, 3..&gt;</dt>
 <dd>
 
-<p>If there are multiple splits (<code>-splitAt</code> or <code>-autoSplits</code>), which splits to output. The default is to output all splits if a filename is specified for the output (using a _split with the split number as a suffix) or just the first split if it&#39;s to standard output (&quot;<code>-</code>&quot;). The default can be specifed with a non-positive number, or just omitting this option.</p>
+<p>If there are multiple splits (<code>-splitAt</code> or <code>-autoSplits</code>), which splits to output. The default is to output all splits if a filename is specified for the output (using a <code>_split</code> with the split number as a suffix) or just the first split if it&#39;s to standard output (&quot;<code>-</code>&quot;). The default can be specifed with a non-positive number, or just omitting this option.</p>
 
 </dd>
 <dt id="startCircuitDistance-meters"><b><code>-startCircuitDistance</code></b> &lt;meters&gt;</dt>
@@ -1091,6 +1159,8 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Sometimes races start with multiple circuits of a loop, before leaving the circuit for a remainder of the course. This option allows you to repeat a beginning portion of the GPX file as a finishing circuit. To do this, you specify the distance to the end of the circuit, then an use the <code>-startCircuits</code> option to specify how many copies of this circuit should be prepended to the route at the beginning.</p>
 
 <p>If the start/end of the circuit lap is not the same place as the desired beginning of the route, then you&#39;ll need to specify a <code>-cropMin</code> value to remove some of the initial circuit</p>
+
+<p>An alternative to this option is the newer <code>-circuitFromPosition</code> which if specified with a position of 0 will generate starting circuits without having to identify the position where the circuits end. So for example <code>-circuitToPosition 0 3</code> would generate three starting circuits automatically.</p>
 
 </dd>
 <dt id="startCircuitEnd-meters"><b><code>-startCircuitEnd</code></b> &lt;meters&gt;</dt>
@@ -1118,7 +1188,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="straight-meters-1-or-more"><b><code>-straight</code></b> &lt;meters&gt; (1 or more)</dt>
 <dd>
 
-<p>Provide segments to be fit with straights, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via <code>-straightStart</code> and/or <code>-straightEnd</code>. IF both methods are used, these will be processed first. So for example, <code>-straight 400 500 100 200</code> will fit straights for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Note the further points are listed first so the fit of a straight to these points does not affect the distance to the nearer points. This is recommended.</p>
+<p>Provide segments to be fit with straights, alternating start distance from start of GPX, and finish distance from start of GPX. This is an alternative to providing values via <code>-straightStart</code> and/or <code>-straightEnd</code>. If both methods are used, these will be processed first. So for example, <code>-straight 400 500 100 200</code> will fit straights for points between 400 and 500 meters from the start, then between 100 and 200 meters from the start. Note the further points are listed first so the fit of a straight to these points does not affect the distance to the nearer points. This is recommended.</p>
 
 </dd>
 <dt id="straightEnd-meters-1-or-more"><b><code>-straightEnd</code></b> &lt;meters&gt; (1 or more)</dt>
@@ -1355,10 +1425,10 @@ Pod::Usage   : for the -help option</code></pre>
 
 <dl>
 
-<dt id="outAndBack2"><b><code>-outAndBack</code></b></dt>
+<dt id="outAndBackLap1"><b><code>-outAndBackLap</code></b></dt>
 <dd>
 
-<p>This specifies that the route should loop around at the turn-around, then return, with a default lane shift.</p>
+<p>This specifies that the route should loop around at the turn-around, then return, then loop again, with a default lane shift.</p>
 
 </dd>
 </dl>
