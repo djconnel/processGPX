@@ -900,5 +900,5 @@ $gpx->tracks_add(
 my $fName = (defined $out) ? $out : "triangleRoute.gpx";
 warn("writing GPX to file $fName\n");
 open my $fout, ">$fName";
-print $fout $gpx->xml("1.1");
+print $fout $gpx->xml(ver=> "1.1");
 exit;
