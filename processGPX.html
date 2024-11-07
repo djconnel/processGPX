@@ -1050,9 +1050,9 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>For <code>-loop</code> courses, the amount to shift the start/finish forwards (positive) or backwards (negative).</p>
 
-<p>For loop courses, RGT Cycling puts the start/finish line 60 meters after the start of the GPX data. This is evidently to provide room for riders to line up before the start, although that is only necessary in point-to-point courses, so the reason for this is unclear. In circuit courses careful placement of the start/finish line, for example at the crest of a hill, or a specific distance from a final corner, is critical, so with this option you can carefully place the start point for the GPX file at the desired start/finish, then use &quot;<code>-loop -shiftSF -60</code>&quot; to move the start of the GPX file back 60 meters, putting the start where it should be.</p>
+<p>The default is <code>-shiftSF 0 -loop</code>. which retains the original GPX start.</p>
 
-<p>Since this is so commonly used in loop courses, the default is -60, so to disable it, use <code>-shiftSF 0 -loop</code>.</p>
+<p>This was needed with RGT courses to accomidate the 60 meter start zone. However, BikeTerra puts the S/F at the starting point for the GPX track, so no shift is needed.</p>
 
 <p>If you are processing a loop course in multiple steps, make sure to use &quot;<code>-shiftSF 0</code>&quot; on all steps other than one, otherwise each step will apply the default -60 meter shift. You want to apply this shift only once.</p>
 
