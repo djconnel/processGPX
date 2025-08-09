@@ -2950,7 +2950,12 @@ sub processStraight {
       $iEnd = $#$points;
     }
 
-    straightenPoints( points=> $points, isLoop=> $isLoop, startIndex=> $iStart, endIndex=> $iEnd);
+    # only straighten if there are at least 2 intermediate points
+    if ($iEnd > $iStart + 1) {
+      straightenPoints( points=> $points, isLoop=> $isLoop, startIndex=> $iStart, endIndex=> $iEnd);
+    } else {
+      note("skipping straight fit: segment spans fewer than two track points\n");
+    }
   }
 
   # these fields are now invalid
