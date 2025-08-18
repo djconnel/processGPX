@@ -4916,7 +4916,7 @@ for my $file ( @files ) {
 
     if (! defined  $rUTurn) {
       $rUTurn = 6;
-      note("setting -RUTurn 5 (meters) ...\n");
+      note("setting -RUTurn $rUTurn (meters) ...\n");
     }
 
     if (! defined $snap) {
