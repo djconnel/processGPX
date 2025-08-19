@@ -114,7 +114,7 @@ sub pointsAreClose {
   my $sMax = shift // 0.05;
   my $zMax = shift // 1;
   my $dz = ((defined $p1->{ele}) && (defined $p2->{ele})) ? ($p2->{ele} - $p1->{ele}) : 0;
-  return (abs($dz < $zMax) && (latlngDistance($p1, $p2) < $sMax));
+  return (abs($dz) < $zMax && (latlngDistance($p1, $p2) < $sMax));
 }
 
 sub latlngDotProduct {
