@@ -867,7 +867,7 @@ exit if ($noSave);
 #
 
 # calculate lats and lons
-my $rEarth      = 2e7 / $pi;    # earth radius in meters
+my $rEarth      = 20037392 / $pi;
 my $deg2rad     = $pi / 180;
 my $lat2y       = $rEarth * $deg2rad;
 

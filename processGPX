@@ -114,7 +114,7 @@ sub pointsAreClose {
   my $sMax = shift // 0.05;
   my $zMax = shift // 1;
   my $dz = ((defined $p1->{ele}) && (defined $p2->{ele})) ? ($p2->{ele} - $p1->{ele}) : 0;
-  return (abs($dz < $zMax) && (latlngDistance($p1, $p2) < $sMax));
+  return (abs($dz) < $zMax && (latlngDistance($p1, $p2) < $sMax));
 }
 
 sub latlngDotProduct {
@@ -2950,7 +2950,12 @@ sub processStraight {
       $iEnd = $#$points;
     }
 
-    straightenPoints( points=> $points, isLoop=> $isLoop, startIndex=> $iStart, endIndex=> $iEnd);
+    # only straighten if there are at least 2 intermediate points
+    if ($iEnd > $iStart + 1) {
+      straightenPoints( points=> $points, isLoop=> $isLoop, startIndex=> $iStart, endIndex=> $iEnd);
+    } else {
+      note("skipping straight fit: segment spans fewer than two track points\n");
+    }
   }
 
   # these fields are now invalid
@@ -3051,7 +3056,7 @@ sub autoStraighten {
       my $count = 0;
       my $k = $j - 1;
       last kLoop if ($k < $i + 2);
-      if (my $L2 = latlngDistance($points->[$i % @$points], $points->[$k % @$points]) > $minLength) {
+      if ((my $L2 = latlngDistance($points->[$i % @$points], $points->[$k % @$points])) > $minLength) {
         my ($avg2, $max2, $rms2) = calcDeviationStats( $points, $i, $k );
         if ($rms2 * $L < $rms * $L2) {
           $j = $k;
@@ -3065,7 +3070,7 @@ sub autoStraighten {
 
       $k = $i + 1;
       last kLoop if ($k > $j - 2);
-      if (my $L2 = latlngDistance($points->[$k % @$points], $points->[$j % @$points]) > $minLength) {
+      if ((my $L2 = latlngDistance($points->[$k % @$points], $points->[$j % @$points])) > $minLength) {
         my ($avg2, $max2, $rms2) = calcDeviationStats( $points, $k, $j );
         if ($rms2 * $L < $rms * $L2) {
           $j = $k;
@@ -4911,7 +4916,7 @@ for my $file ( @files ) {
 
     if (! defined  $rUTurn) {
       $rUTurn = 6;
-      note("setting -RUTurn 5 (meters) ...\n");
+      note("setting -RUTurn $rUTurn (meters) ...\n");
     }
 
     if (! defined $snap) {
