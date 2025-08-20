@@ -921,8 +921,10 @@ sub cropCorners {
     }
 
     # set corner points for new corner
-    $dc1 = ($points->[$cropCorners[$ic]]->{distance} - $cornerCrop) % $courseDistance;
-    $dc2 = ($points->[$cropCorners[$ic]]->{distance} + $cornerCrop) % $courseDistance;
+    $dc1 = $points->[$cropCorners[$ic]]->{distance} - $cornerCrop;
+    $dc1 -= $courseDistance * floor($dc1 / $courseDistance);
+    $dc2 = $points->[$cropCorners[$ic]]->{distance} + $cornerCrop;
+    $dc2 -= $courseDistance * floor($dc2 / $courseDistance);
   }
 
   pop @$points if ($pointAdded);
