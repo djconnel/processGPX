@@ -2871,7 +2871,7 @@ sub straightenPoints {
   my ($rx, $ry) = latlng2dxdy($points->[$iStart], $points->[$iEnd]);
 
   # if neither rx nor ry is nonzero, do nothing
-  next if (($rx == 0) && ($ry == 0));
+  return if (($rx == 0) && ($ry == 0));
   my $r2 = $rx ** 2 + $ry ** 2;
 
   # for each point, find the projection of the point on the segment
