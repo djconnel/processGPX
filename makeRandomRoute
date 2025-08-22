@@ -1,0 +1,1041 @@
+#! /usr/bin/env perl
+$0 =~ s(.*/)();
+use strict;
+use Geo::Gpx;
+
+use Getopt::Long;
+use POSIX qw(floor);
+
+my $pi = atan2(0, -1);
+my $pi2 = $pi / 2;
+my $twopi = 2 * $pi;
+
+# Bonneville Salt Flats
+my $lon0 = -113.5; 
+my $lat0 = 40.789;
+
+sub softMax {
+  my $x1 = shift() / 10;
+  my $x2 = shift() / 10;
+  my $u =
+    ($x1 > $x2 + 10) ? $x1 :
+    ($x2 > $x1 + 10) ? $x2 :
+    $x1 + log(exp($x2 - $x1) + 1);
+  return 10 * $u;
+}
+
+sub xyDistance {
+  my $p1 = shift;
+  my $p2 = shift;
+  return sqrt( ($p1->[0] - $p2->[0]) ** 2 + ($p1->[1] - $p2->[1]) ** 2 );
+}
+
+sub xyDirection {
+  my $p1 = shift;
+  my $p2 = shift;
+  return atan2( $p2->[1] - $p1->[1], $p2->[0] -$p1->[0] );
+}
+
+sub deltaAngle {
+  my $dir1 = shift;
+  my $dir2 = shift;
+  my $delta = $dir2 - $dir1;
+  $delta -= $twopi * floor(0.5 + $delta / $twopi);
+  return $delta;
+}
+
+sub xyCurvature {
+  my $p1 = shift;
+  my $p2 = shift;
+  my $p3 = shift;
+  my $dir1 = xyDirection($p1, $p2);
+  my $dir2 = xyDirection($p2, $p3);
+  my $d = (xyDistance($p1, $p2) + xyDistance($p2, $p3)) / 2;
+  die("ERROR calculating curvature: coincident points\n") if $d <= 0;
+  my $c = deltaAngle($dir1, $dir2) / $d;
+  return $c;
+}
+
+sub pointsColinear {
+  my ($p1, $p2, $p3) = @_;
+  my $dx1 = ($p2->[0] - $p1->[0]);
+  my $dx2 = ($p3->[0] - $p2->[0]);
+  my $dy1 = ($p2->[1] - $p1->[1]);
+  my $dy2 = ($p3->[1] - $p2->[1]);
+  return (
+          ( ($dy1 == 0) && ($dx1 == 0) ) ||
+          ( ($dy2 == 0) && ($dx2 == 0) ) ||
+          ( abs($dy1 * $dx2 - $dx1 * $dy2) / ($dx1 ** 2 + $dy1 ** 2 + $dx2 ** 2 + $dy2 ** 2) < 0.001 )
+         );
+}
+
+# return the tangent of half the angle subtended by p1 to p2, then p3 to p4
+sub tanAngle {
+  my ($p1, $p2, $p3, $p4) = @_;
+  my $dx1 = ($p2->[0] - $p1->[0]);
+  my $dx2 = ($p4->[0] - $p3->[0]);
+  my $dy1 = ($p2->[1] - $p1->[1]);
+  my $dy2 = ($p4->[1] - $p3->[1]);
+  my $r1  = xyDistance($p1, $p2);
+  my $r2  = xyDistance($p3, $p4);
+  my $r1r2 = $r1 * $r2;
+  # cosine and sine of turning angle
+  my $c   = ($dx1 * $dx2 + $dy1 * $dy2) / $r1r2;
+  my $s   = ($dx1 * $dy2 - $dx2 * $dy1) / $r1r2;
+  # we want half of the complement of the turning angle
+  # cos(π - theta) = -cos(theta)
+  # sin(π - theta) = +sin(theta)
+  my $a   = atan2($s, -$c) / 2;
+  return undef if ($a == 0);
+  return sin($a) / cos($a);
+}
+
+sub xyAverage  {
+  my $p1 = shift;
+  my $p2 = shift;
+  return [($p1->[0] + $p2->[0]) / 2, ($p1->[1] + $p2->[1]) / 2];
+}
+
+sub xyInterpolate  {
+  my $p1 = shift;
+  my $p2 = shift;
+  my $f  = shift // 0.5;
+  my $g = 1 - $f;
+  return [$g * $p1->[0] + $f * $p2->[0], $g * $p1->[1] + $f * $p2->[1]];
+}
+
+sub p2xy {
+  my %vars = @_;
+  my $p = $vars{point} // die;
+  my $L = $vars{L} // 100;
+  my $x = ($p->[0] + $p->[1] / 2) * $L * 2 / sqrt(3);
+  my $y = $p->[1] * $L;
+  return ($x, $y);
+}
+
+sub xy2p {
+  my %vars = @_;
+  my $xy = $vars{xy} // die;
+  my ($x, $y) = @$xy;
+  my $L = $vars{L} // 100;
+  my $v = $y / $L;
+  # x/L = (u + v/2) * (2/sqrt(3))
+  # (sqrt(3)(x/L) = (2u + v)
+  # (sqrt(3)(x/L) -v = 2u
+  # u = (sqrt(3)/2)(x/L) - v/2
+  # u = ((sqrt(3)/2)x - y/2)/L
+  my $u = ($x * sqrt(3) - $y) / (2 * $L);
+  return [$u, $v];
+}
+
+sub N2Total {
+  my $N = shift;
+  return ( $N * ($N + 1) / 2 );
+}
+
+sub splineInterpolation {
+  my $p1 = shift;
+  my $p2 = shift;
+  my $p3 = shift;
+
+  my @points;
+  my $nPoints = 20;
+  for my $i ( 1 .. $nPoints - 1 ) {
+    my $fSpline = $i / $nPoints;
+    my @p;
+    for my $coord ( 0, 1 ) {
+      $p[$coord] = (1 - $fSpline) ** 2 * $p1->[$coord] + 2 * $fSpline * (1 - $fSpline) * $p2->[$coord] + $fSpline ** 2 * $p3->[$coord];
+    }
+    push @points, \@p;
+  }
+  return @points;
+}
+
+sub rNorm {
+  return rand() + rand() + rand() + rand() +
+    rand() + rand() + rand() + rand() +
+      rand() + rand() + rand() + rand() - 6;
+}
+
+sub randomizeList {
+  my @a = @_;
+  my @r = ();
+  while (@a) {
+    my $i = int(rand() * @a);
+    push @r, $a[$i];
+    splice(@a, $i, 1);
+  }
+  return @r;
+}
+
+
+
+# call this to generate a random altitude profile
+sub randomizeAltitude {
+  my %var = @_;
+  my $points = $var{points};
+  my $gMax   = $var{gMax} // 0.12;
+  my $RG     = $var{RG} // 0;      # reduce gradient where road is tighter than this radius
+  my $zMin   = $var{zMin} // 0;
+  my $kPow   = $var{kPow} // 1.3;
+  my $k0     = $var{k0} // 0;
+  my $kMax   = $var{kMax} // 50;
+  my $zCrop  = $var{zCrop} // 0;   # amount of altitude to crop to fill in valleys
+  my $p2p    = $var{p2p} // 0;     # if we have a point-to-point (non-periodic)
+  my $gained = $var{gained};       # net gained altitude (only point-to-point)
+  my $bow    = $var{bow};          # 2nd order altitude adjustment to center of route
+
+  warn("randomizing altitude...\n");
+  warn("zMin = $zMin\n");
+
+  # add first point to end if not already
+  if ((! $p2p) && (xyDistance($points->[-1], $points->[0]) > 0.01)) {
+    my @pLast = @{$points->[0]};
+    push @$points, \@pLast;
+  }
+
+  my @ss = (0);
+  my $s = 0;
+  for my $i ( 1 .. $#$points ) {
+    $s += xyDistance($points->[$i - 1], $points->[$i]);
+    push @ss, $s;
+  }
+
+  my $courseDistance = $ss[-1];
+  $courseDistance += xyDistance($points->[-1], $points->[0]) unless ($p2p);
+  my $period = $courseDistance * ($p2p ? 2 : 1);
+  warn("course distance = $courseDistance\naltitude period = $period\n");
+
+  # periodic boundary conditions: cosine (k0 x), k0 = 2pi / L
+  # peak grade = 2pi a0 / L => a0 = L gmax / 2pi
+  # start with second mode
+  my $a0 = $gMax * $period / $twopi;
+  my @a = (0, -$a0);
+  my @phase = (0, 0);
+  my $sum = ($a0 * $twopi / $period) ** 2;
+  $kMax = 50 if ($kMax < 1);
+  for my  $k ( 2 .. $kMax ) {
+    if ($k0 > 0) {
+      $a[$k] = $a0 * rNorm() / (1 + ($k / $k0) ** $kPow);
+    } else {
+      $a[$k] = $a0 * rNorm() / $k ** $kPow;
+    }
+    $phase[$k] = $twopi * rand();
+    $sum += ($a[$k] * $k * $twopi / $period) ** 2;
+  }
+  warn("sqrt(sum) = ", sqrt($sum), "\n");
+  my $f = $gMax / sqrt($sum);
+  for my $a ( @a ) {
+    $a *= $f;
+  }
+
+  my @zs = ();
+  my @zNews = ();
+  for my $i ( 0 .. $#$points ) {
+    my $z = 0;
+    my $theta0 = $twopi * $ss[$i] / $period;
+    for my $k ( 1 .. $#a  ) {
+      $z += $a[$k] * cos($phase[$k] + $k * $theta0);
+    }
+    $zs[$i] = $z;
+    if ($i > 0) {
+      my $ds = $ss[$i] - $ss[$i - 1];
+      my $dz = $zs[$i] - $zs[$i - 1];
+      my $g = $dz / (0.001 + $ds);
+      # clamp g
+      $g = ($g <=> 0) * (($gMax ** -4 + $g ** -4) ** -0.25);
+      # adjust g for curvature
+      if (($RG > 0) && ((! $p2p) || (($i >0) && ($i < $#$points)))) {
+	my $c = xyCurvature($points->[$i - 1], $points->[$i], $points->[($i + 1) % @$points]);
+	$g *= exp(-$RG * abs($c));
+      }
+      $zNews[$i] = $zNews[$i - 1] + $g * $ds;
+    } else {
+      $zNews[$i] = $zs[0];
+    }
+  }
+
+
+  @zs = @zNews;
+
+  if ($p2p) {
+    # add gained (point to point only)
+    if (defined $gained) {
+      my $deltaZ = $gained + $zs[0] - $zs[-1];
+      for my $i ( 0 .. $#zs ) {
+	my $f = $ss[$i] / $courseDistance;
+	$zs[$i] += $deltaZ * $f;
+      }
+    }
+
+    if (defined $bow) {
+      for my $i ( 0 .. $#zs ) {
+	my $f = $ss[$i] / $courseDistance;
+	$zs[$i] += 4 * $bow * $f * (1 - $f)
+      }
+    }
+
+  } else {
+    # now adjust altitudes to match up first and last point (laps only)
+    my $gFix = ($zs[0] - $zs[-1]) / ($ss[-1] - $ss[0]);
+    for my $i ( 0 .. $#zs ) {
+      $zs[$i] += $gFix * $ss[$i];
+    }
+  }
+
+  # calculate base altitude
+  my $z0;
+  for my $z ( @zs ) {
+    $z0 = $z if ((! defined $z0) || ($z < $z0));
+  }
+
+  # crop altitude
+  if ((defined $zCrop) && ($zCrop > 0)) {
+    my $z0New;
+    my $z1 = $z0 + $zCrop;
+    warn("cropping altitude by $zCrop...\n");
+
+    for my $i ( 0 .. $#zs ) {
+      my $z = softMax($z1, $zs[$i]);
+      $z0New = $z unless ((defined $z0New) && ($z > $z0New));
+      $zs[$i] = $z;
+    }
+    $z0 = $z0New;
+  }
+
+  # set altitude with desired minimum
+  my $dz = $zMin - $z0;
+  for my $i ( 0 .. $#zs ) {
+    $points->[$i]->[2] = $zs[$i] + $dz;
+  }
+
+  pop @$points;
+}
+
+
+# point (u, v) : u + v <= N, can connect to, in order,
+# around the clock:
+#    point (u, v+1)
+#    point (u+1, v)
+#    point (u+1, v-1)
+#    point (u, v-1)
+#    point (u-1, v)
+#    point (u-1, v+1)
+
+sub pointNeighbors {
+  my %vars = @_;
+  my $point = $vars{point} // die;
+  my $N = $vars{N} // die;
+  my ($u, $v) = @$point;
+
+  my @ns = ();
+
+  push @ns, [$u, $v + 1] if ($u + $v < $N - 1);               # 1 o'clock
+  push @ns, [$u + 1, $v] if ($u + $v < $N - 1);               # 3 o'clock
+  push @ns, [$u + 1, $v - 1] if (($v > 0) && ($u < $N - 1));  # 5 o'clock
+  push @ns, [$u, $v - 1] if ($v > 0);                         # 7 o'clock
+  push @ns, [$u - 1, $v] if ($u > 0);                         # 9 o'clock
+  push @ns, [$u - 1, $v + 1] if (($u > 0) && ($v < $N - 1));  # 11 o'clock
+
+  return @ns;
+}
+
+# check whether points are adjacent, where points
+# are represented by their coordinates [u, v]
+sub arePointsAdjacent {
+  my $p1 = shift;
+  my $p2 = shift;
+  my ($u1, $v1) = @$p1;
+  my ($u2, $v2) = @$p2;
+  return(
+         (($v1 == $v2) && (abs($u1 - $u2) <= 1)) ||
+         (($u1 == $u2) && (abs($v1 - $v2) <= 1)) ||
+         (($u1 == $u2 + 1) && ($v2 == $v1 + 1))  ||
+         (($u2 == $u1 + 1) && ($v1 == $v2 + 1))
+        );
+}
+
+
+sub printPath {
+  my %vars = @_;
+  my $fp = $vars{fp};
+  my $path = $vars{path} // die;
+  my $coords = $vars{coords} // die;
+  my $L = $vars{L} // 1;
+
+  if (defined $fp) {
+    print $fp "u v x y\n";
+  } else {
+    print "u v x y\n";
+  }
+  for my $p ( @$path ) {
+    my ($x, $y) = p2xy(point=> $coords->[$p], L=> $L);
+    if (defined $fp) {
+      print $fp "@{$coords->[$p]} $x $y\n";
+    } else {
+      print "@{$coords->[$p]} $x $y\n";
+    }
+  }
+}
+
+
+#
+# set the coordinates of each point
+#
+sub makeCoords {
+  my %var = @_;
+  my $N = $var{N} // 10;
+  my $coords = $var{coords} // die;
+  my $index = $var{index} // die;
+  my $neighbors = $var{neighbors} // die;
+
+  for my $u ( 0 .. $N - 1 ) {
+    for my $v ( 0 .. $N - $u - 1 ) {
+      push @$coords, [$u, $v];
+      $index->[$u]->[$v] = $#$coords;
+    }
+  }
+
+  # find neighbors for each point
+  @$neighbors = ();
+  for my $c ( @$coords ) {
+    my @ns  = map { $index->[$_->[0]]->[$_->[1]] } pointNeighbors(N=> $N, point=> $c);
+    push @$neighbors, \@ns;
+  }
+}
+
+
+#
+# given an index to the path of index,
+# replace the sequence index => index + 1
+# with the sequence index = p => index + 1
+# where p is an index to the coords list (point index)
+# and "index" is the index in the path sequence
+#
+sub addPoint {
+  my %vars = @_;
+  my $index  = $vars{index} // die;
+  my $p      = $vars{point} // die;
+  my $path   = $vars{path} // die;
+  my $onPath = $vars{onPath} // die;
+
+  # add the new point in between index and index + 1
+  splice( @$path, $index + 1, 0, ($p) );
+
+  # update onPath
+  $onPath->[$p] = 1;
+}
+
+#
+# given an index to the path of index,
+# remove the point of index i from the path
+#
+sub removePoint {
+  my %vars = @_;
+  my $index  = $vars{index} // die;
+  my $path   = $vars{path} // die;
+  my $onPath = $vars{onPath} // die;
+
+  # update onPath
+  $onPath->[$path->[$index]] = 0;
+
+  # remove the point
+  splice( @$path, $index, 1)
+}
+
+#
+# return a list of unconnected neighbors for each point
+#
+sub unconnectedNeighbors {
+  my %vars = @_;
+  my $onPath = $vars{onPath} // die;
+  my $neighbors = $vars{neighbors} // die;
+  my $point = $vars{point} // die;
+
+  my @ns = ();
+  for my $n ( @{$neighbors->[$point]} ) {
+    push @ns, $n
+      unless ($onPath->[$n]);
+  }
+  return \@ns;
+}
+
+#
+# pick a path thru nodes with neighbors
+#
+sub makePath {
+  my %vars = @_;
+  my $N = $vars{N} // 5;
+  my $neighbors = $vars{neighbors} // die;
+  my $coords = $vars{coords} // die;
+  my $path = $vars{path} // die;
+  my $onPath = $vars{onPath} // die;
+
+  die "road must have at least two points per side\n"
+    if ($N < 2);
+
+  my $unconnected = 0;
+
+  for my $i ( 0 .. $#$coords ) {
+    unless( $onPath->[$i] ) {
+      $unconnected ++;
+      $onPath->[$i] = 0;
+    }
+  }
+  for my $i ( 0 .. $#$path ) {
+    $unconnected -- unless( $onPath->[$path->[$i]] );
+    $onPath->[$path->[$i]] = 1;
+  }
+
+  warn("unconnected = $unconnected\n");
+
+  my $count = 0;
+ pathLoop: while ($unconnected > 0) {
+    $count ++;
+
+    # find candidate points to add
+    # format: index of first point in path, index of new point in coordinate list
+    my @candidates = ();
+    for my $i ( 0 .. $#$path ) {
+      for my $n ( @{unconnectedNeighbors(point=> $path->[$i], neighbors=> $neighbors, onPath=> $onPath)} ) {
+        push @candidates, [$i, $n]
+          if ( arePointsAdjacent( $coords->[$n], $coords->[$path->[($i + 1) % @$path]] ) );
+      }
+    }
+
+    # no possible connections?  Algorithm failed. try untangling knots
+    # search for points which are neighbors of candidates
+    unless (@candidates) {
+      my @newPath = @$path;
+      # step thru all points
+      my @badPoints = grep { ! $onPath->[$_] } ( 0 .. $#$coords );
+      for my $badPoint ( @badPoints ) {
+        my $removedPoints = 0;
+        # empty point: go thru its neighbors
+        warn("trying to removed points touching $badPoint ( @{$coords->[$badPoint]} )\n");
+        warn("neighbors = @{$neighbors->[$badPoint]}\n");
+        for my $n ( @{$neighbors->[$badPoint]} ) {
+          if ($onPath->[$n]) {
+            # find the point in the path
+            for my $j ( 0 .. $#newPath ) {
+              if (
+                  ($newPath[$j] == $n) &&
+                  arePointsAdjacent( $coords->[$newPath[$j - 1]], $coords->[$newPath[($j + 1) % @newPath]] )
+                 ) {
+                removePoint(path=> \@newPath, index=> $j, onPath=> $onPath);
+                $removedPoints ++;
+                $unconnected ++;
+                warn("removing point $n ($j in path) from the new path!\n");
+              }
+            }
+          }
+        }
+        if ($removedPoints == 0) {
+          printPath(path=> $path, coords=> $coords);
+          die ("was unable to repair hole in structure!\n");
+        }
+      }
+      $path = \@newPath;
+      warn("blasted hole in path to try and untie knots\n");
+      next pathLoop;
+    }
+
+    # pick the winner
+    my $winner = $candidates[int(rand() * @candidates)];
+
+    # add it in
+    addPoint(path=> $path, index=> $winner->[0], point=> $winner->[1], onPath=> $onPath);
+
+    # update statistics
+    $unconnected --;
+  }
+  warn("unconnected = $unconnected\n");
+}
+
+# make route from path
+sub makeRoute {
+  my %vars = @_;
+  my $L = $vars{L} // 100;
+  my $path = $vars{path} // die;
+  my $coords = $vars{coords} // die;
+  my $hexagon = $vars{hexagon} // 0;
+  my $N = $vars{N} // die;
+  my $gMax = $vars{gMax} // die;
+  my $RG = $vars{RG} // 0;
+  my $kPow = $vars{kPow} // die;
+  my $k0 = $vars{k0} // 0;
+  my $kMax = $vars{kMax} // 0;
+  my $maxSpacing = $vars{maxSpacing} // 0;
+  my $randomizeAltitude = $vars{randomizeAltitude} // 1;
+  my $zMin = $vars{zMin} // 10;
+  my $zCrop = $vars{zCrop} // 0;
+  my $p2p = $vars{p2p} // 0;
+  my $gained = $vars{gained};
+  my $bow = $vars{bow};
+  my $useArcs = $vars{useArcs} // 1;
+
+
+  # first set of points, before interpolation
+  my @points1 = ();
+  for my $p ( @$path ) {
+    my ($x, $y) = p2xy(point=> $coords->[$p], L=> $L);
+    push @points1, [$x, $y]; 
+  }
+
+  # next set of points: interpolate @ 25%, 75% of intervals
+  my @points2 = ();
+
+  # set how far to curve the corners: can't be more than 1/2
+  # 1/3 @ L = 30
+  my $f1 = 100 / $L;
+  my $f2 = 0.5;
+  my $fCorner = 1 / (1/$f1 + 1/$f2);
+  warn("fCorner = $fCorner\n");
+
+  # set up expanded list of points with interpolated turning points
+  my $i0;
+  if ($p2p) {
+    push @points2, $points1[0];
+    $i0 = 1;
+  } else {
+    $i0 = 0;
+  }
+  for my $i ( $i0 .. $#points1 ) {
+    my $p1 = $points1[$i - 1];
+    my $p2 = $points1[$i];
+    my $p3 = xyInterpolate($p1, $p2, $fCorner);
+    my $p4 = xyInterpolate($p1, $p2, 1 - $fCorner);
+
+    push @points2, $p3, $p4, $p2;
+  }
+
+  # on loop shift first two points to end (they're associated with last point)
+  # this moves points interpolating last point to this point to end of the route on loops
+  # on point-to-point, these points remain, and we'll add in the first point
+  if (! $p2p) {
+    push @points2, shift @points2;
+    push @points2, shift @points2;
+  }
+
+  # points (fractions representative not actual)
+  #  loop:
+  #   0: 1st point
+  #   1: 1/3 to 2nd point
+  #   2: 2/3 to 2nd point
+  #   3: 2nd point
+  #   ...
+  #  3N - 3: last point
+  #  3N - 2: 1/3rd to 1st point
+  #  3N - 1: 2/3rd to 1st point
+  #
+  #  point-to-point
+  #   0: 1st point
+  #   1: 1/3 to 2nd point
+  #   2: 2/3 to 2nd point..
+  #   3: 2nd point (distance L from 1st point)
+  #   4: 1/3 to 3rd point
+  #   5: 2/3 to 3rd point
+  #   6: 3rd point (distance L from 2nd point)
+  #   ...
+  #   3N - 3: last point
+  #
+  #  radius of turn:
+  #    60 deg turn: R = L / 3 sqrt(3)
+  #    120 deg turn: R = L / sqrt(3)
+  #
+  #  arc fit:initial direction from point 1 to 2
+  #    initial direction from point 1 to 2
+  #    final direction from point 4 to 5
+  #    fit circle from points 2 to 4
+  #    this only works because point spacing is constant
+  #
+
+  my @points = ();
+
+  if ($p2p) {
+    push @points, $points2[0];
+  }
+  # process points in triplets
+  for (my $i = 0; $i <= $#points2; $i += 3 ) {
+    # arc connects points 1 and 3: point 2 used for interpolation only (discarded)
+    my $p0 = $points2[$i - 2];              # before preceding point (f along interval)
+    my $p1 = $points2[$i - 1];              # preceding point (1 - f along interval)
+    my $p2 = $points2[$i];                  # present point (apex)
+    my $p3 = $points2[($i + 1) % @points2]; # next point (f along interval
+    my $p4 = $points2[($i + 2) % @points2]; # beyond next point (1 - f along interval)
+
+    if (
+        ((($i == 0) || ($i == $#points2)) && $p2p) ||
+        pointsColinear($p1, $p2, $p3)
+       ) {
+      push @points, $p2;
+    } else {
+      if ($useArcs) {
+        # interval between first two points = (1 - 2f) LSide
+        my $r01 = xyDistance($p0, $p1);
+        # cosine of heading into turn
+        my $c01 = ($p1->[0] - $p0->[0]) / $r01;
+        # sin of heading into turn
+        my $s01 = ($p1->[1] - $p0->[1]) / $r01;
+        # interval between first next points = f LSide
+        my $r12 = xyDistance($p1, $p2);
+        # interval between last two points
+        my $r34 = xyDistance($p3, $p4);
+        # cosine of heading out of turn
+        my $c34 = ($p4->[0] - $p3->[0]) / $r34;
+        # sin of heading out of turn
+        my $s34 = ($p4->[1] - $p3->[1]) / $r34;
+
+        # headings
+        my $dir01 = atan2($s01, $c01);
+        my $dir34 = atan2($s34, $c34);
+        # change in angle, from -pi to +pi
+        my $ddir = $dir34 - $dir01;
+        $ddir -= $twopi * ($ddir <=> 0) if abs($ddir) > $pi;
+        # sign of turn
+        my $sign = $ddir <=> 0;
+        # find radius of turn
+        my $R = $r12 * abs(tanAngle($p0, $p1, $p3, $p4));
+        # pivot point
+        my $xc = $p1->[0] - $sign * $s01 * $R;
+        my $yc = $p1->[1] + $sign * $c01 * $R;
+        # number of points in turn
+        my $nPoints = int(1 + 10 * abs($ddir));
+	push @points, $p1;
+        for my $i ( 1 .. $nPoints - 1) {
+          my $fTurn = $i / $nPoints;  # fraction of distance in turn
+          my $dir = $dir01 + $ddir * $fTurn;
+          my $cDir = cos($dir);
+          my $sDir = sin($dir);
+          # points relative to povit point
+          my $x = $xc + $sign * $sDir * $R;
+          my $y = $yc - $sign * $cDir * $R;
+          push @points, [$x, $y];
+        }
+	push @points, $p3;
+      } else {
+        # old code: splines
+	push @points, $p1;
+        push @points, splineInterpolation($p1, $p2, $p3);
+	push @points, $p3;
+      }
+    }
+  }
+
+  # interpolation, if requested (for altitude)
+  if ( @points && ($maxSpacing > 0) ) {
+    warn("interpolation...\n");
+    my @pNew = ();
+    my $iMax = $#points;
+    for my $i ( 0 .. $iMax ) {
+      my $p1 = $points[$i];
+      my $p2 = $points[($i + 1) % @points];
+      push @pNew, $p1;
+      if ((! $p2p) || ($i < $iMax)) {
+        my $ps = xyDistance( $p1, $p2 );
+        my $npoints = int( $ps / $maxSpacing + 0.5);
+        # interpolate points...
+        for my $n ( 1 .. $npoints - 1 ) {
+          push @pNew,  xyInterpolate( $p1, $p2, $n / $npoints);
+        }
+      }
+    }
+    @points = @pNew;
+  }
+
+  # add altitude: peak grade of 10%
+  warn("adding altitude...\n");
+
+  # construct altitude profiles
+  if ( $randomizeAltitude ) {
+    randomizeAltitude(
+                      points=> \@points,
+                      gMax=> $gMax,
+                      RG=> $RG,
+                      zMin => $zMin,
+                      kPow=> $kPow,
+                      k0=> $k0,
+                      kMax=> $kMax,
+                      zCrop=> $zCrop,
+                      p2p=> $p2p,
+                      gained=> $gained,
+		      bow => $bow,
+		      zMin=> $zMin,
+                     );
+  } else {
+    # altitude, grade peaks at north:
+    # my $yMax = $L * $N;
+    # my $dzdyMax = 0.1 * 2 / sqrt(3);
+    # my $a = ( $dzdyMax / $yMax ** 2 ) / 3;
+
+    # altitude peaks at center: for triangle
+    my $a = 4 * 0.05 * $L / ($N - 1) ** 2;
+
+    # for hexagon
+    my $aHex = 160 * 0.05 * $L / ($N - 1) ** 5;
+
+    warn("a = $a\n");
+    for my $p ( @points ) {
+      # my $z = $a * $p->[1] ** 3;
+      my $uv = xy2p(xy=> $p, L => $L);
+      my ($u, $v) = @$uv;
+      my $w = $N - 1 - $u - $v;
+      my $z;
+      if ( $hexagon ) {
+        my $Nhex = int(($N / 3) -1);
+        my $u2 = $N - 1 - $Nhex - $u;
+        my $v2 = $N - 1 - $Nhex - $v;
+        my $w2 = $N - 1 - $Nhex - $w;
+        $z = $u * $v * $w * $u2 * $v2 * $w2 * $aHex;
+      } else {
+        $z = $u * $v * $w * $a;
+      }
+      $p->[2] = $z;
+    }
+    # set zMin
+    my $p0 = $points[0]->[2];
+    for my $p ( @points ) {
+      $p0 = $p->[2]
+	if ($p->[2] < $p0);
+    }
+    my $dz = $zMin - $p0;
+    for my $p ( @points ) {
+      $p->[2] += $dz;
+    }
+  }
+
+  # copy last point
+  push @points, $points[0] unless($p2p);
+
+  print "x y z u v s\n";
+  my $s = 0;
+  my $p0;
+  for my $p ( @points ) {
+    my $uv = xy2p(xy=> $p, L=> $L);
+    $s += xyDistance($p0, $p) if (defined $p0);
+    print "@$p @$uv $s\n";
+    $p0 = $p;
+  }
+  warn("total course distance = ", sprintf("%.4f", $s / 1000), " km\n");
+
+  return \@points;
+}
+
+
+my $L = 100;
+my $N = 18;
+my $noSave = 0;
+my $out;
+my $hexagon = 0;  # whether to make it a hexagon rather than a triangle
+my $hollow = 0;   # whether the center is hollow
+my $gMax = 0.12;
+my $RG;           # characteristic radius for grade reduction
+my $randomizeAltitude = 0;
+my $kPow = 1.3;
+my $k0 = 0;
+my $kMax = 50;
+my $maxSpacing = 0;
+my $zMin = 1290;   # Bonneville Salt Flats
+my $zCrop = 0;
+my $p2p;
+my $gained;
+my $bow;
+my $loop;
+my $seed;
+my $useArcs;
+my $useSplines;
+
+GetOptions (
+	    "lon0=f"   => \$lon0,
+	    "lat0=f"   => \$lat0,
+            "L=f"      => \$L,
+            "N=i"      => \$N,
+            "noSave"   => \$noSave,
+            "out=s"    => \$out,
+            "hexagon"  => \$hexagon,
+            "hollow"   => \$hollow,
+            "maxGradient=f" => \$gMax,
+            "gMax=f"     => \$gMax,
+	    "RG=f"     => \$RG,
+	    "RGrade=f" => \$RG,
+            "randomizeAltitude" => \$randomizeAltitude,
+            "kPower=f" => \$kPow,
+            "k0=f"     => \$k0,
+            "kMax=i"   => \$kMax,
+            "zMin=f"   => \$zMin,
+            "zCrop=f"  => \$zCrop,
+            "maxSpacing=f" => \$maxSpacing,
+            "pointToPoint" => \$p2p,
+            "p2p"          => \$p2p,
+            "gained=f"     => \$gained,
+	    "bow=f"        => \$bow,
+            "loop"         => \$loop,
+	    "useArcs"      => \$useArcs,
+	    "useSplines"   => \$useSplines,
+	    "seed=i"       => \$seed,
+           )
+  or die("illegal options specified!\n");
+
+
+$useArcs //= (! $useSplines);
+
+die "minimum N = 3 points\n" if ($N < 3);
+
+srand($seed) if (defined $seed);
+
+
+# if gained specified, then it's point-to-point
+$p2p = 1 if ((defined $gained) && ($gained != 0));
+
+
+# whether it's a point-to-point
+$p2p //= (defined $loop) ? (! $loop) : 0;
+
+# hexagons should be divisible by 3
+warn("hexagons are are best if points are divisible by 3\n") if ($hexagon || ($N % 3 > 0));
+warn("hollow hexagons are are best if points are divisible by 9\n") if (($hollow && $hexagon) || ($N % 9 > 0));
+warn("hollow triangles are are best if points are divisible by 3\n") if (($hollow && (! $hexagon)) || ($N % 3 > 0));
+
+warn("total points in domain = ", N2Total($N), "\n");
+
+my $coords = [];
+my $index = [];
+my $neighbors = [];
+my $onPath = [];
+
+# create list of points
+makeCoords(N=> $N, coords=> $coords, index=> $index, neighbors=> $neighbors);
+
+# hollow: middle third is excluded
+if ($hollow) {
+  my $Nhollow = int($N / 3);
+  my $Nhollow2 = int($Nhollow / 3);
+  my $duv = int(2 * $Nhollow / 3);
+  for my $u ( 0 .. $Nhollow - 1) {
+    for my $v ( 0 .. $Nhollow - 1 - $u) {
+      # for hexagons, deal w/ corners
+      next
+        if ($hexagon &&
+            (
+             ($u + $v < $Nhollow2) ||
+             ($v > $Nhollow - $Nhollow2 - 1) ||
+             ($Nhollow - 1 - $u < $Nhollow2)
+            )
+           );
+      $onPath->[$index->[$u + $duv]->[$v + $duv]] = 1;
+    }
+  }
+}
+
+
+# if it's a hexagon, exclude nodes outside the hexagon
+if ($hexagon) {
+  my $Nhex = int($N / 3) - 1;
+  for my $u ( 0 .. $Nhex - 1) {
+    for my $v ( 0 .. $Nhex - 1 - $u) {
+     $onPath->[$index->[$u]->[$v]] = 1;
+     $onPath->[$index->[$u]->[$N - $Nhex + $v]] = 1;
+     $onPath->[$index->[$N - $Nhex + $u]->[$v]] = 1;
+    }
+  }
+}
+
+# initial path
+my $u1 = int($N / 2) - 1;
+
+my $path;
+if ($p2p) {
+  # open path
+  for my $v ( 0 .. $N - 1 ) {
+    # if we're up against a hollow, quit
+    if ($onPath->[$index->[$u1]->[$v]]) {
+      last;
+    }
+    push @$path, $index->[$u1]->[$v];
+  }
+} else {
+  # closed path
+  my $u2 = $u1 + 1;
+  $path = [
+           $index->[$u1]->[0],
+           $index->[$u2]->[0],
+           $index->[$u1]->[1],
+          ];
+}
+
+# we need at least 2 points in the initial path
+die("unable to create an initial path: increase N = $N\n")
+  if (@$path < 2);
+
+warn("path:  " . join(", ", map( { "(" . join(", ", @{$coords->[$_]}) . ")" } @$path )) . "\n");
+
+makePath(N=> $N, coords=> $coords, neighbors=> $neighbors, path=> $path, onPath=> $onPath);
+
+
+# create route, which includes rounding corners
+my $points = makeRoute(
+                       L=> $L,
+                       N=> $N,
+                       coords=> $coords,
+                       gMax=> $gMax,
+                       RG=> $RG,
+                       hexagon=> $hexagon,
+                       kPow => $kPow,
+                       k0 => $k0,
+                       kMax => $kMax,
+                       maxSpacing => $maxSpacing,
+                       path=> $path,
+                       randomizeAltitude => $randomizeAltitude,
+                       zMin  => $zMin,
+                       zCrop => $zCrop,
+                       p2p => $p2p,
+                       gained => $gained,
+		       bow => $bow,
+		       useArcs => $useArcs,
+		       useSplines => $useSplines,
+                      );
+
+
+exit if ($noSave);
+
+# # # # # # # # # # # # # # # #
+#
+# DONE
+#
+
+# calculate lats and lons
+my $rEarth      = 20037392 / $pi;    # earth radius in meters
+my $deg2rad     = $pi / 180;
+my $lat2y       = $rEarth * $deg2rad;
+
+my $c = cos($deg2rad * $lat0);
+my @GPXpoints;
+
+for my $i ( 0 .. $#$points ) {
+  my $lon = $lon0 + $points->[$i]->[0] / ($lat2y * $c);
+  my $lat = $lat0 + $points->[$i]->[1] / $lat2y;
+  my $ele = $points->[$i]->[2];
+  push @GPXpoints, { lat => $lat, lon => $lon, ele => $ele };
+}
+
+my $gpx  = Geo::Gpx->new();
+
+
+my $name = ($hexagon) ? "hexagonRoute" : "randomRoute";
+
+$gpx->tracks_add(
+		{
+		 'name' => $name,
+		 'segments' => [
+				{
+				 'points' => \@GPXpoints
+				}
+			       ]
+		}
+	       );
+
+my $fName = (defined $out) ? $out : "randomRoute.gpx";
+warn("writing GPX to file $fName\n");
+open my $fout, ">$fName";
+print $fout $gpx->xml(ver=> "1.1");
+exit;
