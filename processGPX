@@ -5144,7 +5144,7 @@ for my $file ( @files ) {
     $points =
       snapPoints(
                  points=> $points,
-                 snap=> $points,
+                 snap=> $snap,
                  snapDistance=> $snapDistance,
                  snapAltitude=> $snapAltitude,
                  snapTransition=> $snapTransition,
@@ -5216,7 +5216,7 @@ for my $file ( @files ) {
     $points =
       snapPoints(
                  points=> $points,
-                 snap=> $points,
+                 snap=> $snap,
                  snapDistance=> $snapDistance,
                  snapAltitude=> $snapAltitude,
                  snapTransition=> $snapTransition,
