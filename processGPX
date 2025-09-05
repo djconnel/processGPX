@@ -1606,7 +1606,7 @@ sub doAutoSpacing {
             $i2 ++;
             next iLoop
               if (((! $isLoop) && ($i2 > $#$points)) || ($i2 == $i));
-            $i1 %= scalar(@$points);
+            $i2 %= scalar(@$points);
           }
           # determine the angle between the points
           my $a = latlngAngle($points->[$i1], $points->[$i], $points->[$i2]);
