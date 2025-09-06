@@ -1606,7 +1606,7 @@ sub doAutoSpacing {
             $i2 ++;
             next iLoop
               if (((! $isLoop) && ($i2 > $#$points)) || ($i2 == $i));
-            $i1 %= scalar(@$points);
+            $i2 %= scalar(@$points);
           }
           # determine the angle between the points
           my $a = latlngAngle($points->[$i1], $points->[$i], $points->[$i2]);
@@ -3939,7 +3939,7 @@ sub makeLoop {
 
     if ($pLoop[-1]->{segment} != $point2->{segment}) {
       my %p = %$point2;
-      $p{segment} = $pLoop[-1]->{segment};
+      $p->{segment} = $pLoop[-1]->{segment};
       push @pLoop, \%p;
     }
   }
@@ -5604,7 +5604,7 @@ for my $file ( @files ) {
   # spline again post-smoothing, if requested
   if ( ($splineRadians > 0) && (($lSmooth > 1) || ($zSmooth > 0)) ) {
     note("corner splines, post-smoothing...\n");
-    my $points = addSplines(points=> $points, minRadians=> $splineRadians, maxRadians=> $splineMaxRadians, isLoop=> $isLoop, splineType=> "spline", start=> $splineStart, end=> $splineEnd);
+    $points = addSplines(points=> $points, minRadians=> $splineRadians, maxRadians=> $splineMaxRadians, isLoop=> $isLoop, splineType=> "spline", start=> $splineStart, end=> $splineEnd);
   }
 
   if ( ($arcFitRadians > 0) && (($lSmooth > 1) || ($zSmooth > 0)) ) {
