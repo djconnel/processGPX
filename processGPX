@@ -1039,7 +1039,7 @@ sub addSplines {
       if ($isLoop) {
         next iLoop if ( ($l <= $j) && ($l >= $k) );
       } else {
-        next if ($l <= $j);
+        next iLoop if ($l <= $j);
       }
 
       # turn angles
