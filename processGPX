@@ -3189,7 +3189,7 @@ sub autoStraighten {
       if ((my $L2 = latlngDistance($points->[$k % @$points], $points->[$j % @$points])) > $minLength) {
         my ($avg2, $max2, $rms2) = calcDeviationStats( $points, $k, $j );
         if ($rms2 * $L < $rms * $L2) {
-          $j = $k;
+          $i = $k;
           $L = $L2;
           $avg = $avg2;
           $max = $max2;
