@@ -4918,7 +4918,7 @@ for my $file ( @files ) {
       $xml2 = <$fjoin>;
       $/ = $tmp;
     }
-    close $fin;
+    close $fjoin;
 
     # Parse GPX from open file
     my $gpx2 = Geo::Gpx->new( xml => $xml2 );
