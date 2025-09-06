@@ -3236,7 +3236,7 @@ sub circuitFromPosition {
   $repeats = int($repeats);
 
   if ($repeats <= 0) {
-    warn("CircuitFromPosition called with non-poisitive repeats -- ignoring option.\n");
+    warn("CircuitFromPosition called with non-positive repeats -- ignoring option.\n");
     return $points;
   }
 
