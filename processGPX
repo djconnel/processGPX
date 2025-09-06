@@ -3910,7 +3910,7 @@ sub makeLoop {
   # also calculate distance
   for my $i ( 0 .. $#xs ) {
     $ys[$i] += $shear * $xs[$i];
-    my $x = $ sdir * $xs[$i] + $cdir * $ys[$i];
+    my $x = $sdir * $xs[$i] + $cdir * $ys[$i];
     my $y = -$cdir * $xs[$i] + $sdir * $ys[$i];
     $xs[$i] = $x;
     $ys[$i] = $y;
