@@ -672,7 +672,7 @@ sub removeDuplicatePoints {
     }
 
     if ($i1 == $i) {
-      push @pNew, \%$p;
+      push @pNew, $p;
     }
     else {
       # if this is the first point removed, then clean out derived fields
