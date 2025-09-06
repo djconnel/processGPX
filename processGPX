@@ -3939,7 +3939,7 @@ sub makeLoop {
 
     if ($pLoop[-1]->{segment} != $point2->{segment}) {
       my %p = %$point2;
-      $p{segment} = $pLoop[-1]->{segment};
+      $p->{segment} = $pLoop[-1]->{segment};
       push @pLoop, \%p;
     }
   }
