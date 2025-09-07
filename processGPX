@@ -672,7 +672,7 @@ sub removeDuplicatePoints {
     }
 
     if ($i1 == $i) {
-      push @pNew, \%$p;
+      push @pNew, $p;
     }
     else {
       # if this is the first point removed, then clean out derived fields
@@ -1039,7 +1039,7 @@ sub addSplines {
       if ($isLoop) {
         next iLoop if ( ($l <= $j) && ($l >= $k) );
       } else {
-        next if ($l <= $j);
+        next iLoop if ($l <= $j);
       }
 
       # turn angles
@@ -1606,7 +1606,7 @@ sub doAutoSpacing {
             $i2 ++;
             next iLoop
               if (((! $isLoop) && ($i2 > $#$points)) || ($i2 == $i));
-            $i1 %= scalar(@$points);
+            $i2 %= scalar(@$points);
           }
           # determine the angle between the points
           my $a = latlngAngle($points->[$i1], $points->[$i], $points->[$i2]);
@@ -3189,7 +3189,7 @@ sub autoStraighten {
       if ((my $L2 = latlngDistance($points->[$k % @$points], $points->[$j % @$points])) > $minLength) {
         my ($avg2, $max2, $rms2) = calcDeviationStats( $points, $k, $j );
         if ($rms2 * $L < $rms * $L2) {
-          $j = $k;
+          $i = $k;
           $L = $L2;
           $avg = $avg2;
           $max = $max2;
@@ -3236,7 +3236,7 @@ sub circuitFromPosition {
   $repeats = int($repeats);
 
   if ($repeats <= 0) {
-    warn("CircuitFromPosition called with non-poisitive repeats -- ignoring option.\n");
+    warn("CircuitFromPosition called with non-positive repeats -- ignoring option.\n");
     return $points;
   }
 
@@ -4918,7 +4918,7 @@ for my $file ( @files ) {
       $xml2 = <$fjoin>;
       $/ = $tmp;
     }
-    close $fin;
+    close $fjoin;
 
     # Parse GPX from open file
     my $gpx2 = Geo::Gpx->new( xml => $xml2 );
@@ -4988,9 +4988,15 @@ for my $file ( @files ) {
         (! defined $cropMax) &&
         (latlngDistance($points->[0], $points->[-1]) < 150) &&
         (@$points > 3) &&
-        (latlngDotProduct($points->[-2], $points->[-1], $points->[0], $points->[1]) > -0.1)
+        (latlngDotProduct($points->[-2], $points->[-1], $points->[-1], $points->[0]) > -0.1) &&
+      (
+        (latlngDotProduct($points->[-2], $points->[-1], $points->[-1], $points->[0]) > -0.1) ||
+        (latlngDotProduct($points->[-2], $points->[-1], $points->[-1], $points->[1]) > -0.1) ||
+        (latlngDotProduct($points->[-2], $points->[0], $points->[0], $points->[1]) > -0.1) ||
+        (latlngDotProduct($points->[-1], $points->[0], $points->[0], $points->[1]) > -0.1)
+      )
        ) {
-      $isLoop = 1;
+      $isLoop //= 1;
       $copyPoint = 0;
       note("setting -loop\n");
     }
@@ -5604,7 +5610,7 @@ for my $file ( @files ) {
   # spline again post-smoothing, if requested
   if ( ($splineRadians > 0) && (($lSmooth > 1) || ($zSmooth > 0)) ) {
     note("corner splines, post-smoothing...\n");
-    my $points = addSplines(points=> $points, minRadians=> $splineRadians, maxRadians=> $splineMaxRadians, isLoop=> $isLoop, splineType=> "spline", start=> $splineStart, end=> $splineEnd);
+    $points = addSplines(points=> $points, minRadians=> $splineRadians, maxRadians=> $splineMaxRadians, isLoop=> $isLoop, splineType=> "spline", start=> $splineStart, end=> $splineEnd);
   }
 
   if ( ($arcFitRadians > 0) && (($lSmooth > 1) || ($zSmooth > 0)) ) {
