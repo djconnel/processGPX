@@ -31,6 +31,7 @@
       <li><a href="#adding-time-to-an-activity">adding time to an activity</a></li>
       <li><a href="#adding-gradient-signs">adding gradient signs</a></li>
       <li><a href="#specifying-metadata">specifying metadata</a></li>
+      <li><a href="#converting-an-RGT-route-to-BikeTerra">converting an RGT route to BikeTerra</a></li>
     </ul>
   </li>
   <li><a href="#BUGS">BUGS</a></li>
@@ -48,7 +49,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.53</p>
+<p>0.54</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -256,7 +257,9 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="auto"><b><code>-auto</code></b></dt>
 <dd>
 
-<p>This option automatically turns on options based on &quot;best practices&quot;. It will not turn anything off, so can be used in conjunction with other options.</p>
+<p>This option automatically turns on options based on &quot;best practices&quot;. It will not turn anything off, so can be used in conjunction with other options. Options specifically listed over-ride the -auto option. So for example, to specify that a course is point-to-point and to skip auto-loop detection normally done with <code>-auto</code>, you can do:</p>
+
+<p><code>-processGPX -noloop -auto</code></p>
 
 </dd>
 <dt id="autoLap"><b><code>-autoLap</code></b></dt>
@@ -462,7 +465,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="cornerCrop-meters"><b><code>-cornerCrop</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>If there is a sharp corner, defined as an angle in the range between <code>-minCornerCropDegs</code><code> and -minCornerCropDegs</code>, then points are placed before and after the corner and the corner point itself is deleted, converting the sharp corner into a 2-part turn. This results in corner rounding after smoothing. Corner cropping allows for a reduction in smoothing and avoids <code>-minAngle</code> causing corners to bow outward. This is only done if the straight segmenrs before and after the corner have sufficient length for the interpolated points to be placed.</p>
+<p>If there is a sharp corner, defined as an angle in the range between <code>-minCornerCropDegs</code><code> and -minCornerCropDegs</code>, then points are placed before and after the corner and the corner point itself is deleted, The cropped corner is then rounded with a circular arc. Corner cropping allows for a reduction in smoothing and avoids <code>-minAngle</code> causing corners to bow outward. This is only done if the straight segmenrs before and after the corner have sufficient length for the interpolated points to be placed.</p>
 
 </dd>
 <dt id="cornerCropEnd-meters"><b><code>-cornerCropEnd</code></b> &lt;meters&gt;</dt>
@@ -504,11 +507,15 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>Since smoothing is affected by points ahead of and behind the given point, it is good to extend the points a few smoothing lengths, then crop it back to the desired endpoints.</p>
 
+<p>Negative values are referenced to the end of the route. So for example, <code>-cropMax -140</code> would set a value 140 meters from the end of the route.</p>
+
 </dd>
 <dt id="cropMin-meters"><b><code>-cropMin</code></b> &lt;meters&gt;</dt>
 <dd>
 
 <p>Points prior to this will be stripped, and if needed, a point will be interpolated to this position. This shifts the start position of the GPX route. See <code>-cropMax</code> for more discussion.</p>
+
+<p>Negative values are referenced to the end of the route. So for example, <code>-cropMin -10000</code> would set a value 10 km from the end of the route.</p>
 
 </dd>
 <dt id="cropStart-meters"><b><code>-cropStart</code></b> &lt;meters&gt;</dt>
@@ -615,6 +622,16 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>If a route contains crossings, for example a true figure 8, then it will flatten the road on either side of the crossing, and create a transition from the flattened profile back to the unaltered profile. The side of the flattening is determined by the <code>-rCrossing</code> option. An issue with RGT is that if a sloped road crosses a flat road, for example, on the upward side the sloped road will appear to rise above the surface, while in reality the pavement would be leveled out to allow for the crossing. This creates that leveling.</p>
+
+</dd>
+<dt id="fixSteps"><b><code>-fixSteps</code></b></dt>
+<dd>
+
+<p>Strava route editor is prone to produce points where proximate points have identical altitude, likely because of missing data. This option applies removes the step by applying a uniform gradient to merge the flat segment with the steeper of the two adjacent sides. Of course this is done early in the process, before any interpolation or smoothing.</p>
+
+<p>If there are points with the same altitude you wish to protect from this process, then one approach is slightly change the altitude of the points, for example with the 1 cm &quot;nudge&quot; option in GPXMagic, to avoid equivalent altitudes.</p>
+
+<p>This option is not invoked by <code>-auto</code>, so if you are using Strava Route Editor to generate GPX files, you will probably want to specify this option in addition to a possible <code>-auto</code>.</p>
 
 </dd>
 <dt id="flatten-start-meters-altitude-meters-end-meters-altitude-meters-transition-meters"><b><code>-flatten</code></b> &lt;start-meters&gt; &lt;altitude-meters&gt; &lt;end-meters&gt; &lt;altitude-meters&gt; &lt;transition-meters&gt; ...</dt>
@@ -771,6 +788,8 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>The code will calculate an effective radius of turns, and if this is less than this value, it will shift the road to increase the radius. This is done prior to <code>-laneShift</code>, which may thus result in tighter turns. So if there is a tight switchback, for example, then applying this option will tend to shift the road outward, increasing the turn radius. There is a transition for this lane shift, so for tight S-turns, alternating left and right, or in very tight switchbacks, where the road snakes up a hill, results may be unsatisfactory. It works best with an isolated corner.</p>
+
+<p>It generally helps to add <code>-cornerCrop</code> with a number at least equal to the minimum radius to avoid corners extending outward.</p>
 
 </dd>
 <dt id="minRadiusEnd-meters"><b><code>-minRadiusEnd</code></b> &lt;meters&gt;</dt>
@@ -1243,6 +1262,18 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>As an early stage to processing, interpolate points on the route so that the spacing between points is no more than approximately this spacing. If <code>-smoothing</code> and/or <code>-smoothingz</code> are specified, then smoothing doesn&#39;t work over distances much smaller than this spacing. -autospacing is another option, in which case the code will selectively interpolate points near points where the direction is changing.</p>
+
+</dd>
+<dt id="splice-filenames"><b><code>-splice</code></b> &lt;filenames&gt;</dt>
+<dd>
+
+<p>Starting with the points of the first file, find compatible segments associated with the spliced files, in order, and replace those segments with the points from the spliced files. There is no transition so if the points do not fit perfectly some clean-up may be needed, for example smoothing or point editing.</p>
+
+<p>This may be used, for example, to replace points on a particular climb within a longer route with points for the same climb from a second, superior source. For example, GPX data may be poor for the climb from a mapping program, but you may want to use points from a GPS bike computer instead for a climb. Just make sure that the new points align well with the original track.</p>
+
+<p>If the route is a loop, and if the splice match wraps around, then the S/F will be chosen as the point on the splice which is closest to the original S/F point.</p>
+
+<p>Splicing is done early, before any point interpolation, but after a possible <code>-autoLoop</code>@ option is processed.</p>
 
 </dd>
 <dt id="splineDegs-degrees"><b><code>-splineDegs</code></b> &lt;degrees&gt;</dt>
@@ -1902,6 +1933,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p><code>processGPX -author &quot;Dan Connelly&quot; -keywords &quot;race, BikeTerra&quot; -copyright &quot;Dan Connelly&quot; -name &quot;Crit Course&quot; crit.gpx -out critBT.gpx -description &quot;the best crit course&quot;</code></p>
 
 <p>This example specifies an author name, adds keywords, a copyright, a title, and a description, taking the trackpoints from the file &quot;crit.gpx&quot;, and writing the result to &quot;critBT.gpx&quot;. The time the file was generated is automatically stored in the &quot;time&quot; metadata field. A &quot;processGPX&quot; keywords is additionally automatically added, to record this program was used,</p>
+
+<h2 id="converting-an-RGT-route-to-BikeTerra">converting an RGT route to BikeTerra</h2>
+
+<p>RGT routes had 60 meters at the start and 140 meters at the end for riders to group. Biketerra does not use these buffer regions. So to get the same course distance in BikeTerra as was used in RGT, 60 meters from the start and 140 meters from the end should be cropped. For example:</p>
+
+<p><code>processGPX -cropMin 60 -cropMax -140 RGTRoute.gpx -out BikeTerraRoute.gpx</code></p>
 
 <h1 id="BUGS">BUGS</h1>
 

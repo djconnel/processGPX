@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.53
+    0.54
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -287,7 +287,12 @@ OPTIONS
     "-auto"
         This option automatically turns on options based on "best
         practices". It will not turn anything off, so can be used in
-        conjunction with other options.
+        conjunction with other options. Options specifically listed
+        over-ride the -auto option. So for example, to specify that a course
+        is point-to-point and to skip auto-loop detection normally done with
+        "-auto", you can do:
+
+        "-processGPX -noloop -auto"
 
     "-autoLap"
         Synonym for "-autoLoop"
@@ -538,12 +543,11 @@ OPTIONS
         If there is a sharp corner, defined as an angle in the range between
         "-minCornerCropDegs"" and -minCornerCropDegs", then points are
         placed before and after the corner and the corner point itself is
-        deleted, converting the sharp corner into a 2-part turn. This
-        results in corner rounding after smoothing. Corner cropping allows
-        for a reduction in smoothing and avoids "-minAngle" causing corners
-        to bow outward. This is only done if the straight segmenrs before
-        and after the corner have sufficient length for the interpolated
-        points to be placed.
+        deleted, The cropped corner is then rounded with a circular arc.
+        Corner cropping allows for a reduction in smoothing and avoids
+        "-minAngle" causing corners to bow outward. This is only done if the
+        straight segmenrs before and after the corner have sufficient length
+        for the interpolated points to be placed.
 
     "-cornerCropEnd" <meters>
         Where to stop corner cropping
@@ -582,10 +586,18 @@ OPTIONS
         point, it is good to extend the points a few smoothing lengths, then
         crop it back to the desired endpoints.
 
+        Negative values are referenced to the end of the route. So for
+        example, "-cropMax -140" would set a value 140 meters from the end
+        of the route.
+
     "-cropMin" <meters>
         Points prior to this will be stripped, and if needed, a point will
         be interpolated to this position. This shifts the start position of
         the GPX route. See "-cropMax" for more discussion.
+
+        Negative values are referenced to the end of the route. So for
+        example, "-cropMin -10000" would set a value 10 km from the end of
+        the route.
 
     "-cropStart" <meters>
         Alias for "-cropMin"
@@ -742,6 +754,23 @@ OPTIONS
         above the surface, while in reality the pavement would be leveled
         out to allow for the crossing. This creates that leveling.
 
+    "-fixSteps"
+        Strava route editor is prone to produce points where proximate
+        points have identical altitude, likely because of missing data. This
+        option applies removes the step by applying a uniform gradient to
+        merge the flat segment with the steeper of the two adjacent sides.
+        Of course this is done early in the process, before any
+        interpolation or smoothing.
+
+        If there are points with the same altitude you wish to protect from
+        this process, then one approach is slightly change the altitude of
+        the points, for example with the 1 cm "nudge" option in GPXMagic, to
+        avoid equivalent altitudes.
+
+        This option is not invoked by "-auto", so if you are using Strava
+        Route Editor to generate GPX files, you will probably want to
+        specify this option in addition to a possible "-auto".
+
     "-flatten" <start-meters> <altitude-meters> <end-meters>
     <altitude-meters> <transition-meters> ...
         This important option allows the route to be flattened over a
@@ -887,6 +916,9 @@ OPTIONS
         S-turns, alternating left and right, or in very tight switchbacks,
         where the road snakes up a hill, results may be unsatisfactory. It
         works best with an isolated corner.
+
+        It generally helps to add "-cornerCrop" with a number at least equal
+        to the minimum radius to avoid corners extending outward.
 
     "-minRadiusEnd" <meters>
         If specified, where to stop applying minimum radius (-minRadius). If
@@ -1483,6 +1515,27 @@ OPTIONS
         spacing. -autospacing is another option, in which case the code will
         selectively interpolate points near points where the direction is
         changing.
+
+    "-splice" <filenames>
+        Starting with the points of the first file, find compatible segments
+        associated with the spliced files, in order, and replace those
+        segments with the points from the spliced files. There is no
+        transition so if the points do not fit perfectly some clean-up may
+        be needed, for example smoothing or point editing.
+
+        This may be used, for example, to replace points on a particular
+        climb within a longer route with points for the same climb from a
+        second, superior source. For example, GPX data may be poor for the
+        climb from a mapping program, but you may want to use points from a
+        GPS bike computer instead for a climb. Just make sure that the new
+        points align well with the original track.
+
+        If the route is a loop, and if the splice match wraps around, then
+        the S/F will be chosen as the point on the splice which is closest
+        to the original S/F point.
+
+        Splicing is done early, before any point interpolation, but after a
+        possible "-autoLoop"@ option is processed.
 
     "-splineDegs" <degrees>
         If splines are desired, specifying this will cause spline
@@ -2205,6 +2258,15 @@ EXAMPLES
     was generated is automatically stored in the "time" metadata field. A
     "processGPX" keywords is additionally automatically added, to record
     this program was used,
+
+  converting an RGT route to BikeTerra
+    RGT routes had 60 meters at the start and 140 meters at the end for
+    riders to group. Biketerra does not use these buffer regions. So to get
+    the same course distance in BikeTerra as was used in RGT, 60 meters from
+    the start and 140 meters from the end should be cropped. For example:
+
+    "processGPX -cropMin 60 -cropMax -140 RGTRoute.gpx -out
+    BikeTerraRoute.gpx"
 
 BUGS
     lane shifting and sharp corners
