@@ -5459,11 +5459,16 @@ for my $file ( @files ) {
 	  $dSF = $d;
 	}
       }
-      warn("DEBUG: iSF = $iSF\n");
+      note("setting S/F to point ", $iSF + 1,  " of ",  scalar(@$points2), " in spliced file $splice,\n");
+      warn("spliced points at start = " . (@$points2 - $iSF) . "\n");
       push @pNew, @$points2[$iSF .. $#$points2];
+      warn("retained points = " . ($i1 + 1 - $i2) . "\n");
       push @pNew, @$points[$i2 .. $i1];
+      warn("spliced points after start = " . $iSF . "\n");
       push @pNew, @$points2[0 .. $iSF - 1];
     }
+    note("points before splicing = ", scalar(@$points) . "\n");
+    note("points after splicing = ", scalar(@pNew) . "\n");
     $points = \@pNew;
   }
 
