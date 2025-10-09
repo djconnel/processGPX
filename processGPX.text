@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.54
+    0.55
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -1534,8 +1534,25 @@ OPTIONS
         the S/F will be chosen as the point on the splice which is closest
         to the original S/F point.
 
+        For point-to-point races, the splice must be contained within the
+        original route. It cannot replace the first or last point, for
+        example. It also cannot extend the route. For loops, the splice can
+        fit anywhere in the loop, including crossing the original
+        start/finish. The new start/finish will be the point in the spliced
+        data closest to the original start/finish.
+
         Splicing is done early, before any point interpolation, but after a
         possible "-autoLoop"@ option is processed.
+
+        Splicing will only occur if the start of the splice is within a
+        certain distance of an endpoint from the original file. This
+        distance defaults to 250 meters, but can be set with the
+        "-spliceDistance" option.
+
+    "-spliceDistance" <meters>
+        This allows specification of how close the spliced segment must be
+        to a point in the original file to be considered a candidate for
+        splicing. The default is 250 meters.
 
     "-splineDegs" <degrees>
         If splines are desired, specifying this will cause spline

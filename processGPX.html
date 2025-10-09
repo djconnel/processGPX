@@ -49,7 +49,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.54</p>
+<p>0.55</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -1273,7 +1273,17 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>If the route is a loop, and if the splice match wraps around, then the S/F will be chosen as the point on the splice which is closest to the original S/F point.</p>
 
+<p>For point-to-point races, the splice must be contained within the original route. It cannot replace the first or last point, for example. It also cannot extend the route. For loops, the splice can fit anywhere in the loop, including crossing the original start/finish. The new start/finish will be the point in the spliced data closest to the original start/finish.</p>
+
 <p>Splicing is done early, before any point interpolation, but after a possible <code>-autoLoop</code>@ option is processed.</p>
+
+<p>Splicing will only occur if the start of the splice is within a certain distance of an endpoint from the original file. This distance defaults to 250 meters, but can be set with the <code>-spliceDistance</code> option.</p>
+
+</dd>
+<dt id="spliceDistance-meters"><b><code>-spliceDistance</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This allows specification of how close the spliced segment must be to a point in the original file to be considered a candidate for splicing. The default is 250 meters.</p>
 
 </dd>
 <dt id="splineDegs-degrees"><b><code>-splineDegs</code></b> &lt;degrees&gt;</dt>

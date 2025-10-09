@@ -35,8 +35,9 @@ use Pod::Usage;
 #               fixed problem with interpolatePoint when lng jumps 360 deg
 #               fixed -cornerCrop handing of loop courses
 # version 0.54: change autoLoop, add -splice, -fixSteps, added arcFit to cornerCrop
+# version 0.55: improved splicing.  Added -spliceDistance
 
-my $version = "0.54";             # make sure this matches pod value
+my $version = "0.55";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -311,12 +312,160 @@ sub latlng2dxdy {
   return ($dx, $dy);
 }
 
+# splicing in file
+sub splicePoints {
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $points2 = $var{points2} // [];
+  my $isLoop = $var{isLoop} // 0;
+  my $spliceDistance = $var{spliceDistance} // 250;
+
+    # find the start and finish nodes for the splice
+  $spliceDistance //= 250;
+  my $ps1 = $points2->[0];
+  my $ps2 = $points2->[-1];
+  # find distances of points to splice points
+  my @ds1 = map { latlngDistance($_, $ps1) } @$points;
+  my @ds2 = map { latlngDistance($_, $ps2) } @$points;
+
+  # criterion:
+  # 1. pointing in same direction
+  # 2. comparable altitude
+  # 3. pointing in relatively same direction
+  # points from i1 + 1 to i2 - 1 will be removed
+  # find candidates: there may be multiple similarly good choices
+  my $i1;
+  my $i2;
+  my @i1s = ();
+  my @i2s = ();
+  my $iClosest1;
+  my $iClosest2;
+  # keep final point at entry which aligns with start of spliced portion
+  for my $i ( 0 .. $#ds1 ) {
+    if (
+	($ds1[$i] < $spliceDistance) &&
+	($isLoop || ($i < $#$points)) &&
+	(( ! defined $iClosest1) || ($ds1[$i] < 1 + 1.2 * $ds1[$iClosest1])) &&
+	(abs($points->[$i]->{ele} - $ps1->{ele}) < 1 + 0.3 * $ds1[$i])
+       ) {
+      # check that point aligns with entry to spliced section
+      my $l = latlngDotProduct($points->[$i], $ps1, $ps1, $points2->[1]);
+      if ((! defined $l) || ($l > -0.1)) {
+	# check that next point does not align with spliced section
+	if ($isLoop || ($i < $#$points)) {
+	  $l = latlngDotProduct($ps1, $points->[($i + 1) % @$points], $ps1, $points2->[1]);
+	} else {
+	  $l = 0;
+	}
+	if ((! defined $l) || ($l > -0.1)) {
+	  $iClosest1 = $i
+	    if ((! defined $iClosest1) || ($ds1[$i] < $ds1[$iClosest1]));
+	  push @i1s, $i;
+	}
+      }
+    }
+    @i1s = grep {$ds1[$_] < 1 + 1.2 * $ds1[$iClosest1]} @i1s;
+  }
+  $i1 = $iClosest1;		# initial guess
+  # keep first point at exit which aligns with start of spliced portion
+  for my $i ( 0 .. $#ds2 ) {
+    if (
+	($isLoop || ($i > 0)) && 
+	($ds2[$i] < $spliceDistance) &&
+	(( ! defined $iClosest2) || ($ds2[$i] < 1 + 1.2 * $ds2[$iClosest2])) &&
+	(abs($points->[$i]->{ele} - $ps2->{ele}) < 1 + 0.3 * $ds2[$i])
+       ) {
+      my $l = latlngDotProduct($points2->[-2], $ps2, $ps2, $points->[$i]);
+      if ((! defined $l) || ($l > -0.1)) {
+	if ($isLoop || ($i > 0)) {
+	  $l = latlngDotProduct($points2->[-2], $ps2, $points->[$i - 1], $ps2);
+	} else {
+	  $l = 0;
+	}
+	if ((! defined $l) || ($l > -0.1)) {
+	  $iClosest2 = $i
+	    if ((! defined $iClosest2) || ($ds2[$i] < $ds1[$iClosest2]));
+	  push @i2s, $i;
+	}
+      }
+    }
+    @i2s = grep {$ds2[$_] < 1 + 1.2 * $ds2[$iClosest2]} @i2s;
+  }
+  $i2 = $iClosest2;		# initial guess
+  # if no candidates, bail
+  if ((@i1s == 0) || (@i2s == 0)) {
+    warn("WARNING: splice of file failed to find matching interval\n");
+    next;
+  }
+  # find combination of candidates with the least separation
+  for my $a ( @i1s ) {
+    for my $b ( @i2s ) {
+      if ($isLoop) {
+	my $s = $b - $a;
+	$s += @$points if ($s < 0);
+	my $s0 = $i2 - $i1;
+	$s0 += @$points if ($s0 < 0);
+	if ($s < $s0) {
+	  $i1 = $a;
+	  $i2 = $b;
+	}
+      } else {
+	if (($b > $a) && (($i1 > $i2) || ($b - $a < $i2 - $i1))) {
+	  $i1 = $a;
+	  $i2 = $b;
+	}
+      }
+    }
+  }
+
+  # make sure splice points aren't too close (10 cm)
+  $i1 = (($i1 - 1) % @$points) while (($ds1[$i1] < 0.01) && ($isLoop || ($i1 > 0)) && (($i1 - 1) % @$points != $i2));
+  $i2 = (($i2 + 1) % @$points) while (($ds2[$i2] < 0.01) && ($isLoop || ($i2 < $#$points)) && (($i2 + 1) % @$points != $i2));
+
+  if ((! $isLoop) && ($i2 <= $i1)) {
+    warn("WARNING: splice of file failed to find matching points in forward direction.\n");
+    next;
+  }
+
+  # splice in the points
+  my @pNew;
+  if ($i2 >= $i1 ) {
+    note("splicing file between points $i1 and $i2\n");
+    @pNew = @$points[0 .. $i1];
+    push @pNew, @$points2;
+    push @pNew, @$points[$i2 .. $#$points];
+  } else {
+    # wrap around: find new S/F point (closest to old S/F point)
+    note("splicing file between points $i1 and $i2 (wrap around)\n");
+    my $dSF;
+    my $iSF;
+    for my $i ( 0 .. $#$points2 ) {
+      my $d = latlngDistance($points2->[$i], $points->[0]);
+      if ((! defined $iSF) || ($d < $dSF)) {
+	$iSF = $i;
+	$dSF = $d;
+      }
+    }
+    note("setting S/F to point ", $iSF + 1,  " of ",  scalar(@$points2), " in spliced file,\n");
+    warn("spliced points at start = " . (@$points2 - $iSF) . "\n");
+
+    @pNew = @$points2[$iSF .. $#$points2];
+    push @pNew, @$points[$i2 .. $i1];
+    push @pNew, @$points2[0 .. $iSF - 1];
+  }
+  note("points before splicing = ", scalar(@$points) . "\n");
+  note("points after splicing = ", scalar(@pNew) . "\n");
+  $points = \@pNew;
+
+  return $points;
+}
+
+
 #
 # for a range of points, interpolate the fields based on distance between
 # the first and last point
 # use distance field if present on internal points else calculate distance field
 #
-
 
 sub interpolateFields {
   my @points = @_;
@@ -4697,6 +4846,7 @@ my $snapAltitude = 1;  # how close altitude needs to be for snapping
 my $snapDistance = 2;  # number of meters threshold for point snapping
 my $snapTransition;    # whether to transition the altitude around snaps to match the source
 my $spacing;           # target point spacing: linear interpolate between existing points
+my $spliceDistance;    # spliced points must be closer than this to neighbor point
 my $splineDegs;               # minimum degrees use if we use spline interpolation
 my $splineEnd;                # where to stop spline fitting
 my $splineMaxDegs = 60;       # maximum turn angle for spline
@@ -4909,6 +5059,7 @@ GetOptions (
             "snapZ=f"       => \$snapAltitude,
             "spacing=f"     => \$spacing,
 	    "splice=s{1,100}" => \@splice,
+	    "spliceDistance=f"  => \$spliceDistance,
             "splineDegs=f"  => \$splineDegs,
             "splineEnd=f"   => \$splineEnd,
             "splineMaxDegs=f" => \$splineMaxDegs,
@@ -5367,109 +5518,7 @@ for my $file ( @files ) {
       }
     }
 
-    # find the start and finish nodes for the splice
-    my $spliceDistance = 150;
-    my $ps1 = $points2->[0];
-    my $ps2 = $points2->[-1];
-    # find distances of points to splice points
-    my @ds1 = map { latlngDistance($_, $ps1) } @$points;
-    my @ds2 = map { latlngDistance($_, $ps2) } @$points;
-
-    # criterion:
-    # 1. pointing in same direction
-    # 2. comparable altitude
-    # 3. pointing in relatively same direction
-    # points from i1 + 1 to i2 - 1 will be removed
-    # find candidates: there may be multiple similarly good choices
-    my $i1;
-    my $i2;
-    my @i1s = ();
-    my @i2s = ();
-    for my $i ( 0 .. $#ds1 ) {
-      if (
-	  ((! defined $i1) || ($ds1[$i] < $ds1[$i1])) &&
-	  ($i < $#$points) &&
-	  (abs($points->[$i]->{ele} - $ps1->{ele}) < 1 + 0.3 * $ds1[$i]) &&
-	  (latlngDotProduct($points->[$i], $ps1, $ps1, $points2->[1]) > -0.1)
-	 ) {
-	$i1 = $i;
-	@i1s = grep {$ds1[$_] < 1 + 1.2 * $ds1[$i1]} @i1s;
-	push @i1s, $i1;
-      }
-    }
-    for my $i ( 0 .. $#ds1 ) {
-      if (
-	  ((! defined $i2) || ($ds2[$i] < $ds2[$i2])) &&
-	  (abs($points->[$i]->{ele} - $ps2->{ele}) < 1 + 0.3 * $ds2[$i]) &&
-	  (latlngDotProduct($points2->[-2], $ps2, $ps2, $points->[$i]) > -0.1)
-	 ) {
-	$i2 = $i;
-	@i2s = grep {$ds2[$_] < 1 + 1.2 * $ds2[$i1]} @i2s;
-	push @i2s, $i2;
-      }
-    }
-    warn("DEBUG: i1 candidates = @i1s\n");
-    warn("DEBUG: i2 candidates = @i2s\n");
-    # if no candidates, bail
-    if ((@i1s == 0) || (@i2s == 0)) {
-      warn("WARNING: splice of file $splice failed to find matching interval\n");
-      next;
-    }
-    # find combination o candidates with the least separation
-    for my $a ( @i1s ) {
-      for my $b ( @i2s ) {
-	if ($isLoop) {
-	  my $s = $b - $a;
-	  $s += @$points if ($s < 0);
-	  my $s0 = $i2 - $i1;
-	  $s0 += @$points if ($s0 < 0);
-	  if ($s < $s0) {
-	    $i1 = $a;
-	    $i2 = $b;
-	  }
-	} else {
-	  if (($b > $a) && (($i1 > $i2) || ($b - $a < $i2 - $i1))) {
-	    $i1 = $a;
-	    $i2 = $b;
-	  }
-	}
-      }
-    }
-    if ((! $isLoop) && ($i2 <= $i1)) {
-      warn("WARNING: splice of file $splice failed to find matching points in forward direction.\n");
-      next;
-    }
-
-    # splice in the points
-    my @pNew;
-    if ($i2 > $i1 ) {
-      note("splicing file $splice between points $i1 and $i2\n");
-      push @pNew, @$points[0 .. $i1];
-      push @pNew, @$points2;
-      push @pNew, @$points[$i2 .. $#$points];
-    } else {
-      # wrap around: find new S/F point (closest to old S/F point)
-      note("splicing file $splice between points $i1 and $i2 (wrap around)\n");
-      my $dSF;
-      my $iSF;
-      for my $i ( 0 .. $#$points2 ) {
-	my $d = latlngDistance($points2->[$i], $points->[0]);
-	if ((! defined $iSF) || ($d < $dSF)) {
-	  $iSF = $i;
-	  $dSF = $d;
-	}
-      }
-      note("setting S/F to point ", $iSF + 1,  " of ",  scalar(@$points2), " in spliced file $splice,\n");
-      warn("spliced points at start = " . (@$points2 - $iSF) . "\n");
-      push @pNew, @$points2[$iSF .. $#$points2];
-      warn("retained points = " . ($i1 + 1 - $i2) . "\n");
-      push @pNew, @$points[$i2 .. $i1];
-      warn("spliced points after start = " . $iSF . "\n");
-      push @pNew, @$points2[0 .. $iSF - 1];
-    }
-    note("points before splicing = ", scalar(@$points) . "\n");
-    note("points after splicing = ", scalar(@pNew) . "\n");
-    $points = \@pNew;
+    $points = splicePoints(points=> $points, points2=> $points2, isLoop=> $isLoop, spliceDistance=> $spliceDistance);
   }
 
   # unnamed segments get converted to 0 so they can be merged if contiguius
@@ -7196,7 +7245,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.54
+0.55
 
 =head1 DESCRIPTION
 
@@ -8872,8 +8921,26 @@ If the route is a loop, and if the splice match wraps around, then the
 S/F will be chosen as the point on the splice which is closest to the
 original S/F point.
 
+For point-to-point races, the splice must be contained within the
+original route.  It cannot replace the first or last point, for
+example.  It also cannot extend the route.  For loops, the splice can
+fit anywhere in the loop, including crossing the original
+start/finish.  The new start/finish will be the point in the spliced
+data closest to the original start/finish.
+
 Splicing is done early, before any point interpolation, but after
 a possible C<-autoLoop>@ option is processed.
+
+Splicing will only occur if the start of the splice is within a
+certain distance of an endpoint from the original file.  This distance
+defaults to 250 meters, but can be set with the C<-spliceDistance>
+option.
+
+=item B<C<-spliceDistance>> <meters>
+
+This allows specification of how close the spliced segment must be to
+a point in the original file to be considered a candidate for
+splicing.  The default is 250 meters.
 
 =item B<C<-splineDegs>> <degrees>
 
