@@ -1621,7 +1621,7 @@ sub fixZigZags {
 
 
 #
-# steps are 
+# steps are adjacent points with equivalent altitude, which tend to be introduced by Strava
 #
 sub fixSteps {
   my %var = @_;
@@ -1632,7 +1632,10 @@ sub fixSteps {
   note("checking for altitude steps ...\n");
   my $i = 0;
   while ($i < $#$points) {
-    next if ((! $isLoop) && (($i == 0) || ($i >= $#$points - 1)));
+    if ((! $isLoop) && (($i == 0) || ($i >= $#$points - 1))) {
+      $i ++;
+      next;
+    }
     my $j = ($i + 1) % @$points;
 
     # special case: check for repeated points in step
@@ -5571,7 +5574,7 @@ for my $file ( @files ) {
   if ($fixSteps) {
     $points = fixSteps(points=> $points, isLoop=> $isLoop);
   }
-  
+
   # adjust positions if requested
   if ( ((defined $xShift) && ($xShift != 0)) || ((defined $yShift) && ($yShift != 0)) ) {
     my $dLat = $yShift / $lat2y;
