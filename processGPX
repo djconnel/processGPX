@@ -36,8 +36,9 @@ use Pod::Usage;
 #               fixed -cornerCrop handing of loop courses
 # version 0.54: change autoLoop, add -splice, -fixSteps, added arcFit to cornerCrop
 # version 0.55: improved splicing.  Added -spliceDistance
+# version 0.56: moved file loading to a proc, added -closeLoop
 
-my $version = "0.55";             # make sure this matches pod value
+my $version = "0.56";             # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -47,17 +48,110 @@ $0 =~ s(.*/)();
 # a function which transitions from 1 (x = -1) to 1/2 (x = 0) to 0 ( x = 1 )
 my $pi2 = atan2(1, 0);
 
+#
+# load a file and return a points list
+#
+sub loadGPX {
+  my %var = @_;
+  my $GPXFile = $var{GPXFile};
+  my $nSegment = $var{nSegment} // 0;
+  my $stripSegments = $var{stripSegments} // 0;
+  my $nTrack = $var{track} // 1;
+
+  my $trkIndex = 0;
+  my %segmentNames;
+
+  if (my ($f, $t) = ($GPXFile =~ /(.*)\:(\d+)$/)) {
+    $GPXFile = $f;
+    $trkIndex = ($t > 0) ? $t - 1: 0;
+    $nTrack = $t;
+  }
+  open my $fp, "<$GPXFile"
+    or die("ERROR opening file $GPXFile");
+  my $xml;
+  {
+    my $tmp = $/;
+    $/ = undef;
+    $xml = <$fp>;
+    $/ = $tmp;
+  }
+  close $fp;
+
+  # Parse GPX from open file
+  my $gpx = Geo::Gpx->new( xml => $xml );
+
+  # get segment names indexed by track and segments
+  my $extensions = getExtensions(\$xml, $trkIndex + 1);
+
+  # Parse GPX from open file
+  my $waypoints = $gpx->waypoints();
+  my $tracks    = $gpx->tracks();
+
+  my $track = $tracks->[$trkIndex];
+
+  # segments for the spliced file
+  my $segments  = $track->{segments};
+
+  my $points = [];
+
+  my $nSegment0 = $nSegment;
+  for my $segment ( @$segments ) {
+    $nSegment ++;
+    warn("increasing segment number to $nSegment\n");
+
+    # make sure we have a new copy of all points
+    for my $p ( @{$segment->{points}} ) {
+      $p->{segment} = ($stripSegments ? 0 : $nSegment);
+      push @$points, $p;
+    }
+    flattenPointExtensions(points=> $points);
+  }
+
+  # segments:
+  # $segments: pointer to segments in the GPX data
+  # @segmentPoints: list of segments
+  # points->{segment}: ID of the segment associated with each point
+  # initially the segment ID = segment index
+  # this may change if segments are modified
+
+  if ((! $stripSegments) && (defined $extensions) && (defined $extensions->{segmentName}->{$nTrack})) {
+    for my $s ( keys %{$extensions->{segmentName}->{$nTrack}} ) {
+      my $nS = $nSegment0 + $s;
+      $segmentNames{$nS} = $extensions->{segmentName}->{$nTrack}->{$s};
+      warn("segment number $nS : $extensions->{segmentName}->{$nTrack}->{$s}\n");
+    }
+  }
+  return {
+	  xml=> $xml,
+	  gpx=> $gpx,
+	  points=> $points,
+	  nTrack=> $nTrack,
+	  track=> $track,
+	  waypoints=> $waypoints,
+	  nSegment=> $nSegment,
+	  segmentNames=> \%segmentNames,
+	  extensions=> $extensions,
+	 };
+}
+
+
 # debugging function for printing out points
 # uses a reference point, then the points to be printed
 sub points2String {
   my $p0 = shift;
-  my @points = @_;
-  warn("points2String called with " . scalar(@points) . " points\n");
-  my $s = "x y z\n";
+  my @points;
+  if (ref($_[0]) eq "ARRAY") {
+    @points = @{$_[0]};
+  } else {
+    @points = @_;
+  }
+  note("points2String called with " . scalar(@points) . " points\n");
+  my $s = "x y z segment\n";
   for my $p ( @points ) {
     my ($x, $y) = latlng2dxdy($p0, $p);
     my $z = $p->{ele};
-    $s .= "$x $y $z\n";
+    my $ns = $p->{segment};
+    $s .= "$x $y $z $ns\n";
   }
   return $s;
 }
@@ -4779,7 +4873,8 @@ my $autoSplits = 0; # number of splits to put into the road based on distance
 my $autoStraightenDeviation;  # maximum deviation for auto-straightening
 my $autoStraightenLength;  # minimum length for auto-straightening
 my $author;         # author, for GPX
-my $copyPoint = 0; # whether to make sure first point and last point in data coincide
+my $closeLoop;    # sets -loop and -copyPoint
+my $copyPoint;     # whether to make sure first point and last point in data coincide
 my $copyright;     # copyright field, for GPX
 my $cornerCrop;    # amount to "crop" from sharp corners before point interpolation
 my $cornerCropStart;  # where to begin corner cropping
@@ -4943,7 +5038,9 @@ GetOptions (
             "circuitsToPosition=f{1,3}"    => \@circuitToPosition,
             "circuitToPoint=f{1,30}"       => \@circuitToPosition,
             "circuitsToPoint=f{1,30}"      => \@circuitToPosition,
-            "closed!"       => \$copyPoint,
+            "closed!"       => \$closeLoop,
+	    "closedLoop!"   => \$closeLoop,
+            "closeLoop!"    => \$closeLoop,
             "copyPoint!"    => \$copyPoint,
             "copyright=s"   => \$copyright,
             "cornerCrop=f" => \$cornerCrop,
@@ -5107,6 +5204,15 @@ if ($vFlag ) {
   exit 0;
 }
 
+# process -closeLoop
+if ( defined $closeLoop ) {
+  $copyPoint //= $closeLoop;
+  $isLoop //= $closeLoop;
+  warn("DEBUG: -closeLoop: copyPoint = $copyPoint, isLoop = $isLoop\n");
+} else {
+  $copyPoint //= 0;
+}
+
 # make sure repeat is in range
 die("-repeat limited to range 0 to 99\n")
   if ($repeat > 99);
@@ -5186,75 +5292,24 @@ die("output file name can be specified only if one input file is specified: eith
   if ((@files > 1) && ($outFile ne ""));
 
 for my $file ( @files ) {
-  # if file has track code appended, split that off
-  my $trkIndex = ($selectedTrack > 0) ? $selectedTrack - 1 : 0;
-
-  if (my ($f, $t) = ($file =~ /(.*)\:(\d+)$/)) {
-    $file = $f;
-    $trkIndex = ($t > 0) ? $t - 1: 0;
-  }
-
-  open my $fin, "<$file"
-    or die("ERROR opening file $file");
-  my $xml;
-  {
-    my $tmp = $/;
-    $/ = undef;
-    $xml = <$fin>;
-    $/ = $tmp;
-  }
-  close $fin;
-
-  die("ERROR: file $file is empty\n")
-    unless (defined $xml);
-
-  # Parse GPX from open file
-  my $gpx = Geo::Gpx->new( xml => $xml );
-
-  # get segment names indexed by track and segments for the target track
-  my $extensions = getExtensions(\$xml);
-  my $waypoints = $gpx->waypoints();
-  my $tracks    = $gpx->tracks();
-
-  # process tracks
-  my $track = $tracks->[$trkIndex];
-  die("ERROR: selected track ", $trkIndex + 1, " not found in file $file\n")
-    unless (defined $track);
-  my $nTrack = $trkIndex + 1;
-
-  # list of segments in the present track
-  my $segments = $track->{segments};
-
-  # segments:
-  # $segments: pointer to segments in the GPX data
-  # @segmentPoints: list of segments
-  # points->{segment}: ID of the segment associated with each point
-  # initially the segment ID = segment index
-  # this may change if segments are modified
-
-  # add segment field to points
-  my $points = [];
 
   my $nSegment = 0;
-  my %segmentDefined;
+  my $GPXResult = loadGPX(GPXFile=> $file, nSegment=> $nSegment, stripSegments=> $stripSegments);
+  my $points = $GPXResult->{points};
+  $nSegment = $GPXResult->{nSegment};
+  my $xml = $GPXResult->{xml};
+  my $gpx = $GPXResult->{gpx};
+  my $extensions = $GPXResult->{extensions};
+  my $waypoints = $GPXResult->{waypoints};
+  my $nTrack = $GPXResult->{nTrack};
+  my $track = $GPXResult->{track};
   my %segmentName;              # names of each segment
-
-  for my $segment ( @$segments ) {
-    $nSegment ++;
-    $segmentDefined{$nSegment} ++;
-
-    my $segmentName = $extensions->{segmentName}->{$nTrack}->{$nSegment};
-    $segmentName{$nSegment} = $segmentName;
-    note("processing segment $nSegment ...\n");
-    note("segment name = $segmentName\n") if ( (defined $segmentName) && ($segmentName ne "") );
-
-    for my $p ( @{$segment->{points}} ) {
-      $p->{segment} = ($stripSegments ? 0 : $nSegment);
-      push @$points, $p;
-    }
-    flattenPointExtensions(points=> $points);
-    note("total points after segment $nSegment = ", scalar(@$points), "\n");
+  my %segmentDefined;
+  for my $ns (keys %{$GPXResult->{segmentNames}}) {
+    $segmentName{$ns} = $GPXResult->{segmentNames}->{$ns};
+    $segmentDefined{$ns} ++;
   }
+
   note("points in original GPX track = ", scalar(@$points), "\n");
   my ($score, $scoreD, $scoreZ) = calcQualityScore(points=> $points, isLoop=> $isLoop);
   note("quality score of original course = ", sprintf("%.4f", $score), "\n");
@@ -5280,64 +5335,13 @@ for my $file ( @files ) {
   # if join was specified, join points from a second file
   for my $join ( @join ) {
 
-    my $nTrack    = 1;
-    my $trkIndex2 = 0;
-
-    if (my ($f, $t) = ($join =~ /(.*)\:(\d+)$/)) {
-      $join = $f;
-      $trkIndex2 = ($t > 0) ? $t - 1: 0;
-      $nTrack = $t;
+    my $GPXResult = loadGPX(GPXFile=> $join, nSegment=> $nSegment, stripSegments=> $stripSegments);
+    my $points2 = $GPXResult->{points};
+    $nSegment = $GPXResult->{nSegment};
+    for my $ns (keys %{$GPXResult->{segmentNames}}) {
+      $segmentName{$ns} = $GPXResult->{segmentNames}->{$ns};
+      $segmentDefined{$ns} ++;
     }
-    note("joining file $join to the end of file $file...\n");
-    open my $fjoin, "<$join"
-      or die("ERROR opening file $join");
-    my $xml2;
-    {
-      my $tmp = $/;
-      $/ = undef;
-      $xml2 = <$fjoin>;
-      $/ = $tmp;
-    }
-    close $fjoin;
-
-    # Parse GPX from open file
-    my $gpx2 = Geo::Gpx->new( xml => $xml2 );
-
-    # get segment names indexed by track and segments
-    my $extensions2 = getExtensions(\$xml2, $trkIndex2 + 1);
-
-    # Parse GPX from open file
-    my $waypoints2 = $gpx2->waypoints();
-    my $tracks2    = $gpx2->tracks();
-
-    my $track2 = $tracks2->[$trkIndex2];
-
-    # segments for the joined file
-    my $segments2  = $track2->{segments};
-
-    my $points2 = [];
-
-    my $nSegment0 = $nSegment;
-    for my $segment ( @$segments2 ) {
-      $nSegment ++;
-
-      # make sure we have a new copy of all points
-      for my $p ( @{$segment->{points}} ) {
-        $p->{segment} = ($stripSegments ? 0 : $nSegment);
-        push @$points2, $p;
-      }
-      flattenPointExtensions(points=> $points2);
-    }
-
-    # add in segment extensions to the main extensions
-    if ((! $stripSegments) && (defined $extensions2) && (defined $extensions2->{segmentName}->{$nTrack})) {
-      for my $s ( keys %{$extensions2->{segmentName}->{$nTrack}} ) {
-        my $nS = $nSegment0 + $s;
-        $segmentName{$nS} = $extensions2->{segmentName}->{$nTrack}->{$s};
-        $segmentDefined{$nS} ++;
-      }
-    }
-
     push @$points, @$points2;
     note("points after joining with $join = ", scalar(@$points), "\n");
   }
@@ -5462,74 +5466,27 @@ for my $file ( @files ) {
 
   # splice in files
   for my $splice ( @splice ) {
-
-    my $nTrack    = 1;
-    my $trkIndex2 = 0;
-
-    if (my ($f, $t) = ($splice =~ /(.*)\:(\d+)$/)) {
-      $splice = $f;
-      $trkIndex2 = ($t > 0) ? $t - 1: 0;
-      $nTrack = $t;
+    my $GPXResult = loadGPX(GPXFile=> $splice, nSegment=> $nSegment, stripSegments=> $stripSegments);
+    my $points2 = $GPXResult->{points};
+    $nSegment = $GPXResult->{nSegment};
+    for my $ns (keys %{$GPXResult->{segmentNames}}) {
+      $segmentName{$ns} = $GPXResult->{segmentNames}->{$ns};
+      $segmentDefined{$ns} ++;
     }
-    note("splicing file $splice into file $file...\n");
-    open my $fsplice, "<$splice"
-      or die("ERROR opening file $splice");
-    my $xml2;
-    {
-      my $tmp = $/;
-      $/ = undef;
-      $xml2 = <$fsplice>;
-      $/ = $tmp;
-    }
-    close $fsplice;
-
-    # Parse GPX from open file
-    my $gpx2 = Geo::Gpx->new( xml => $xml2 );
-
-    # get segment names indexed by track and segments
-    my $extensions2 = getExtensions(\$xml2, $trkIndex2 + 1);
-
-    # Parse GPX from open file
-    my $waypoints2 = $gpx2->waypoints();
-    my $tracks2    = $gpx2->tracks();
-
-    my $track2 = $tracks2->[$trkIndex2];
-
-    # segments for the spliced file
-    my $segments2  = $track2->{segments};
-
-    my $points2 = [];
-
-    my $nSegment0 = $nSegment;
-    for my $segment ( @$segments2 ) {
-      $nSegment ++;
-
-      # make sure we have a new copy of all points
-      for my $p ( @{$segment->{points}} ) {
-        $p->{segment} = ($stripSegments ? 0 : $nSegment);
-        push @$points2, $p;
-      }
-      flattenPointExtensions(points=> $points2);
-    }
-
-    # add in segment extensions to the main extensions
-    if ((! $stripSegments) && (defined $extensions2) && (defined $extensions2->{segmentName}->{$nTrack})) {
-      for my $s ( keys %{$extensions2->{segmentName}->{$nTrack}} ) {
-        my $nS = $nSegment0 + $s;
-        $segmentName{$nS} = $extensions2->{segmentName}->{$nTrack}->{$s};
-        $segmentDefined{$nS} ++;
-      }
-    }
-
     $points = splicePoints(points=> $points, points2=> $points2, isLoop=> $isLoop, spliceDistance=> $spliceDistance);
   }
 
-  # unnamed segments get converted to 0 so they can be merged if contiguius
+  # unnamed segments get converted to 0 so they can be merged if contiguous
   for my $p ( @$points ) {
     unless (defined $segmentName{$p->{segment}}) {
       $segmentDefined{$p->{segment}} = 0;
       $p->{segment} = 0;
     }
+  }
+
+  warn("segment names:\n");
+  for my $ns (sort {$a <=> $b} (keys %segmentName)) {
+    warn("segment $ns: $segmentName{$ns}\n");
   }
 
   # autospacing triggered if max angle specified
@@ -7248,7 +7205,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.55
+0.56
 
 =head1 DESCRIPTION
 
@@ -7823,12 +7780,19 @@ the end of the track.
 
 =item B<C<-closed>>
 
-Alias for C<-copyPoint>
+=item B<C<-closedLoop>>
+
+=item B<C<-closeLoop>>
+
+Equivalent to C<-copyPoint> C<-loop>.  Negation negates C<-copyPoint>
+and negates C<-loop> unless it has already been been set.
 
 =item B<C<-copyPoint>>
 
 For C<-loop> courses, copy the first point to the end of the list of
-points, so the circuit is explicitly closed.
+points, so the circuit is explicitly closed.  If this is used without
+C<-loop> then the result will be the same but smooting will not extend
+across the S/F line.  You probably want C<-closeLoop> instead.
 
 =item B<C<-copyright>> <string>
 
@@ -9261,7 +9225,7 @@ automatically chosen.
 
 The following example was from a criterium course:
 
-C<processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -splineDegs 12 -minRadius 6 -prune -smooth 7 -snapDistance 2 -snap 1 -copyPoint -lap CherryPieCritRGT.gpx>
+C<processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -splineDegs 12 -minRadius 6 -prune -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx>
 
 The course has an out-and-back section ending in a loop.  In the
 actual race, the out-and-back is separated by cones. However, for RGT
@@ -9358,16 +9322,11 @@ cause merging roads to suddenly "snap" together from too far a range,
 however, or even adjacent roads or lanes to merge.  For reference, in
 RGT Cycling, road width is 8 meters.
 
-=item B<C<-copyPoint>>
-
-Make sure the last point matches the first, so RGT Cycling recognizes
-it as a circuit
-
-=item B<C<-lap>>
+=item B<C<-closeLoop>>
 
 It is a multi-lap race, so assure a smooth transition from the end of
-a lap to the beginning of a next.  This is also necessary for
-C<-copyPoint> to work.
+a lap to the beginning of a next.  Also processing like smoothing
+recognizes that the course passes through the S/F point.
 
 =back
 
@@ -9545,7 +9504,7 @@ smoothing.
 
 One approach here is to use the -selectiveSmooth option.  For example:
 
-C<processGPX -copyPoint -lap -spacing 3 -zsmooth 10 -selectiveSmooth 15 270 5 1540 15 original.gpx -minRadius 6 -out processed.gpx>
+C<processGPX -closeLoop -spacing 3 -zsmooth 10 -selectiveSmooth 15 270 5 1540 15 original.gpx -minRadius 6 -out processed.gpx>
 
 =over
 
@@ -9564,7 +9523,7 @@ For this I used -smoothStart and -smoothEnd, to isolate
 the oval, but then to get smoothing on the rest of the loop as well, I
 needed to run the code twice:
 
-C<processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -copyPoint -lap -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -minRadius 6 -out processed.gpx>
+C<processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -closeLoop -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -minRadius 6 -out processed.gpx>
 
 This uses a shell "pipe", which is a way to run the program twice on
 the same data without saving to an intermediate file. although the
@@ -9577,10 +9536,6 @@ intermediate file would be useful for debugging.
 The first call to processGPX specifies no S/F line shift (that will be done the
 second call, and I want to maintain the position of the start of the GPX for
 the first call).
-
-=item B<C<-lap>>
-
-It is a lap course.
 
 =item B<C<-spacing 3>>
 
@@ -9617,10 +9572,10 @@ processGPX.  It's called a "pipe".  The "C<->" tells the code that this
 call takes its input from the pipe.  So think of it as a virtual file, a
 direct line of communication from one call of the code to the next.
 
-=item B<C<-copyPoint -lap>>
+=item B<C<-closeLoop>>
 
-Tell this call to the code that it's a lap, and I want to copy the
-first point to the last point to close the loop.
+Specify this is a lap course with the last point coincident with the first.
+Copying the point may be redundent.
 
 =item B<C<-smooth 15 -smoothStart 1540 -smoothEnd 270>>
 

@@ -49,7 +49,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.55</p>
+<p>0.56</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -447,13 +447,21 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="closed"><b><code>-closed</code></b></dt>
 <dd>
 
-<p>Alias for <code>-copyPoint</code></p>
+</dd>
+<dt id="closedLoop"><b><code>-closedLoop</code></b></dt>
+<dd>
+
+</dd>
+<dt id="closeLoop"><b><code>-closeLoop</code></b></dt>
+<dd>
+
+<p>Equivalent to <code>-copyPoint</code> <code>-loop</code>. Negation negates <code>-copyPoint</code> and negates <code>-loop</code> unless it has already been been set.</p>
 
 </dd>
 <dt id="copyPoint"><b><code>-copyPoint</code></b></dt>
 <dd>
 
-<p>For <code>-loop</code> courses, copy the first point to the end of the list of points, so the circuit is explicitly closed.</p>
+<p>For <code>-loop</code> courses, copy the first point to the end of the list of points, so the circuit is explicitly closed. If this is used without <code>-loop</code> then the result will be the same but smooting will not extend across the S/F line. You probably want <code>-closeLoop</code> instead.</p>
 
 </dd>
 <dt id="copyright-string"><b><code>-copyright</code></b> &lt;string&gt;</dt>
@@ -1508,7 +1516,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>The following example was from a criterium course:</p>
 
-<p><code>processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -splineDegs 12 -minRadius 6 -prune -smooth 7 -snapDistance 2 -snap 1 -copyPoint -lap CherryPieCritRGT.gpx</code></p>
+<p><code>processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -splineDegs 12 -minRadius 6 -prune -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx</code></p>
 
 <p>The course has an out-and-back section ending in a loop. In the actual race, the out-and-back is separated by cones. However, for RGT cycling, riders use the full road width of 8 meters, so the out and back portions needed to be separated.</p>
 
@@ -1574,16 +1582,10 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Snap the return leg in the out-and-back to match the outgoing leg when the two are within 2 meters. The &quot;1&quot; refers to replacing later occurances of road with preceding cases: &quot;2&quot; would replace the earlier occurance. 2 meters is presently the default snap distance. With Strava Route Editor data, 1 meter can result in a fragmented replacement, and bad results. When a road has curves, a larger snapDistance than the default may be necessary. Too large a value may cause merging roads to suddenly &quot;snap&quot; together from too far a range, however, or even adjacent roads or lanes to merge. For reference, in RGT Cycling, road width is 8 meters.</p>
 
 </dd>
-<dt id="copyPoint1"><b><code>-copyPoint</code></b></dt>
+<dt id="closeLoop1"><b><code>-closeLoop</code></b></dt>
 <dd>
 
-<p>Make sure the last point matches the first, so RGT Cycling recognizes it as a circuit</p>
-
-</dd>
-<dt id="lap1"><b><code>-lap</code></b></dt>
-<dd>
-
-<p>It is a multi-lap race, so assure a smooth transition from the end of a lap to the beginning of a next. This is also necessary for <code>-copyPoint</code> to work.</p>
+<p>It is a multi-lap race, so assure a smooth transition from the end of a lap to the beginning of a next. Also processing like smoothing recognizes that the course passes through the S/F point.</p>
 
 </dd>
 </dl>
@@ -1742,7 +1744,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>One approach here is to use the -selectiveSmooth option. For example:</p>
 
-<p><code>processGPX -copyPoint -lap -spacing 3 -zsmooth 10 -selectiveSmooth 15 270 5 1540 15 original.gpx -minRadius 6 -out processed.gpx</code></p>
+<p><code>processGPX -closeLoop -spacing 3 -zsmooth 10 -selectiveSmooth 15 270 5 1540 15 original.gpx -minRadius 6 -out processed.gpx</code></p>
 
 <dl>
 
@@ -1758,7 +1760,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>For this I used -smoothStart and -smoothEnd, to isolate the oval, but then to get smoothing on the rest of the loop as well, I needed to run the code twice:</p>
 
-<p><code>processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -copyPoint -lap -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -minRadius 6 -out processed.gpx</code></p>
+<p><code>processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -closeLoop -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -minRadius 6 -out processed.gpx</code></p>
 
 <p>This uses a shell &quot;pipe&quot;, which is a way to run the program twice on the same data without saving to an intermediate file. although the intermediate file would be useful for debugging.</p>
 
@@ -1768,12 +1770,6 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>The first call to processGPX specifies no S/F line shift (that will be done the second call, and I want to maintain the position of the start of the GPX for the first call).</p>
-
-</dd>
-<dt id="lap2"><b><code>-lap</code></b></dt>
-<dd>
-
-<p>It is a lap course.</p>
 
 </dd>
 <dt id="spacing-31"><b><code>-spacing 3</code></b></dt>
@@ -1812,10 +1808,10 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This tells the command line shell to &quot;send the standard output to the standard input of the next program&quot;, which is a sepearate call to processGPX. It&#39;s called a &quot;pipe&quot;. The &quot;<code>-</code>&quot; tells the code that this call takes its input from the pipe. So think of it as a virtual file, a direct line of communication from one call of the code to the next.</p>
 
 </dd>
-<dt id="copyPoint--lap"><b><code>-copyPoint -lap</code></b></dt>
+<dt id="closeLoop2"><b><code>-closeLoop</code></b></dt>
 <dd>
 
-<p>Tell this call to the code that it&#39;s a lap, and I want to copy the first point to the last point to close the loop.</p>
+<p>Specify this is a lap course with the last point coincident with the first. Copying the point may be redundent.</p>
 
 </dd>
 <dt id="smooth-15--smoothStart-1540--smoothEnd-270"><b><code>-smooth 15 -smoothStart 1540 -smoothEnd 270</code></b></dt>

@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.55
+    0.56
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -529,11 +529,16 @@ OPTIONS
         ends at the end of the track.
 
     "-closed"
-        Alias for "-copyPoint"
+    "-closedLoop"
+    "-closeLoop"
+        Equivalent to "-copyPoint" "-loop". Negation negates "-copyPoint"
+        and negates "-loop" unless it has already been been set.
 
     "-copyPoint"
         For "-loop" courses, copy the first point to the end of the list of
-        points, so the circuit is explicitly closed.
+        points, so the circuit is explicitly closed. If this is used without
+        "-loop" then the result will be the same but smooting will not
+        extend across the S/F line. You probably want "-closeLoop" instead.
 
     "-copyright" <string>
         If you want to specify a copyright field in the GPX, list it here.
@@ -1842,7 +1847,7 @@ EXAMPLES
 
     "processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3
     -autoSpacing -splineDegs 12 -minRadius 6 -prune -smooth 7 -snapDistance
-    2 -snap 1 -copyPoint -lap CherryPieCritRGT.gpx"
+    2 -snap 1 -closeLoop CherryPieCritRGT.gpx"
 
     The course has an out-and-back section ending in a loop. In the actual
     race, the out-and-back is separated by cones. However, for RGT cycling,
@@ -1928,14 +1933,10 @@ EXAMPLES
         range, however, or even adjacent roads or lanes to merge. For
         reference, in RGT Cycling, road width is 8 meters.
 
-    "-copyPoint"
-        Make sure the last point matches the first, so RGT Cycling
-        recognizes it as a circuit
-
-    "-lap"
+    "-closeLoop"
         It is a multi-lap race, so assure a smooth transition from the end
-        of a lap to the beginning of a next. This is also necessary for
-        "-copyPoint" to work.
+        of a lap to the beginning of a next. Also processing like smoothing
+        recognizes that the course passes through the S/F point.
 
   out-and-back course
     This example uses the -outAndBack shortcut to create an out-and-back
@@ -2076,8 +2077,8 @@ EXAMPLES
 
     One approach here is to use the -selectiveSmooth option. For example:
 
-    "processGPX -copyPoint -lap -spacing 3 -zsmooth 10 -selectiveSmooth 15
-    270 5 1540 15 original.gpx -minRadius 6 -out processed.gpx"
+    "processGPX -closeLoop -spacing 3 -zsmooth 10 -selectiveSmooth 15 270 5
+    1540 15 original.gpx -minRadius 6 -out processed.gpx"
 
     "-selectiveSmooth 15 270 5 1540 15"
         This says to smooth with a smoothing length up to 270 meter
@@ -2092,7 +2093,7 @@ EXAMPLES
     the code twice:
 
     "processGPX -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5
-    original.gpx -out - | processGPX - -copyPoint -lap -smooth 15 -prune
+    original.gpx -out - | processGPX - -closeLoop -smooth 15 -prune
     -smoothStart 1540 -smoothEnd 270 -minRadius 6 -out processed.gpx"
 
     This uses a shell "pipe", which is a way to run the program twice on the
@@ -2103,9 +2104,6 @@ EXAMPLES
         The first call to processGPX specifies no S/F line shift (that will
         be done the second call, and I want to maintain the position of the
         start of the GPX for the first call).
-
-    "-lap"
-        It is a lap course.
 
     "-spacing 3"
         A fine spacing is used here, as the loop is only 1600 meters, and
@@ -2137,9 +2135,9 @@ EXAMPLES
         file, a direct line of communication from one call of the code to
         the next.
 
-    "-copyPoint -lap"
-        Tell this call to the code that it's a lap, and I want to copy the
-        first point to the last point to close the loop.
+    "-closeLoop"
+        Specify this is a lap course with the last point coincident with the
+        first. Copying the point may be redundent.
 
     "-smooth 15 -smoothStart 1540 -smoothEnd 270"
         Apply 15 meter smoothing this time, except start it at 1540 meters
