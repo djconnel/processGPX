@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.56
+    0.57
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -136,8 +136,9 @@ OPTIONS
     simultaneously invoke an option. For example, "-spacing 10" sets the
     spacing for point interpolation to 10 meters, and additionally turns on
     point interpolation.
-    lists: Some options allow for multiple values, for example "-flatten" or
-    "-autoSegments". See details in the description of the specific option.
+    lists: Some options allow for multiple values, for example
+    "-uniformGradient" or "-autoSegments". See details in the description of
+    the specific option.
 
     The options are the following, excluding negations, which for flags are
     the option with "no" preceding the keyword.
@@ -202,6 +203,21 @@ OPTIONS
         extensions field, but only if "-autosmoothingZ" is positive. It is
         useful for tuning the autosmoothing scale length.
 
+    "-align" <option>
+        Synonym for "-snap"
+
+    "-alignAltitude" <meters>
+        Synonym for "-snapAltitudes"
+
+    "-alignDistance" <meters>
+        Synonym for "-snapDistance"
+
+    "-alignTransition" <meters>
+        Synonym for "-snapTransition"
+
+    "-alignZ" <meters>
+        This is a synonym for "-snapAltitude".
+
     "-anchorSF"
         For point-to-point routes, this specifies that the start and finish
         points should be anchored. Smoothing would otherwise cause these
@@ -230,7 +246,7 @@ OPTIONS
         useful for preventing RGT from connecting the finish and start
         points, which has a 100 meter threshold, as this is written.
 
-    "-arcFitDegs" <degrees>
+    "-arcFitAngle" <degrees> =item "-arcFitDegs" <degrees>
         If arc fits are desired, specifying this will cause arc fit
         interpolation to be done for corners turning at least this much, but
         less than the "-arcFitMaxDegs" option. A typical value is 5 degrees.
@@ -259,7 +275,7 @@ OPTIONS
         Where to end arc fitting, if any. The default is to end any arc
         fitting at the end of the course.
 
-    "-arcFitMaxDegs" <degrees>
+    "-arcFitMaxAngle" <degrees> =item "-arcFitMaxDegs" <degrees>
         If a "-arcFitDegs" option is specified, specifying this limit the
         maximum angle corner for which arc fit interpolation will be
         applied. ArcFits are good for gradual, rounded corners but are not
@@ -510,7 +526,7 @@ OPTIONS
         the course returns to the specified point and define that as a
         circuit.
 
-        If the number of circuits is greater than 1, it will repeat thse
+        If the number of circuits is greater than 1, it will repeat these
         points to create multiple circuits. If the number is zero, it will
         delete the points. If the number is one, then nothing will change.
 
@@ -553,6 +569,11 @@ OPTIONS
         "-minAngle" causing corners to bow outward. This is only done if the
         straight segmenrs before and after the corner have sufficient length
         for the interpolated points to be placed.
+
+    "-cornerCropArcFit"
+        Whether to do arc fits when corner cropping. This is the default, so
+        to turn it on use "-nocornerCropArcFit". Without arc fitting, the
+        cropped corner will be angular.
 
     "-cornerCropEnd" <meters>
         Where to stop corner cropping
@@ -740,11 +761,21 @@ OPTIONS
         begin. So for example "-circuitToPosition 0 3" would generate three
         finishing circuits automatically.
 
+        If "-finishCircuits" is specified but not "-finishCircuitDistance",
+        then the result is equivalent to "-circuitToPosition" to position 0
+        (counting from end) with one repeat (meaning the circuit starts the
+        penultimate time it reaches the finish point).
+
     "-finishCircuits" <count>
         A finishing circuit starting at the position specified by the
         "-finishCircuitDistance" option, in meters, will be appended to the
         initial data this number of times. A value of 1 here implies adding
         one copy, which will result in two laps of the circuit.
+
+        If "-finishCircuits" is specified but not "-finishCircuitDistance",
+        then the result is equivalent to "-circuitToPosition" to position 0
+        (counting from end) with one repeat (meaning the circuit starts the
+        penultimate time it reaches the finish point).
 
     "-finishCircuitStart" <meters>
         Synonym for "-finishCircuitDistance".
@@ -777,12 +808,12 @@ OPTIONS
         specify this option in addition to a possible "-auto".
 
     "-flatten" <start-meters> <altitude-meters> <end-meters>
-    <altitude-meters> <transition-meters> ...
-        This important option allows the route to be flattened over a
-        specified coordinate range, with a specified transition length. This
-        has been used where there are overpasses in a route, where it is
-        important that the altitude difference between the upper and lower
-        roadway be maintained, even with altitude smoothing.
+    <altitude-meters> <transition-meters> <bow-meters> ...
+        This option allows the route to be flattened over a specified
+        coordinate range, with a specified transition length. This has been
+        used where there are overpasses in a route, where it is important
+        that the altitude difference between the upper and lower roadway be
+        maintained, even with altitude smoothing.
 
         You sepecify a starting distance, then the altitude at that point,
         then a finish distance, then (optionally) an altitude at the second
@@ -793,14 +824,23 @@ OPTIONS
         The transition length is used to describe a distance over which a
         cosine weighting term is used to transition between the fixed
         altitude, and the prior altitude for those points. This should be
-        made long enough to avoid excessive deviations in gradient, yet
-        small enough to limit the extent of the influence of the command.
+        made long enough to avoid excessive deviations in gradient.
 
-        Multiple sets of five numbers can be provided, in which case
-        altitude flattening is done over each of the specified segments.
+        Bow describes how far up (positive) or down (negative) the center of
+        the segment is raised relative to the straight line connecting the
+        endpoints. This may be useful for suspension bridges, for example.
 
-        Distances are calculated *after* smoothing but before cropping or
-        extension.
+        Multiple sets of six numbers can be provided, in which case altitude
+        flattening is done over each of the specified segments.
+
+        Distances are calculated *before* most route processing, after
+        possible route reversal. So if you are using "-reverse", specify the
+        distance values from the start of the route after reversal. It is
+        done before possibly adding circuits, so the adjusted altitudes will
+        be available on all circuits.
+
+        If you want a uniform gradient but do not want to specify the
+        endpoint altitudes, consider "-uniformGradient" instead.
 
     "-gAutoSmooth"
         Synonym for "-autoSmoothG"
@@ -895,7 +935,7 @@ OPTIONS
         example). The default is to base it on the "-laneShift" (left for a
         negative lane shift, else positive).
 
-    "-maxCornerCropDegs" <degrees>
+    "-maxCornerCropAngles" <degrees> =item "-maxCornerCropDegs" <degrees>
         The maximum angle at which corner cropping should be done, for
         example 120 degrees.
 
@@ -907,7 +947,7 @@ OPTIONS
         multiplied by 100. With the closure of RGT it is unlikely this has
         any remaining utility.
 
-    "-minCornerCropDegs" <degrees>
+    "-minCornerCropAngle" <degrees> =item "-minCornerCropDegs" <degrees>
         The minimum angle at which corner cropping should be done, for
         example 60 degrees.
 
@@ -1245,6 +1285,36 @@ OPTIONS
     "-selectiveZSmooth" <meters> ...
         an alias for -selectiveSmoothZ
 
+    "-selectiveSpacing" <meters> ...
+        This applies selective point spacing on the course before other
+        processing. It is done in addition to the "-spacing" and
+        "-autoSpacing" specifications. If the specified value is larger than
+        the spacing implied from those options, then there is little effect,
+        since those will be applied first. If the spacings in this option
+        are smaller, then they will be applied after those values, possibly
+        further reducing the point spacing.
+
+        Values are specified in groups of three, with the first being a
+        spacing in meters, the second being a start of the interval for this
+        spacing, and the third being the end of the interval for this
+        spacing. Additional sets of three points can then be specified. On
+        loop courses only the end point can be before the start point, in
+        which case the interval will wrap around the S/F point.
+
+        The following is an example of applying a 1 meter spacing to the
+        region from 1000 meters to 1100 meters, then 2 meter spacing from
+        1100 to 1200 meters:
+
+        "-selectiveSmooth 1 1000 1100 2 1100 1200"
+
+        On many commands involving intervals, if the stop point is before
+        the start point, that implies the interval is after the start point
+        and before the end point but not between. On point-to-point courses
+        that makes no sense here, so these intervals are rejected on
+        point-to-point courses. Of course on loop courses ("-loop", "-lap",
+        or "-autoLoop") wrapping around still makes perfect sense, so this
+        is still the interpretation.
+
     "-shiftEnd" <meters>
         The position at which lane shifting should end. This is useful in
         case you have an isolated out-and-back section and want to be able
@@ -1496,18 +1566,15 @@ OPTIONS
         This is a nice clean replacement
 
     "-snapTransition" <meters>
-        WARNING: this may be buggy. Check results carefully.
-
         This is an *experimental* feature whereby points within this
-        distance of a snap transition on partially syncronized in altitude,
-        with a transition weighting depending on distance along the course.
-        This is designed to avoid having divergent roads having different
-        slopes while still overlapping, which can create "ridges" in the
-        pavement which in real life would cause riders to crash. It's
-        experimental, however, and there is no guarantee it will help rather
-        than hurt, because of the way smoothing affects points near snap
-        transitions, and snapping is almost always combined with smoothing
-        to avoid abrupt jumps in position.
+        distance of a snap transition on partially syncronized in altitude
+        with a zero gradient, with a transition weighting depending on
+        geometrical distance from the snap transition. This is designed to
+        avoid having divergent roads having different slopes while still
+        overlapping It's experimental, however, and there is no guarantee it
+        will help rather than hurt, because of the way smoothing affects
+        points near snap transitions, and snapping is almost always combined
+        with smoothing to avoid abrupt jumps in position.
 
     "-snapZ" <meters>
         This is a synonym for "-snapAltitude"
@@ -1559,7 +1626,7 @@ OPTIONS
         to a point in the original file to be considered a candidate for
         splicing. The default is 250 meters.
 
-    "-splineDegs" <degrees>
+    "-splineAngle" <degrees> =item "-splineDegs" <degrees>
         If splines are desired, specifying this will cause spline
         interpolation to be done for corners turning at least this much, but
         less than the "-splineMaxDegs" option. A typical value is 5 degrees.
@@ -1571,7 +1638,7 @@ OPTIONS
         Where to end spline fitting, if any. The default is to end any
         spline fitting at the end of the course. This can "wrap around".
 
-    "-splineMaxDegs" <degrees>
+    "-splineMaxAngle" <degrees> =item "-splineMaxDegs" <degrees>
         If a "-splineDegs" option is specified, specifying this limit the
         maximum angle corner for which spline interpolation will be applied.
         Splines are good for gradual, rounded corners but are not good for
@@ -1619,11 +1686,10 @@ OPTIONS
         desired beginning of the route, then you'll need to specify a
         "-cropMin" value to remove some of the initial circuit
 
-        An alternative to this option is the newer "-circuitFromPosition"
-        which if specified with a position of 0 will generate starting
-        circuits without having to identify the position where the circuits
-        end. So for example "-circuitToPosition 0 3" would generate three
-        starting circuits automatically.
+        If "-startCircuits" is specified but not "-startCircuitDistance",
+        then the result is equivalent to "-circuitFromPosition" from
+        position 0 with one repeat (meaning the circuit ends the first time
+        it returns to the starting point).
 
     "-startCircuitEnd" <meters>
         Synonym for "-startCircuitDistance".
@@ -1634,6 +1700,11 @@ OPTIONS
         to be added to the beginning of the data. So a value 1 means adding
         one copy, which implies two laps of the circuit, including the one
         defined in the original file.
+
+        If "-startCircuits" is specified but not "-startCircuitDistance",
+        then the result is equivalent to "-circuitFromPosition" from
+        position 0 with one repeat (meaning the circuit ends the first time
+        it returns to the starting point).
 
     "-startTime" "<time string>"
         Specify a start line for an activity using clear notation, for
@@ -1662,14 +1733,6 @@ OPTIONS
         A minimum number of points is needed to straighten a segment. If
         insufficient points are available, then nothing will be done.
 
-    "-straightEnd" <meters> (1 or more)
-        Set one or more distances for straight fitting.
-
-        See "-straightStart"
-
-    "-straightStart" <meters> (1 or more)
-        Set one or more start distances for straight fitting.
-
         Straight fitting is done by finding the endpoints of the straight
         segment using the provided distances. Only existing points will be
         used: no point interpolation will be done. Then for points between
@@ -1685,14 +1748,24 @@ OPTIONS
         is perpendicular to any altitude gradients. This could result in a
         road with a constant gradient but following a curvy path ending up
         with a non-constant gradient. So check altitudes with care. One
-        possible approach is to use the "-flatten" option to interpolate the
-        altitudes, after doing the straight-line fit.
+        possible approach is to use the "-uniformGradient" option to
+        interpolate the altitudes, after doing the straight-line fit.
+
+    "-straightEnd" <meters> (1 or more)
+        Set one or more distances for straight fitting.
+
+        See "-straightStart" and "-straight".
+
+    "-straightStart" <meters> (1 or more)
+        Set one or more start distances for straight fitting.
 
         If multiple values are listed, then multiple sections will be
-        replaced. Distances will be updated after each circular segment
-        replacement. So if you want to do multiple circular replacements,
-        either list them from further to closer relative to the start to
-        avoid the distances for later fits being affected by earlier fits.
+        replaced. Distances will be updated after each segment replacement.
+        So if you want to do multiple circular replacements, list them from
+        further to closer relative to the start to avoid the distances for
+        later fits being affected by earlier fits.
+
+        See "-straight" for comments.
 
     "-stripSegments"
         if specified, this results in existing segment definitions on input
@@ -1710,6 +1783,22 @@ OPTIONS
         will be used. Track number can also be specified by putting a suffix
         after the filename, for example "file.gpx:2" for the second track in
         file.gpx.
+
+    "-uniformGradient" <start-meters> <end-meters> <bow-meters> ...
+        This is similar to "-flatten", except instead of setting a fixed
+        altitude at each endpoint, interpolates altitudes from the course.
+        One common application is bridges or tunnels, where a mapping
+        program may use altitudes from the Earth, while the bridge or tunnel
+        more typically takes a uniform gradient. Suspension bridges, for
+        example, may be more parabolic in nature, and that will require
+        future support. This is done before most route processing, but after
+        "-join" and "-splice", and after "-reverse".
+
+        The third number, if any, is a bow term, which is how much the
+        center point is above or below the straight line connecting the
+        start and finish point. This results in a uniformly graded gradient
+        rather than a uniform gradient. It is useful for suspension bridges,
+        for example, which have a curved trajectory.
 
     "-v" or "-version"
         Print the version number and exit.
@@ -1748,12 +1837,12 @@ OPTIONS
     "-zShiftEnd" <meters>
         Distance on the route to end altitude shift. There will be a
         transition outside of this range. This is also used for "-zScale"
-        and "-zOffset" (it affects all)..
+        and "-zOffset" (it affects each).
 
     "-zShiftStart" <meters>
         Distance on the route to start altitude shift. There will be a
         transition outside of this range. This is also used for "-zScale"
-        and "-zOffset" (it affects all)..
+        and "-zOffset" (it affects each).
 
     "-zSmooth"
         Synonym for "-smoothZ"
@@ -1845,25 +1934,22 @@ EXAMPLES
   criterium course
     The following example was from a criterium course:
 
-    "processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3
-    -autoSpacing -splineDegs 12 -minRadius 6 -prune -smooth 7 -snapDistance
-    2 -snap 1 -closeLoop CherryPieCritRGT.gpx"
+    "processGPX -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3
+    -autoSpacing -cornerCrop 6 -minRadius 6 -prune -smooth 7 -snapDistance 2
+    -snap 1 -closeLoop CherryPieCritRGT.gpx"
 
     The course has an out-and-back section ending in a loop. In the actual
-    race, the out-and-back is separated by cones. However, for RGT cycling,
-    riders use the full road width of 8 meters, so the out and back portions
-    needed to be separated.
+    race, the out-and-back is separated by cones. But Biketerra does not
+    have a way to specify riders have riders go out and back on the same
+    road except for full out-and-back courses. So here a separate road out
+    and back are used. This creates four lanes.
 
     Options:
 
-    "-laneshift -6"
+    "-laneshift -3"
         Riders remain to the left left on the out-and-back portion, so each
         direction is shifted 4 meters to the left. The negative number
         implies left, a positive number implies right.
-
-        At one time a lane shift of 4 meters was adequate, but with changes
-        to "asset" placement, a larger lane shift is now needed. This
-        example uses 7 meters to the left (UK, perhaps).
 
     "-shiftStart 740 -shiftEnd 1390"
         The lane shift is applied starting at 740 meters and ending at 1390
@@ -1899,18 +1985,12 @@ EXAMPLES
         This option is almost always a good idea, setting the spacing in the
         corners to provide adequare resolution.
 
-    "-splineDegs 12"
-        This option helps improve prevent corners from "collapsing" when
-        they don't have enough points to define the curve in the original
-        GPX file. Instead of being interpreted as polygons with straight
-        segments, they will be interpreted as smooth curves, if there are
-        corners bending more than this angle (12 degrees, in this example).
-        This is usually a good idea if there are tight turns.
+    "-cornerCrop 6"
+        If there are tight corners in the GPX file, this replaces the
+        rounded forner with a circular arc before further processing.
 
     "-minRadius 6"
-        If a corner turns out sharper than 6 meters, RGT will try to
-        increase the radius of the turn by extending the road outward, with
-        a smooth transition into and out of the correction.
+        Make sure the corner isn't too sharp for BikeTerra.
 
     "-prune"
         Remove useless points which don't affect either the shape of the
@@ -1952,6 +2032,10 @@ EXAMPLES
     This example uses the -outAndBackLap shortcut to create an out-and-back
     circuit with loops at both ends to create a circuit.
 
+    Point-to-point routes on BikeTerra have automatically generated
+    turnarounds at the end so this is nor normally needed there, unless for
+    example you prefer having larger-radius turnarounds.
+
     "processGPX -outAndBackLap outSection.gpx -out outAndBackCircuit.gpx"
 
     "-outAndBackLap"
@@ -1963,9 +2047,12 @@ EXAMPLES
     is not used here, since in this example, the loop at the end of the
     out-and-back is part of the original route.
 
+    BikeTerra automatically adds turnarounds to the end of point-to-point
+    routes. so this is not typically necessary.
+
     "processGPX -crop 38730 -anchorSF -spacing 10 -autoSpacing -smoothAngle
     20 -prune -smooth 10 -smoothZ 20 -snapDistance 5 -snap 1 -autoSegments
-    10 0.5 -minRadius 6 NoonRide.gpx"
+    10 0.5 -cornerCrop 6 -minRadius 6 NoonRide.gpx"
 
     "-crop 38730"
         The finish of this route is on the out-and-back section, so
@@ -2038,6 +2125,11 @@ EXAMPLES
         higher number places a higher value on segments having a higher
         average gradient.
 
+    "-cornerCrop 6"
+        It is generally good practice to set "-cornerCrop" to match
+        "-minRadius", to replace sharp corners with circular arcs before
+        further processing.
+
     "-minRadius 6"
         If a corner turns out sharper than 6 meters, RGT will try to
         increase the radius of the turn by extending the road outward, with
@@ -2069,7 +2161,7 @@ EXAMPLES
     "-out processed.gpx"
         This specifies the name of the file to which the result is written
 
-  Multi-step processing: selective smoothing
+  selective smoothing
     Here is an example where an urban route with reasonably sharp corners,
     except it followed an oval path around a park. The oval path came out of
     Strava Route Editor slightly ragged, so I wanted enough smoothing there
@@ -2085,6 +2177,7 @@ EXAMPLES
         distance, then 5 meters from there up to 1540 meter distance, and
         from there 15 meters again to the end of the lap.
 
+  multi-step processing
     But an alternate approach is to run the code twice, smoothing in two
     steps.
 
@@ -2153,6 +2246,46 @@ EXAMPLES
         steps.
 
     "-out processed.gpx"
+
+  adjusting gradient for bridges or tunnels
+    Typically tunnels are built with a constant gradient. Route editors may
+    not produce this uniform gradient, so it can be useful to "manually" set
+    the gradient to uniform. Or, on climbs with poor altitude resolution,
+    you might want to set the gradient to uniform over certain sections.
+
+    Here the "-uniformGradient" option can be useful, for example:
+
+    "processGPX -auto -simplify -uniformGradient 1000 1500 input.gpx -out
+    output.gpx"
+
+    Options here include:
+
+    "-auto"
+        This specifies a reasonable set of smoothing parameters.
+
+    "-simplify"
+        Reduce the number of points after processing beyond that which
+        "-prune" would produce.
+
+    "-uniformGradient 1000 1500"
+        This specifies that the gradient from 1000 meters to 1500 meters is
+        to be set to be uniform. This is done before any other processing,
+        so additional smoothing may transition the gradient at the start and
+        finish of the interval.
+
+    For suspension bridges, for example, a uniform gradient might not be
+    appropriate. These may have a smoothly varying gradient, producing a
+    parabolic shape. In this case, you would provide a third parameter to
+    "-uniformGradient". For example:
+
+    "processGPX -auto -simplify -uniformGradient 2000 2400 3 input.gpx -out
+    output.gpx"
+
+    "-uniformGradient 2000 2400 3"
+        This specifies that instead of a uniform, linear increase in
+        gradient from the start at 2000 meters to the finish at 2400 meters,
+        the center is raised 3 meters relative to the straight line, with
+        the transition to 0 meters at the start points and stop points.
 
   segment generation
     "processGPX -stripSegments -autoSegments 100 0.5 -segments
@@ -2283,6 +2416,11 @@ EXAMPLES
     "processGPX -cropMin 60 -cropMax -140 RGTRoute.gpx -out
     BikeTerraRoute.gpx"
 
+    For circuits, you don't need to crop the end of the route, but the S/F
+    point should be shifted:
+
+    "processGPX -cropMin 60 RGTCircuit.gpx -out BikeTerraCircuit.gpx"
+
 BUGS
     lane shifting and sharp corners
         If you apply more lane shift than the radius of the tightest corner,
@@ -2294,11 +2432,23 @@ BUGS
         computation time and can be conflused for sufficiently complicated
         routes. More testing is needed.
 
-    "-snapTransition" is suspect.
+    "-snapTransition" may cause issues.
+        If there are gaps in a snapping range, then snapTransition may cause
+        unnecessary flattening of the course
+
     snapping and segments
         If segments are defined before snapping, the code will try to assign
         the appropriate segment to each snapped point, but this is
         imperfect. It is better to define segments after snapping points.
+
+    gradient signs apply to only forward direction.
+        On BikeTerra, for example, routes can be ridden in either direction,
+        and the present gradient sign approach is only in the forward
+        direction.
+
+    climbs only detected in forward direction.
+        Climb detection applies only to riding routes in the forward
+        direction.
 
 AUTHORS
     Daniel Connelly <djconnel@gmail.com>

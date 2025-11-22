@@ -37,8 +37,15 @@ use Pod::Usage;
 # version 0.54: change autoLoop, add -splice, -fixSteps, added arcFit to cornerCrop
 # version 0.55: improved splicing.  Added -spliceDistance
 # version 0.56: moved file loading to a proc, added -closeLoop
+# version 0.57: added -uniformGradient, moved -flatten to pre-smoothing and pre-circuit creation; added bow term to -flatten,
+#               added -selectiveSpacing; fixed fixCrossings on laps, allowed start/endCircuit to trigger circuitTo/FromPosition
+#               fixed bug in circuits, added -align as synonym for -snap, waypoints fixed, -merge close -snap segments,
+#               -snapTransition recoded, reduced snapStep in large routes, added cornerCropArcFit, fixed problem with
+#               interpolatePoint and distance field on loops, improved S/F interpolation with cropped corners
+#               fixed -reverse to retain start point on loops, fixed reversePoints distance, reduced minCornerCropDegs default,
+#               Angle alias for Degs on options
 
-my $version = "0.56";             # make sure this matches pod value
+my $version = "0.57"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -97,7 +104,6 @@ sub loadGPX {
   my $nSegment0 = $nSegment;
   for my $segment ( @$segments ) {
     $nSegment ++;
-    warn("increasing segment number to $nSegment\n");
 
     # make sure we have a new copy of all points
     for my $p ( @{$segment->{points}} ) {
@@ -118,20 +124,19 @@ sub loadGPX {
     for my $s ( keys %{$extensions->{segmentName}->{$nTrack}} ) {
       my $nS = $nSegment0 + $s;
       $segmentNames{$nS} = $extensions->{segmentName}->{$nTrack}->{$s};
-      warn("segment number $nS : $extensions->{segmentName}->{$nTrack}->{$s}\n");
     }
   }
   return {
-	  xml=> $xml,
-	  gpx=> $gpx,
-	  points=> $points,
-	  nTrack=> $nTrack,
-	  track=> $track,
-	  waypoints=> $waypoints,
-	  nSegment=> $nSegment,
-	  segmentNames=> \%segmentNames,
-	  extensions=> $extensions,
-	 };
+          xml=> $xml,
+          gpx=> $gpx,
+          points=> $points,
+          nTrack=> $nTrack,
+          track=> $track,
+          waypoints=> $waypoints,
+          nSegment=> $nSegment,
+          segmentNames=> \%segmentNames,
+          extensions=> $extensions,
+         };
 }
 
 
@@ -139,23 +144,85 @@ sub loadGPX {
 # uses a reference point, then the points to be printed
 sub points2String {
   my $p0 = shift;
-  my @points;
+  my $points;
   if (ref($_[0]) eq "ARRAY") {
-    @points = @{$_[0]};
+    $points = shift;
   } else {
-    @points = @_;
+    $points = \@_;
   }
-  note("points2String called with " . scalar(@points) . " points\n");
-  my $s = "x y z segment\n";
-  for my $p ( @points ) {
+  note("points2String called with " . scalar(@$points) . " points\n");
+  # get labels from keys of first point
+  my @labels = keys(%{$points->[0]});
+  my $s = "x y @labels\n";
+  for my $p ( @$points ) {
+    my @vals = ();
+    for my $k ( @labels ) {
+      # special handling of linked lists with index field
+      if (((ref $p->{$k}) ne "") && (defined $p->{$k}->{index})) {
+	push @vals, $p->{$k}->{index};
+      } else {
+	push @vals, (defined $p->{$k}) ? $p->{$k} : "undefined";
+      }
+    }
     my ($x, $y) = latlng2dxdy($p0, $p);
-    my $z = $p->{ele};
-    my $ns = $p->{segment};
-    $s .= "$x $y $z $ns\n";
+    # special handling of next and prev
+    my @data = map { ref $_ eq ""  ? $_ : "data" } ($x, $y, @vals);
+    $s .= "@data\n";
   }
   return $s;
 }
 
+sub copyPoint {
+  my $points = shift;
+  unless (pointsAreClose($points->[0], $points->[-1])) {
+    my %p = %{$points->[0]};
+    $p{segment} = $points->[-1]->{segment} if (defined $points->[-1]->{segment});
+    $p{distance} = $points->[-1]->{distance} + latlngDistance($points->[-1], \%p) if (defined $points->[-1]->{distance});
+    push @$points, \%p;
+  }
+  return $points;
+}
+
+
+#
+# add next and prev fields to points, for linked-list behavior
+#
+sub createLinks
+{
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $isLoop = $var{isLoop} // 0;
+  # create a linked list
+  for my $i ( 0 .. $#$points ) {
+    $points->[$i]->{next} = ($isLoop || $i < $#$points) ? $points->[($i + 1) % @$points] : undef;
+    $points->[$i]->{prev} = ($isLoop || $i > 0) ? $points->[$i - 1] : undef;
+  }
+  return $points;
+}
+
+#
+# go from a linked list to points
+#
+sub linkedListToPoints {
+  my $pStart = shift // return [];
+  my $p = $pStart;
+  my @pNew = ();
+  while ((defined $p) && (! $p->{counted})) {
+    push @pNew, $p;
+    $p->{counted} = 1;
+    $p = $p->{next};
+  }
+  for my $p ( @pNew ) {
+    delete $p->{counted};
+  }
+  return \@pNew;
+}
+
+
+#
+# smooth transition function
+# 1 to 0 from -1 to 1, sinusoid in between
+#
 sub transition {
   my $x = shift;
   return (
@@ -163,6 +230,28 @@ sub transition {
           ($x > 1) ? 0 :
           (1 - sin($x * $pi2)) / 2
          );
+}
+
+# isPointOnInterval: check whether a point is in an interval s1 <= s <= s2
+sub isPointInInterval {
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $start = $var{start};
+  my $stop = $var{stop};
+  my $isLoop = $var{isLoop} // 0;
+  my $s = $var{distance};
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+
+  return 0 unless (defined $s);
+  if ($isLoop) {
+    if (defined $courseDistance) {
+      $start -= floor($start / $courseDistance) * $courseDistance;
+      $stop -= floor($stop / $courseDistance) * $courseDistance;
+    }
+  }
+  return (($s >= $start) || ($s <= $stop))
+    if ($start > $stop);
+  return (($s >= $start) && ($stop >= $s));
 }
 
 # set the suffix of a filename
@@ -437,55 +526,55 @@ sub splicePoints {
   # keep final point at entry which aligns with start of spliced portion
   for my $i ( 0 .. $#ds1 ) {
     if (
-	($ds1[$i] < $spliceDistance) &&
-	($isLoop || ($i < $#$points)) &&
-	(( ! defined $iClosest1) || ($ds1[$i] < 1 + 1.2 * $ds1[$iClosest1])) &&
-	(abs($points->[$i]->{ele} - $ps1->{ele}) < 1 + 0.3 * $ds1[$i])
+        ($ds1[$i] < $spliceDistance) &&
+        ($isLoop || ($i < $#$points)) &&
+        (( ! defined $iClosest1) || ($ds1[$i] < 1 + 1.2 * $ds1[$iClosest1])) &&
+        (abs($points->[$i]->{ele} - $ps1->{ele}) < 1 + 0.3 * $ds1[$i])
        ) {
       # check that point aligns with entry to spliced section
       my $l = latlngDotProduct($points->[$i], $ps1, $ps1, $points2->[1]);
       if ((! defined $l) || ($l > -0.1)) {
-	# check that next point does not align with spliced section
-	if ($isLoop || ($i < $#$points)) {
-	  $l = latlngDotProduct($ps1, $points->[($i + 1) % @$points], $ps1, $points2->[1]);
-	} else {
-	  $l = 0;
-	}
-	if ((! defined $l) || ($l > -0.1)) {
-	  $iClosest1 = $i
-	    if ((! defined $iClosest1) || ($ds1[$i] < $ds1[$iClosest1]));
-	  push @i1s, $i;
-	}
+        # check that next point does not align with spliced section
+        if ($isLoop || ($i < $#$points)) {
+          $l = latlngDotProduct($ps1, $points->[($i + 1) % @$points], $ps1, $points2->[1]);
+        } else {
+          $l = 0;
+        }
+        if ((! defined $l) || ($l > -0.1)) {
+          $iClosest1 = $i
+            if ((! defined $iClosest1) || ($ds1[$i] < $ds1[$iClosest1]));
+          push @i1s, $i;
+        }
       }
     }
     @i1s = grep {$ds1[$_] < 1 + 1.2 * $ds1[$iClosest1]} @i1s;
   }
-  $i1 = $iClosest1;		# initial guess
+  $i1 = $iClosest1;             # initial guess
   # keep first point at exit which aligns with start of spliced portion
   for my $i ( 0 .. $#ds2 ) {
     if (
-	($isLoop || ($i > 0)) && 
-	($ds2[$i] < $spliceDistance) &&
-	(( ! defined $iClosest2) || ($ds2[$i] < 1 + 1.2 * $ds2[$iClosest2])) &&
-	(abs($points->[$i]->{ele} - $ps2->{ele}) < 1 + 0.3 * $ds2[$i])
+        ($isLoop || ($i > 0)) &&
+        ($ds2[$i] < $spliceDistance) &&
+        (( ! defined $iClosest2) || ($ds2[$i] < 1 + 1.2 * $ds2[$iClosest2])) &&
+        (abs($points->[$i]->{ele} - $ps2->{ele}) < 1 + 0.3 * $ds2[$i])
        ) {
       my $l = latlngDotProduct($points2->[-2], $ps2, $ps2, $points->[$i]);
       if ((! defined $l) || ($l > -0.1)) {
-	if ($isLoop || ($i > 0)) {
-	  $l = latlngDotProduct($points2->[-2], $ps2, $points->[$i - 1], $ps2);
-	} else {
-	  $l = 0;
-	}
-	if ((! defined $l) || ($l > -0.1)) {
-	  $iClosest2 = $i
-	    if ((! defined $iClosest2) || ($ds2[$i] < $ds1[$iClosest2]));
-	  push @i2s, $i;
-	}
+        if ($isLoop || ($i > 0)) {
+          $l = latlngDotProduct($points2->[-2], $ps2, $points->[$i - 1], $ps2);
+        } else {
+          $l = 0;
+        }
+        if ((! defined $l) || ($l > -0.1)) {
+          $iClosest2 = $i
+            if ((! defined $iClosest2) || ($ds2[$i] < $ds1[$iClosest2]));
+          push @i2s, $i;
+        }
       }
     }
     @i2s = grep {$ds2[$_] < 1 + 1.2 * $ds2[$iClosest2]} @i2s;
   }
-  $i2 = $iClosest2;		# initial guess
+  $i2 = $iClosest2;             # initial guess
   # if no candidates, bail
   if ((@i1s == 0) || (@i2s == 0)) {
     warn("WARNING: splice of file failed to find matching interval\n");
@@ -495,19 +584,19 @@ sub splicePoints {
   for my $a ( @i1s ) {
     for my $b ( @i2s ) {
       if ($isLoop) {
-	my $s = $b - $a;
-	$s += @$points if ($s < 0);
-	my $s0 = $i2 - $i1;
-	$s0 += @$points if ($s0 < 0);
-	if ($s < $s0) {
-	  $i1 = $a;
-	  $i2 = $b;
-	}
+        my $s = $b - $a;
+        $s += @$points if ($s < 0);
+        my $s0 = $i2 - $i1;
+        $s0 += @$points if ($s0 < 0);
+        if ($s < $s0) {
+          $i1 = $a;
+          $i2 = $b;
+        }
       } else {
-	if (($b > $a) && (($i1 > $i2) || ($b - $a < $i2 - $i1))) {
-	  $i1 = $a;
-	  $i2 = $b;
-	}
+        if (($b > $a) && (($i1 > $i2) || ($b - $a < $i2 - $i1))) {
+          $i1 = $a;
+          $i2 = $b;
+        }
       }
     }
   }
@@ -536,12 +625,11 @@ sub splicePoints {
     for my $i ( 0 .. $#$points2 ) {
       my $d = latlngDistance($points2->[$i], $points->[0]);
       if ((! defined $iSF) || ($d < $dSF)) {
-	$iSF = $i;
-	$dSF = $d;
+        $iSF = $i;
+        $dSF = $d;
       }
     }
     note("setting S/F to point ", $iSF + 1,  " of ",  scalar(@$points2), " in spliced file,\n");
-    warn("spliced points at start = " . (@$points2 - $iSF) . "\n");
 
     @pNew = @$points2[$iSF .. $#$points2];
     push @pNew, @$points[$i2 .. $i1];
@@ -550,10 +638,7 @@ sub splicePoints {
   note("points before splicing = ", scalar(@$points) . "\n");
   note("points after splicing = ", scalar(@pNew) . "\n");
   $points = \@pNew;
-
-  return $points;
 }
-
 
 #
 # for a range of points, interpolate the fields based on distance between
@@ -607,12 +692,21 @@ sub interpolatePoint {
   my $p1 = shift;
   my $p2 = shift;
   my $f = shift;
+  my $courseDistance = shift // 0;
+  my $isLoop = shift // 0;
+
   # interpolate lat and lng using distances, not angles
   my ($dx, $dy) = latlng2dxdy($p1, $p2);
   my $p = addVectorToPoint($p1, [$dx * $f, $dy * $f]);
+
+  # remove links, if any
+  delete $p->{next};
+  delete $p->{prev};
+
   # interpolate other random values
   for my $k ( keys %$p1 ) {
-    next if ($k eq "lat" || $k eq "lon");
+    # skip lat lon (handled separately) or point references
+    next if ($k eq "lat" || $k eq "lon" || ref $p1->{$k} ne "");
     if ((defined $p1->{$k}) && (defined $p2->{$k})) {
       if ($k eq "segment" ) {
         if ( $p1->{$k} eq $p2->{$k} ) {
@@ -620,6 +714,11 @@ sub interpolatePoint {
         } else {
           $p->{$k} = 0;
         }
+      } elsif (($k eq "distance") && ($courseDistance > 0))  {
+	# distance must be treated specially on courses
+	my $d = $p1->{distance} + distanceDifference($p1, $p2, $courseDistance, $isLoop) * $f;
+	$d -= $courseDistance * floor($d / $courseDistance);
+	$p->{$k} = $d;
       } elsif (($p1->{$k} =~ /^$number_regexp$/o) && ($p2->{$k} =~ /^$number_regexp$/o)) {
         $p->{$k} = $p1->{$k} * (1 - $f) + $p2->{$k} * $f;
       } else {
@@ -630,18 +729,20 @@ sub interpolatePoint {
   return $p;
 }
 
+
 #
 # return a new list of points and the index of a point at a given
 # position.  The point is interpolated if necessary
 #
 sub pointAtPosition {
-  my $s0     = shift;
-  my $points = shift;
-  my $isLoop = shift // 0;
+  my %var = @_;
+  my $s0 = $var{distance} // die("pointAtPosition requires a distance parameters.\n");
+  my $points = $var{points} // [];
+  my $isLoop = $var{isLoop} // 0;
 
   my @pNew = ();
 
-  addDistanceField(points=> $points) unless (exists $points->[0]->{distance});
+  addDistanceFieldIfNeeded(points=> $points);
 
   # handling of open loop
   my $courseDistance = $points->[-1]->{distance};
@@ -651,6 +752,8 @@ sub pointAtPosition {
 
   my $pointAdded = 0;
   my $pIndex;
+
+  # this should be a binary search...
   for ( my $i = 1 ; $i <= $#$points; $i ++ ) {
     push @pNew, $points->[$i - 1];
     if ( ($s0 > 0) && ($points->[$i]->{distance} >= $s0) && ($points->[$i - 1]->{distance} < $s0) ) {
@@ -663,7 +766,7 @@ sub pointAtPosition {
       } elsif (($d2 < 0.01) && ($d1 >= $ds / 2)) {
         $pIndex = $i;
       } else {
-        push @pNew, interpolatePoint($points->[$i - 1], $points->[$i], $f);
+        push @pNew, interpolatePoint($points->[$i - 1], $points->[$i], $f, $courseDistance, $isLoop);
         $pIndex = $#pNew;
       }
     }
@@ -684,6 +787,37 @@ sub pointAtPosition {
   return (\@pNew, $pIndex);
 }
 
+sub fieldAtPosition {
+  my %var = @_;
+  my $s0 = $var{distance} // die("pointAtPosition requires a distance parameters.\n");
+  my $points = $var{points} // [];
+  my $field = $var{field} // die("fieldAtPosition requires a field specification\n");
+  my $isLoop = $var{isLoop} // 0;
+
+  # handling of open loop
+  my $courseDistance = calcCourseDistance(isLoop=> $isLoop, points=> $points) if ($isLoop);
+  if ($isLoop) {
+    $s0 -= $courseDistance * floor($s0 / $courseDistance);
+  }
+  for my $i ( 0 .. $#$points ) {
+    last if ((! $isLoop) && ($i == $#$points));
+    my $s1 = $points->[$i]->{distance};
+    my $s2 = $points->[($i + 1) % @$points]->{distance};
+    $s2 += $courseDistance if ($isLoop && $s2 < $s1);
+    if (($s1 <= $s0) && ($s2 >= $s0)) {
+      my $f1 = $points->[$i]->{$field};
+      if ($s0 == $s1) {
+        return $f1;
+      }
+      my $f2 = $points->[($i + 1) % @$points]->{$field};
+      die("ERROR: trying to interpolate undefined field $field\n") unless ((defined $f1) && (defined $f2));
+      my $f = ($s0 - $s1) / ($s2 - $s1);
+      return( $f1 * (1 - $f) + $f2 * $f );
+    }
+  }
+  return undef;
+}
+
 # for splines...
 # Catmull-Rom spline
 # f is the fraction between points 2 and 3
@@ -691,13 +825,13 @@ sub pointAtPosition {
 # f4 is the normalized distance from p3 to p4
 # they are provided as arguments to spare calculation
 sub interpolateCorner {
-  my ($p1, $p2, $p3, $p4, $f1, $f4, $f) = @_;
-  my $a1 = interpolatePoint($p1, $p2, 1 + $f / $f1);
-  my $a2 = interpolatePoint($p2, $p3, $f);
-  my $a3 = interpolatePoint($p3, $p4, ($f - 1) / $f4);
-  my $b1 = interpolatePoint($a1, $a2, ($f1 + $f) / ($f1 + 1));
-  my $b2 = interpolatePoint($a2, $a3, $f / ($f4 + 1));
-  my $px = interpolatePoint($b1, $b2, $f);
+  my ($p1, $p2, $p3, $p4, $f1, $f4, $f, $courseDistance, $isLoop) = @_;
+  my $a1 = interpolatePoint($p1, $p2, 1 + $f / $f1, $courseDistance, $isLoop);
+  my $a2 = interpolatePoint($p2, $p3, $f, $courseDistance, $isLoop);
+  my $a3 = interpolatePoint($p3, $p4, ($f - 1) / $f4, $courseDistance, $isLoop);
+  my $b1 = interpolatePoint($a1, $a2, ($f1 + $f) / ($f1 + 1), $courseDistance, $isLoop);
+  my $b2 = interpolatePoint($a2, $a3, $f / ($f4 + 1), $courseDistance, $isLoop);
+  my $px = interpolatePoint($b1, $b2, $f, $courseDistance, $isLoop);
   return $px;
 }
 
@@ -783,6 +917,8 @@ sub splineInterpolation {
   my $p2 = shift;
   my $p3 = shift;
   my $p4 = shift;
+  my $courseDistance = shift // 0;
+  my $isLoop = shift // 0;
   my $dd = shift // ($pi / 16); # minimum angle for spline
 
   # calculate number of points based on the angles
@@ -798,7 +934,7 @@ sub splineInterpolation {
 
   for my $i ( 1 .. $NPoints ) {
     my $f = $i / ($NPoints + 1);
-    my $p = interpolateCorner($p1, $p2, $p3, $p4, $f1, $f4, $f);
+    my $p = interpolateCorner($p1, $p2, $p3, $p4, $f1, $f4, $f, $courseDistance, $isLoop);
     push @points, $p;
   }
 
@@ -814,6 +950,8 @@ sub arcFitInterpolation {
   my $p2 = shift; # interpolation starts here
   my $p3 = shift; # interpolation ends here
   my $p4 = shift; # for second circle fit
+  my $courseDistance = shift // 0;
+  my $isLoop = shift;
   my $dd = shift // ($pi / 16); # interpolation angle
 
   my @xy1 = latlng2dxdy($p2, $p1);
@@ -982,7 +1120,6 @@ sub removeDuplicatePoints {
   return \@pNew;
 }
 
-
 sub checkAutoLoop {
   my %var = @_;
   my $points = $var{points} // [];
@@ -993,14 +1130,13 @@ sub checkAutoLoop {
   $i1 -- while ((latlngDistance($points->[$i1], $points->[$i2]) < 10) && ($i1 > $i2 - @$points));
   $i3 ++ while ((latlngDistance($points->[$i2], $points->[$i3]) < 10) && ($i3 < $#$points));
   my $isLoop = (
-		(latlngDistance($points->[0], $points->[-1]) < 150) &&
-		(@$points > 2) &&
-		(latlngDotProduct($points->[$i1], $points->[$i2], $points->[$i2], $points->[$i3]) > -0.1)
-	       );
+                (latlngDistance($points->[0], $points->[-1]) < 150) &&
+                (@$points > 2) &&
+                (latlngDotProduct($points->[$i1], $points->[$i2], $points->[$i2], $points->[$i3]) > -0.1)
+               );
   note("autoLoop detection: " . ($isLoop ? "true" : "false") . "\n");
   return $isLoop;
 }
-
 
 #
 # crop corners
@@ -1011,6 +1147,7 @@ sub cropCorners {
   my $cornerCrop = $var{cornerCrop} // 0;
   my $minRadians = $var{minRadians} // $pi / 3;
   my $maxRadians = $var{maxRadians};
+  my $cornerCropArcFit = $var{cornerCropArcFit} // 1;
   my $start      = $var{start};
   my $end        = $var{end};
   my $spacing    = $var{spacing} // 0;
@@ -1053,8 +1190,7 @@ sub cropCorners {
   return $points unless (@cropCorners);
 
   # add a distance field if needed
-  addDistanceField(points=> $points)
-    unless ( (defined $points->[0]->{distance}) || (! ( (defined $start) || (defined $end) )) );
+  addDistanceFieldIfNeeded(points=> $points) if ((defined $start) || (defined $end));
 
   # corners which are too close get pruned
   my $dMin = 2 * $cornerCrop;
@@ -1069,7 +1205,7 @@ sub cropCorners {
     } else {
       $dPrev = $points->[$cropCorners[($ic - 1) % @cropCorners]]->{distance};
       $dPrev -= $courseDistance
-	if ($ic == 0);
+        if ($ic == 0);
     }
     my $dNext;
     if ((! $isLoop) && ($ic == $#cropCorners)) {
@@ -1077,7 +1213,7 @@ sub cropCorners {
     } else {
       $dNext = $points->[$cropCorners[($ic + 1) % @cropCorners]]->{distance};
       $dNext += $courseDistance
-	if ($ic == $#cropCorners);
+        if ($ic == $#cropCorners);
     }
 
     # pass criteria:
@@ -1085,22 +1221,22 @@ sub cropCorners {
     # 2. corner is sufficiently far from neighbor corners (or for point-to-point, course terminals)
     push @cc, $cropCorners[$ic]
       if (
-	  (
-	   (defined $start) ?
-	   (
-	    (defined $end) ?
-	    (
-	     ($isLoop && ($end < $start)) ?
-	     (($d >= $end) && ($d <= $start)) :
-	     (($d <= $end) && ($d >= $start))
-	    ) :
-	    ($d >= $start)
-	   ) :
-	   ((! defined $end) || ($d <= $end))
-	  ) &&
-	  ($dNext >= $d + $dMin) &&
-	  ($dPrev <= $d - $dMin)
-	 );
+          (
+           (defined $start) ?
+           (
+            (defined $end) ?
+            (
+             ($isLoop && ($end < $start)) ?
+             (($d >= $end) && ($d <= $start)) :
+             (($d <= $end) && ($d >= $start))
+            ) :
+            ($d >= $start)
+           ) :
+           ((! defined $end) || ($d <= $end))
+          ) &&
+          ($dNext >= $d + $dMin) &&
+          ($dPrev <= $d - $dMin)
+         );
   }
 
   @cropCorners = @cc;
@@ -1128,7 +1264,10 @@ sub cropCorners {
   my $i = 0;
   my $p1 = $points->[$i];
   my $p2 = $points->[($i + 1) % @$points];
+  my $checked = [];
  pointLoop: while ($i < @$points) {
+    last if ($checked->[$i]->[$ic]);  # infinite loop check
+    $checked->[$i]->[$ic] ++;
     # if it's a point to point and we reached the last point, we're done
     if ((! $isLoop) && ($i >= $#$points)) {
       push @pNew, $points->[$i] if ($i == $#$points);
@@ -1155,7 +1294,7 @@ sub cropCorners {
     # next point > start of crop interval: interpolate a point if needed
     # if point is immediately before corner entry, it's been added
     if  (($dc1 > $dp1 + $epsilon) && ($dc1 < $dp2 - $epsilon)) {
-      $p1 = interpolatePoint($p1, $p2, ($dc1 - $dp1) / ($dp2 - $dp1));
+      $p1 = interpolatePoint($p1, $p2, ($dc1 - $dp1) / ($dp2 - $dp1), $courseDistance, $isLoop);
       $dp1 = $dc1;
       push @pNew, $p1;
     }
@@ -1168,17 +1307,48 @@ sub cropCorners {
       # we reached end of points: if this is a lap course we've already cropped beginning of lap, so add arc
       if  ( $isLoop ) {
 	if ($i + 1 > $#$points) {
-	  # corner wraps around: interpolate points
-	  my $newPoints = arcFit($pNew[-2], $pNew[-1], $pNew[0], $pNew[1], $cornerCrop);
-	  my $iMid = int(@$newPoints / 2);
-	  push @pNew, @$newPoints[0 .. $iMid - 1];
-	  # add the curve points to the beginning of the new points
-	  unshift @pNew, @$newPoints[$iMid .. $#$newPoints];
-
-	  last pointLoop;
-	}
+	  my $p1 = $pNew[-1];
+	  my $p2 = $pNew[0];
+	  if ( $cornerCropArcFit ) {
+	    # corner wraps around: interpolate points
+	    my $newPoints = arcFit($pNew[-2], $p1, $p2, $pNew[1], $cornerCrop);
+	    # arc fit: pick closest point
+	    my $iClosest;
+	    my $dClosest = latlngDistance($p1, $points->[0]);
+	    for my $iFit ( 0 .. $#$newPoints ) {
+	      my $dFit = latlngDistance($newPoints->[$iFit], $points->[0]);
+	      if ($dFit < $dClosest) {
+		$iClosest = $iFit;
+		$dClosest = $dFit;
+	      }
+	    }
+	    # check if we need to shift the S/F
+	    if (latlngDistance($p2, $points->[0]) > $dClosest) {
+	      if (defined $iClosest) {
+		push @pNew, @$newPoints[0 .. $iClosest - 1];
+		# add the curve points to the beginning of the new points
+		unshift @pNew, @$newPoints[$iClosest .. $#$newPoints];
+	      } else {
+		# closest point is first crop point
+		pop @pNew;
+		unshift @pNew, $p1;
+	      }
+	    }
+	  } else {
+	    # interpolate new S/F point
+	    my $f = ($courseDistance - $p1->{distance}) / ($courseDistance + $p2->{distance} - $p1->{distance});
+	    if ($f * $cornerCrop < 0.1) {
+	      pop @pNew;
+	      unshift @pNew, $p1;
+	    }
+	    elsif ((1 - $f) * $cornerCrop > 0.1) {
+	      unshift @pNew, interpolatePoint($p1, $p2, $f, $courseDistance, $isLoop);
+	    }
+	  }
+          last pointLoop;
+        }
       } elsif ($i > $#$points) {
-	last pointLoop;
+        last pointLoop;
       }
 
       # skip to next point
@@ -1201,12 +1371,12 @@ sub cropCorners {
       $dp2 = $p2->{distance};
       $dp2 += $courseDistance if ($dp2 < $dp1); # if wrap-around
     } elsif (abs($dp1 - $dc2) > $epsilon) {
-      $p1 = interpolatePoint($points->[$i], $points->[($i + 1) % @$points], ($dc2 - $dp1) / ($dp2 - $dp1));
+      $p1 = interpolatePoint($points->[$i], $points->[($i + 1) % @$points], ($dc2 - $dp1) / ($dp2 - $dp1), $courseDistance, $isLoop);
       $dp1 = $dc2;
     }
 
     # arc fits
-    if (@pNew) {
+    if ($cornerCropArcFit && @pNew) {
       my $arcPoint1 = (@pNew > 1) ? $pNew[-2] : $points->[-1];
       my $arcPoint2 = $pNew[-1];
       my $arcPoint3 = $p1;
@@ -1221,27 +1391,30 @@ sub cropCorners {
     # skip to next crop corner, else dump rest of points
     if ($ic > $#cropCorners) {
       if ($isLoop) {
-	$ic -= @cropCorners;
+        $ic -= @cropCorners;
       } else {
-	push @pNew, $p1
-	  unless (@pNew && pointsAreClose($pNew[-1], $p1));
-	push @pNew, @$points[$i + 1 .. $#$points];
-	last pointLoop;
+        push @pNew, $p1
+          unless (@pNew && pointsAreClose($pNew[-1], $p1));
+        push @pNew, @$points[$i + 1 .. $#$points];
+        last pointLoop;
       }
     }
 
     # set corner points for new corner
     $dc1 = ($points->[$cropCorners[$ic]]->{distance} - $cornerCrop);
-    $dc1 += $courseDistance while ($dc1 < $dp1);
+    $dc1 += $courseDistance * ceil(($dp1 - $dc1) / $courseDistance) if ($courseDistance);
     $dc2 = ($points->[$cropCorners[$ic]]->{distance} + $cornerCrop);
-    $dc2 += $courseDistance while ($dc2 < $dc1);
+    $dc2 += $courseDistance * ceil(($dc1 - $dc2) / $courseDistance) if ($courseDistance);
   }
 
   deleteDerivedFields(\@pNew);
   return \@pNew;
 }
 
-
+#
+# this proc fits a circlar arc between two line segments, with the
+# maximum radius which fits, or a specified maximum.
+#
 sub arcFit {
   # assume straight from p0 to p1, smooth from p1 to p2, straight from p2 to p3
   my $p0 = shift;
@@ -1252,7 +1425,7 @@ sub arcFit {
   my $RMax = shift;             # maximum distance to center
   my $dd = shift // ($pi / 16); # minimum angle point fit
 
-  return if ($RMax == 0);
+  return [] if ($RMax == 0);
 
   # calculate the intersection point: p1 -> d1
   my $d01 = latlngDistance($p0, $p1);
@@ -1314,6 +1487,9 @@ sub arcFit {
   # di1 = [ s2 (x2 - x1) - c2 (y2 - y1) ] / (c1 s2 - c2 s1)
   my $di1 = ( $s2 * $xy12[0] - $c2 * $xy12[1] ) / $cross;
   my $di2 = ( $c1 * $xy12[1] - $s1 * $xy12[0] ) / $cross;
+
+  # if there's a negative value, bail (revisit this)
+  return [] if (($di1 < 0) || ($di2 < 0));
 
   # figure out radii from distance
   my $R = (($di1 > $di2) ? $di2 : $di1) / $fR;
@@ -1393,6 +1569,8 @@ sub addSplines {
   addDistanceField(points=> $points)
     unless ( (defined $points->[0]->{distance}) || (! ( (defined $start) || (defined $end) )) );
 
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+
   # find corners which meet spline criteria
   # two turns in the same direction, both less than max
   # assume sharper or single-point turns are intentional
@@ -1452,9 +1630,9 @@ sub addSplines {
          ) {
         my $newPoints;
         if ($isArcFit) {
-          $newPoints = arcFitInterpolation( $points->[$k], $points->[$i], $points->[$j], $points->[$l], $minRadians );
+          $newPoints = arcFitInterpolation( $points->[$k], $points->[$i], $points->[$j], $points->[$l], $courseDistance, $isLoop, $minRadians );
         } else {
-          $newPoints = splineInterpolation( $points->[$k], $points->[$i], $points->[$j], $points->[$l], $minRadians );
+          $newPoints = splineInterpolation( $points->[$k], $points->[$i], $points->[$j], $points->[$l], $courseDistance, $isLoop, $minRadians );
         }
         $count += scalar(@$newPoints);
         push @pNew, @$newPoints;
@@ -1521,8 +1699,8 @@ sub xyPointOnLine {
   return ( $f, $d );
 }
 
-# checks whether px is on the line connecting p1 and p2
-sub isPointOnRoad {
+# checks whether px is on the line connecting p1 and p2 (or close to an endpoint)
+sub isPointOnLine {
   my $p1 = shift();
   my $p2 = shift();
   my $px = shift();
@@ -1544,7 +1722,7 @@ sub isPointOnRoad {
 # if the direction from p2 to px, and from px to p3, falls in
 # between the cirections from p1 to p2 and from p2 to p3,
 # then it's compatible with being on the line
-sub isPointOnRoadCorner {
+sub isPointOnCorner {
   my $p1 = shift();
   my $p2 = shift();
   my $p3 = shift();
@@ -1572,13 +1750,13 @@ sub isPointOnRoadCorner {
   my $dB = deltaAngle($d12, $dx3);
   my $dC = deltaAngle($d12, $d34);
   # if angles are monotonic, success
-  my $isPointOnRoadCorner =
+  my $isPointOnCorner =
     (
      ( ($dA >= 0) && ($dB >= $dA) && ($dC >= $dB) ) ||
      ( ($dA <= 0) && ($dB <= $dA) && ($dC <= $dB) )
     );
 
-  return $isPointOnRoadCorner;
+  return $isPointOnCorner;
 }
 
 
@@ -1605,7 +1783,7 @@ sub roadTest {
 
   return 1
     if (
-        isPointOnRoad($points->[$k], $points->[$l], $points->[$i], $d)
+        isPointOnLine($points->[$k], $points->[$l], $points->[$i], $d)
        );
 
   return 0
@@ -1616,7 +1794,7 @@ sub roadTest {
             ($m <= $#$points)
            );
 
-  return ( isPointOnRoadCorner($points->[$j], $points->[$k], $points->[$l], $points->[$m], $points->[$i]) );
+  return ( isPointOnCorner($points->[$j], $points->[$k], $points->[$l], $points->[$m], $points->[$i]) );
 }
 
 #
@@ -1745,30 +1923,32 @@ sub fixSteps {
     my $p3 = $points->[$j];
     my $p4 = $points->[($j + 1) % @$points];
 
-    my $g1 = ($p2->{ele} - $p1->{ele}) / pointSeparation($p1, $p2, $courseDistance);
-    my $g2 = ($p4->{ele} - $p3->{ele}) / pointSeparation($p3, $p4, $courseDistance);
+    my $ds1 = pointSeparation($p1, $p2, $courseDistance, $isLoop);
+    my $g1 = ($ds1 == 0) ? 0 : ($p2->{ele} - $p1->{ele}) / $ds1;
+    my $ds2 = pointSeparation($p3, $p4, $courseDistance, $isLoop);
+    my $g2 = ($ds2 == 0) ? 0 : ($p4->{ele} - $p3->{ele}) / $ds2;
     if (
-	($p2->{ele} == $p3->{ele}) &&
-	(pointSeparation($p2, $p3, $courseDistance) < 100) &&
-	(($p1->{ele} <=> $p2->{ele}) == ($p3->{ele} <=> $p4->{ele})) &&
-	abs($g1) > 0.001 &&
-	abs($g2) > 0.001
+        ($p2->{ele} == $p3->{ele}) &&
+        (pointSeparation($p2, $p3, $courseDistance, $isLoop) < 100) &&
+        (($p1->{ele} <=> $p2->{ele}) == ($p3->{ele} <=> $p4->{ele})) &&
+        abs($g1) > 0.001 &&
+        abs($g2) > 0.001
        ) {
       $stepCount ++;
       note("fixing step # $stepCount between $p2->{distance} and $p3->{distance} meters (" . ($interpolatedPoints + 1) . ")...\n");
       if (abs($g1) > abs($g2)) {
-	# interpolate p2 altitude
-	for my $n ( 0 .. $interpolatedPoints ) {
-	  my $px = $points->[($i + $n) % @$points];
-	  $px->{ele} = ($p1->{ele} * pointSeparation($px, $p3, $courseDistance) + $p3->{ele} * pointSeparation($p1, $px, $courseDistance)) / pointSeparation($p1, $p3, $courseDistance);
-	}
+        # interpolate p2 altitude
+        for my $n ( 0 .. $interpolatedPoints ) {
+          my $px = $points->[($i + $n) % @$points];
+          $px->{ele} = ($p1->{ele} * pointSeparation($px, $p3, $courseDistance, $isLoop) + $p3->{ele} * pointSeparation($p1, $px, $courseDistance, $isLoop)) / pointSeparation($p1, $p3, $courseDistance, $isLoop);
+        }
       }
       else {
-	# interpolate p3 altitude
-	for my $n ( 0 .. $interpolatedPoints ) {
-	  my $px = $points->[($i + 1 + $n) % @$points];
-	  $px->{ele} = ($p2->{ele} * pointSeparation($px, $p4, $courseDistance) + $p4->{ele} * pointSeparation($p2, $px, $courseDistance)) / pointSeparation($p2, $p4, $courseDistance);
-	}
+        # interpolate p3 altitude
+        for my $n ( 0 .. $interpolatedPoints ) {
+          my $px = $points->[($i + 1 + $n) % @$points];
+          $px->{ele} = ($p2->{ele} * pointSeparation($px, $p4, $courseDistance, $isLoop) + $p4->{ele} * pointSeparation($p2, $px, $courseDistance, $isLoop)) / pointSeparation($p2, $p4, $courseDistance, $isLoop);
+        }
       }
     }
     $i += 1 + $interpolatedPoints;
@@ -1785,7 +1965,7 @@ sub findLoops  {
   my $isLoop = shift;
   note("checking for loops...\n");
   my $loopDistance = 100;
-  addDistanceField(points=> $points) unless (exists $points->[0]->{distance});
+  addDistanceFieldIfNeeded(points=> $points);
   addDirectionField(points=> $points, isLoop=> $isLoop);
   my $u = 0;
   my $v = 0;
@@ -2023,7 +2203,6 @@ sub smoothing {
   return \@pNew;
 }
 
-
 sub doAutoSpacing {
   my %var = @_;
   my $points    = $var{points}  // [];
@@ -2033,6 +2212,8 @@ sub doAutoSpacing {
   my $minRadius = $var{minRadius} // 0;
 
   my $smoothRadians = $smoothAngle * $deg2rad;
+
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
 
   # iterate a few times
   for my $autoSpacingIteration ( 0 ) {
@@ -2114,7 +2295,7 @@ sub doAutoSpacing {
             # add first point for corner smoothing, unless another point is close
             my $ff = 0.5 * $spacing / $ds[$#pNew]; # normalized spacing of new points
             if ( ($f > $ff) && ($f < 1 - $ff) ) {
-              push @pNew, interpolatePoint($pNew[-1], $pStack[-1], $f);
+              push @pNew, interpolatePoint($pNew[-1], $pStack[-1], $f, $courseDistance, $isLoop);
               # adjust spacing to next point to account for interpolated point
               $ds[$#pNew] = $ds[$#pNew - 1] * (1 - $f);
               $ds[$#pNew - 1] *= $f;
@@ -2129,7 +2310,7 @@ sub doAutoSpacing {
               if ($N > 0 ) {
                 $ds[$#pNew] = $dsTot / $N;
                 for my $n ( 1 .. $N - 1 ) {
-                  push @pNew, interpolatePoint($p1, $p2, $n / $N);
+                  push @pNew, interpolatePoint($p1, $p2, $n / $N, $courseDistance, $isLoop);
                   $ds[$#pNew] = $dsTot / $N;
                 }
               } else {
@@ -2153,6 +2334,8 @@ sub doPointInterpolation {
   my $isLoop    = $var{isLoop} // 0;
   my $spacing   = $var{spacing} // 0;
 
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+
   note("interpolation..\n");
   my @pNew = ();
   my $iMax = $#$points - ($isLoop ? 0 : 1);
@@ -2164,7 +2347,7 @@ sub doPointInterpolation {
     my $npoints = int( $ps / $spacing + 0.5);
     # interpolate points...
     for my $n ( 1 .. $npoints - 1 ) {
-      push @pNew,  interpolatePoint( $p1, $p2, $n / $npoints);
+      push @pNew,  interpolatePoint( $p1, $p2, $n / $npoints, $courseDistance, $isLoop);
     }
   }
   push @pNew, $points->[-1] unless ($isLoop);
@@ -2182,6 +2365,7 @@ sub snapPoints {
   my $snapDistance    = $var{snapDistance} // 2;
   my $snapAltitude    = $var{snapAltitude} // 1;
   my $spacing         = $var{spacing} // 0;
+  my $isLoop          = $var{isLoop} // 0;
 
   addDistanceField(points=> $points);
 
@@ -2199,8 +2383,9 @@ sub snapPoints {
   }
 
   # on large courses, since initial search is O(N-squared), step thru multiple points, then refine
-  # snap step 1 has a potential bug (infinite loop) so lower bound is 2
-  my $snapStep = 2 + int(scalar(@$points) / 200);
+  # snap step 1 has a potential bug (infinite loop) so lower bound is 2.  This was /200 but /1000
+  # works better in tests
+  my $snapStep = 2 + int(scalar(@$points) / 1000);
 
   #
   # maximum range at which we check for snapping...
@@ -2214,6 +2399,7 @@ sub snapPoints {
 
   # i is on the "earlier" segment, j on the "later" segment
   # note this excludes starting point and end point
+  my $snappedPoints = 0;
  iLoop: for ( my $i = 0; $i < $#$points - 1; $i += $snapStep ) {
     my $p1 = $points->[$i];
     my @jCount;
@@ -2243,7 +2429,7 @@ sub snapPoints {
         if ($jCount[$j] ++);
 
       # looking for j sufficiently close to i and connected with less than a 30% slope
-      # slope requirement avoids snapping across tight switchbacks or a hypothetical "spiral"
+      # slope requirement avoids snapping across tight switchbacks or a spiral
       while ((($d = latlngDistance( $p1, $points->[$j])) > $snapRange ) || (abs($p1->{ele} - $points->[$j]->{ele}) > $snapAltitude + 0.3 * $d)) {
         $j += $snapStep;
         next iLoop if ($j >= $#$points);
@@ -2318,7 +2504,7 @@ sub snapPoints {
       # point i is matched to point j, and the two are moving in the same direction
       # for each point j, if it falls on a line of points i, then replace the nearest point i
 
-      # first we need to find values of j which are encapsulated by i
+      # first we need to find values of <j which are encapsulated by i
       # j will be replaced by i
       my ($ja, $jb);
     jLoop2: while(1) {
@@ -2578,9 +2764,16 @@ sub snapPoints {
                       abs(abs($points->[$j]->{distance} - $points->[$j1]->{distance}) - abs($points->[$i]->{distance} - $points->[$i1]->{distance}))
                      )
                     );
+            # create new point but with original segment
             my %p = %{$points->[$i]};
             $p{segment} = $points->[$j]->{segment};
+
+            # keep track of what was snapped for post-processing
+            $p{snapFrom} = $points->[$i];
+
+            # replace the point
             push @pNew, \%p;
+            $snappedPoints ++;
           }
           push @pNew, @$points[$j2 .. $#$points]; # keep everything which follows j range
         } else {
@@ -2609,81 +2802,6 @@ sub snapPoints {
         $points = \@pNew;
       }
 
-      # snap transition...
-      # adjust altitude...
-      # the first pass goes from i1 to i2
-      # the replaced portion goes from j3 to j4
-      # for points beyond this range, transition the altitude
-      # this presently does not work with loops
-      if ( $snapTransition > 0 ) {
-        my $j3 = (($sign > 0) ? $j1 : $j2) + 1;
-        my $j4 = $j3 + $i2 - $i1 + 1;
-
-        # d = 1: forward direction, -1: backard direction
-        for my $d ( -1, 1 ) {
-          my $s = 0;
-          $i = ($d > 0) ? $i2 : $i1;
-          my @sis = (0);
-          my @is = ($i);
-          while (($s < $snapTransition) && ($i > 0) && ($i < $#$points)) {
-            $s += latlngDistance($points->[$i], $points->[$i + $d]);
-            $i += $d;
-            push @sis, $s;
-            push @is, $i;
-          }
-          my $jd = $d * $sign;
-          $j = ($jd > 0) ? $j4 : $j3;
-          my @sjs = (0);
-          my @js = ($j);
-
-          $s = 0;
-          while (($s < $snapTransition) && ($j > 0) && ($j < $#$points)) {
-            $s += latlngDistance($points->[$j], $points->[$j + $jd]);
-            $j += $jd;
-            push @sjs, $s;
-            push @js, $j;
-          }
-          # step thru and adjust altitudes
-          my $u = 0;
-          my $v = 0;
-          my @zis   = ( $points->[$is[0]]->{ele} );
-          my @zjs   = ( $points->[$js[0]]->{ele} );
-          while (($u < $#sis) && ($v < $#sjs)) {
-            my $i = $is[$u];
-            my $j = $js[$v];
-            if ($sis[$u + 1] < $sjs[$v + 1]) {
-              $u ++;
-              # interpolate the point onto the other interval
-              my $f = ($sis[$u] - $sjs[$v]) / ($sjs[$v + 1] - $sjs[$v]);
-              my $z0   = (1 - $f) * $points->[$js[$v]]->{ele} + $f * $points->[$js[$v + 1]]->{ele};
-              # note: in limit of being close to the snapped section, altitude is average of two branches, then it diverges
-              my $g = ( 1 + cos($pi * $sis[$u] / $snapTransition) ) / 4; # from 0.5 to 0
-              die "negative g!" if ($g < 0);
-              my $z1 = $points->[$is[$u]]->{ele};
-              $zis[$u] = $g * $z0 + (1 - $g) * $z1;
-            } else {
-              $v ++;
-              my $f = ($sjs[$v] - $sis[$u]) / ($sis[$u + 1] - $sis[$u]);
-              my $z0   = (1 - $f) * $points->[$is[$u]]->{ele} + $f * $points->[$is[$u + 1]]->{ele};
-              my $g = ( 1 + cos($pi * $sjs[$v] / $snapTransition) ) / 4; # from 0.5 to 0
-              die "negative g!" if ($g < 0);
-              # note: in limit of being close to the snapped section, altitude is average of two branches, then it diverges
-              my $z1 = $points->[$js[$v]]->{ele};
-              $zjs[$v] = $g * $z0 + (1 - $g) * $z1;
-            }
-          }
-
-          # assign the new elevations to the appropriate points
-          for my $u ( 0 .. $#zis ) {
-            $points->[$is[$u]]->{ele} = $zis[$u];
-          }
-          for my $v ( 0 .. $#zjs ) {
-            $points->[$js[$v]]->{ele} = $zjs[$v];
-          }
-        }
-      }
-      # end of snap transition
-
       # jump to next ivalue outside of range if we did replacement
       # this isn't perfect, but note points in j range are changed, so
       # j indices are no longer valid: this is why need to jump to outer loop
@@ -2692,9 +2810,141 @@ sub snapPoints {
     }
   }
 
+  # fix possible gaps
+  if ($snappedPoints > 0) {
+    # make linked list of points
+    createLinks(points=> $points, isLoop=> $isLoop);
+
+    my $minSnapGap = 30;   # minimum gap between snap regions: should be large enough to capture typical corners
+    while ($snappedPoints > 0) {
+      $snappedPoints = 0;
+      # search for gaps between snap regions smaller than a given distance
+      # for both sides of the snap
+    snapGapLoop: for my $i ( 0 .. $#$points ) {
+        my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop) if ($isLoop);
+        last unless ($isLoop || $i < $#$points - 1);
+        if ((defined $points->[$i]->{snapFrom}) && (! defined $points->[($i + 1) % @$points]->{snapFrom})) {
+          my $j = ($i + 2) % @$points;
+          last snapGapLoop unless ($isLoop || $j > $i);
+
+          next snapGapLoop if (pointSeparation($points->[$i], $points->[$j], $courseDistance, $isLoop) > $minSnapGap);
+          if (defined $points->[$j]->{snapFrom}) {
+            # the gap is small : is the snapped to gap also small?
+            next snapGapLoop if (pointSeparation($points->[$i]->{snapFrom}, $points->[$j]->{snapFrom}, $courseDistance, $isLoop) > $minSnapGap);
+            my @pGap = ();
+            my $pSnap = $points->[$i]->{snapFrom}->{next};
+            while ((defined $pSnap) && ($pSnap != $points->[$j]->{snapFrom})) {
+              push @pGap, %{$pSnap};
+              $pGap[-1]->{snapFrom} = $pSnap;
+              $pSnap = $pSnap->{next};
+            }
+            my @pNew;
+            if ($j > $i) {
+              @pNew = (@$points[0 .. $i], @pGap, @$points[$j .. $#$points]);
+            } else {
+              # gap overlaps S/F: find nearest point
+              my $kSF;
+              my $dMin;
+              for my $k ( 0 .. $#pGap ) {
+                my $d = latlngDistance($points->[0], $pGap[$kSF]);
+                unless ((defined $dMin) && ($d > $dMin)) {
+                  $kSF = $k;
+                  $dMin = $d;
+                }
+              }
+              @pNew = (@pGap[0 .. $kSF - 1], @$points[$j .. $i], @pGap[$kSF .. $#pGap]);
+            }
+            $points = \@pNew;
+            $snappedPoints = @pGap;
+          }
+        }
+      }
+    }
+
+
+    # snap transition: smooth out terrain
+    # snap transitions are the beginning and end of either segments which
+    # received or provided points for snapping
+    if ( $snapTransition > 0 ) {
+      addDistanceField(points=> $points);
+      my $courseDistance= calcCourseDistance(points => $points, isLoop=> $isLoop);
+      $points->[0]->{isStart} = 1;
+      my $pointCount = 0;
+      for (my $p = $points->[0]; defined $p; $p = $p->{next}) {
+	last if ($pointCount && $p->{isStart});
+	$pointCount ++;
+	my $side;
+	my $pSnap;
+	if (defined $p->{snapFrom}) {
+	  if ((defined $p->{next}) && (! defined $p->{next}->{snapFrom})) {
+	    $pSnap = $p;
+	    $side = "start";
+	  }
+	  if ((defined $p->{prev}) && (! defined $p->{prev}->{snapFrom})) {
+	    next if (defined $pSnap);
+	    $pSnap = $p;
+	    $side = "stop";
+	  }
+	}
+
+	if (defined $pSnap) {
+	  # refine spacing near transition
+          my $sSnap = $pSnap->{distance};
+          my $spacing = $snapTransition / 5;
+          $spacing = 1 if ($spacing < 1);
+
+	  # refining happens both sides of the snap
+	  for my $p0 ( $pSnap, $pSnap->{snapFrom} ) {
+	    next unless (defined $p0);
+	    my $sMin  = $p0->{distance} - 2 * $snapTransition;
+	    my $sMax  = $p0->{distance} + 2 * $snapTransition;
+
+	    note("processing $side snap transition between $sMin and $sMax (elevation = $p0->{ele})\n");
+
+	    # add points after snap point
+	    $points =  applySelectiveSpacing(points=> $points, intervals=> [[$sMin, $sMax]], spacings=> [$spacing], isLoop=> $isLoop);
+	  }
+
+	  # update next and prev fields
+	  createLinks(points=> $points, isLoop=> $isLoop);
+
+	  # process transitions
+	  for my $p0 ( $pSnap, $pSnap->{snapFrom} ) {
+	    my $pt1 = $p0;
+	    $pt1 = $pt1->{prev} while ((defined $pt1->{prev}) && latlngDistance($pt1->{prev}, $p0) < $snapTransition);
+	    my $pt2 = $p0;
+	    $pt2 = $pt2->{next} while ((defined $pt2->{next}) && latlngDistance($pt2->{next}, $p0) < $snapTransition);
+	    $pt2->{next}->{stop} = 1 if (defined $pt2->{stop});
+	    # adjust the elevations
+	    for (my $pt = $pt1; (defined $pt) && (! defined $pt->{stop}); $pt = $pt->{next}) {
+	      # smoothing is based on point separation, not distance difference
+	      my $fd = latlngDistance($p0, $pt) / $snapTransition;
+	      if (abs($fd) < 1) {
+		my $f = (1 + cos($pi * $fd)) / 2;
+		$pt->{ele} = (1 - $f) * $pt->{ele} + $f * $p0->{ele};
+	      } else {
+		last;
+	      }
+	    }
+	    delete $pt2->{next}->{stop} if (defined $pt2->{next});
+	  }
+	}
+      }
+    }
+    # end of snap transition
+  }
+
+  # eliminate temporary fields
+  for my $field ( "prev", "next", "snapFrom", "isStart" ) {
+    deleteField(points=>$points, field=> $field);
+  }
+
   if ( $snap == 2 ) {
     @$points = reverse(@$points);
   }
+
+  deleteDerivedFields($points);
+
   return $points;
 }
 
@@ -2723,7 +2973,7 @@ sub isPointPrunable {
   # only prune points in the same segment
   return 0 unless (($s1 == $s2) && ($s2 == $s3));
 
-  if (isPointOnRoad ( $p1, $p2, $p3, 1 ) ) {
+  if (isPointOnLine ( $p1, $p2, $p3, 1 ) ) {
     my $d13 = sqrt(($y3 - $y1) ** 2 + ($x3 - $x1) ** 2);
     my $d23 = sqrt(($y3 - $y2) ** 2 + ($x3 - $x2) ** 2);
 
@@ -2744,10 +2994,10 @@ sub isPointPrunable {
 # this is in principle recursive but take some steps to avoid trivial recursion
 #
 sub simplifyPoints {
-  my %vars   = @_;
-  my $z0 = $vars{z0} // 0.1;
-  my $r0 = $vars{r0} // 1;
-  my $points = $vars{points} // [];
+  my %var   = @_;
+  my $z0 = $var{z0} // 0.1;
+  my $r0 = $var{r0} // 1;
+  my $points = $var{points} // [];
 
 
   return $points if (@$points < 3);
@@ -2809,16 +3059,206 @@ sub simplifyPoints {
 }
 
 #
+# set minimum spacing over one or more intervals
+#
+
+sub applySelectiveSpacing {
+  my %var = @_;
+  my $points = $var{"points"} // [];
+  my $intervals = $var{"intervals"} // [];
+  my $spacings = $var{"spacings"} // [];
+  my $isLoop = $var{"isLoop"} // 0;
+
+  addDistanceFieldIfNeeded(points=> $points);
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop) if ($isLoop);
+
+  for my $ni ( 0 .. $#$intervals ) {
+    my $si = $intervals->[$ni] // [];
+    # check for interval is in order on point-to-point
+    next unless ($isLoop || $si->[1] > $si->[0]);
+    my $spacing = $spacings->[$ni % @$spacings];
+    next if ((! (defined $spacing)) || ($spacing <= 0));
+
+    $si->[0] //= 0;
+    $si->[1] //= $courseDistance;
+
+    my $copyPoint = $isLoop && (! pointsAreClose($points->[0], $points->[-1]));
+    copyPoint($points) if ($copyPoint);
+
+    my @newPoints = ($points->[0]);
+    for (my $i = 1; $i <= $#$points;) {
+      # if we're at beginning or end of the interval, interpolate the point
+      if ( isPointInInterval(points=> $points, start=> $newPoints[-1]->{distance}, stop=> $points->[$i]->{distance}, isLoop=> $isLoop, distance=> $si->[0]) ) {
+        my $d1 = $si->[0] - $newPoints[-1]->{distance};
+        $d1 += $courseDistance if ($isLoop && $d1 < 0);
+        my $d2 = $points->[$i]->{distance} - $si->[0];
+        $d2 += $courseDistance if ($isLoop && $d2 < 0);
+        if (($d1 > 0.01) && ($d2 > 0.01)) {
+          my $f = $d1 / ($d1 + $d2);
+          push @newPoints, interpolatePoint($newPoints[-1], $points->[$i], $f, $courseDistance, $isLoop);
+        } elsif ($d2 <= 0.01) {
+          push @newPoints, $points->[$i];
+          $i ++;
+        }
+      }
+
+      # add in points
+      while ( isPointInInterval(points=> $points, start=> $si->[0], stop=> $si->[1], isLoop=> $isLoop, distance=> $points->[$i]->{distance}) ) {
+        my $d = pointSeparation($newPoints[-1], $points->[$i], $courseDistance, $isLoop);
+        my $N = int($d / $spacing + 0.5);
+        my $pLast = $newPoints[-1];
+        for my $j ( 1 .. $N - 1 ) {
+          my $f = $j / $N;
+          push @newPoints, interpolatePoint($pLast, $points->[$i], $f, $courseDistance, $isLoop);
+        }
+        if ($i < @$points) {
+          push @newPoints, $points->[$i];
+          $i ++;
+        }
+      }
+
+      # if we're at the end of the interval, interpolate the point
+      if ( isPointInInterval(points=> $points, start=> $newPoints[-1]->{distance}, stop=> $points->[$i]->{distance}, isLoop=> $isLoop, distance=> $si->[1]) ) {
+        my $pNew;
+        # add the last point in the interval
+        my $d1 =  $si->[1] - $newPoints[-1]->{distance};
+        $d1 += $courseDistance if ($isLoop && $d1 < 0);
+        my $d2 = $points->[$i]->{distance} - $si->[1];
+        $d2 += $courseDistance if ($isLoop && $d2 < 0);
+        if (($d1 > 0.01) && ($d2 > 0.01)) {
+          my $f = $d1 / ($d1 + $d2);
+          $pNew = interpolatePoint($newPoints[-1], $points->[$i], $f, $courseDistance, $isLoop);
+        }
+        # step up to the next point
+        my $pNext;
+        if (defined $pNew) {
+          $pNext = $pNew;
+        } else {
+          $pNext = $points->[$i];
+          $i ++;
+        }
+        my $d = $si->[1] - $newPoints[-1]->{distance};
+        $d += $courseDistance if ($isLoop && $d < 0);
+        my $N = int($d / $spacing + 0.5);
+        for my $j ( 1 .. $N - 1 ) {
+          my $f = $j / $N;
+          push @newPoints, interpolatePoint($newPoints[-1], $pNext, $f, $courseDistance, $isLoop);
+        }
+        # add in the new point
+        push @newPoints, $pNext
+          if (defined $pNext);
+      }
+
+      # add in point
+      if ($i < @$points) {
+        push @newPoints, $points->[$i];
+        $i ++;
+      }
+    }
+
+    pop @newPoints if ($copyPoint);
+
+    $points = \@newPoints;
+  }
+
+  deleteDerivedFields($points, ["curvature", "gradient", "heading"]);
+  return $points;
+}
+
+#
+# set a uniform gradient between points, using altitudes specified for the endpoints
+# a transition may be applied beyond the endpoints
+#
+
+sub applyUniformGradient {
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $isLoop = $var{isLoop} // [];
+  my $lambda = $var{lambda} // 0;
+  my $z1     = $var{z1};
+  my $z2     = $var{z2};
+  my $start  = $var{start};
+  my $stop   = $var{stop};
+  my $bow    = $var{bow} // 0;
+
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop) if ($isLoop);
+
+  # if the altitudes are not defined, then define them
+  {
+    my $s = $start;
+    $s -= $courseDistance * floor($s / $courseDistance) if $isLoop;
+    ($points, my $i) = pointAtPosition(points=> $points, isLoop=> $isLoop, distance=> $s);
+    $z1 //= $points->[$i]->{ele};
+  }
+  {
+    my $s = $stop;
+    $s -= $courseDistance * floor($s / $courseDistance) if $isLoop;
+    ($points, my $i) = pointAtPosition(points=> $points, isLoop=> $isLoop, distance=> $s);
+    $z2 //= $points->[$i]->{ele};
+  }
+
+  # limit lambda for loop
+  my $d = $stop - $start;
+  $d -= $courseDistance * floor($d / $courseDistance) if ($isLoop);
+  my $mid = $start + $d / 2;  # midpoint between start and finish
+  if ($isLoop) {
+    $mid -= $courseDistance * floor($mid / $courseDistance);
+    my $lambdaMax = ($courseDistance - $d) / 2.001;
+    $lambda = $lambdaMax if ($lambda > $lambdaMax);
+  }
+
+  # if there's bow, set a minimum spacing
+  if (abs($bow) > 0.01) {
+    my $N = 1 + int(16 * $d / (1 + $d));
+    my $spacing = $d / $N;
+    $points = applySelectiveSpacing(points=> $points, isLoop=> $isLoop, spacings=> [$spacing], intervals=> [[$start, $stop]]);
+  }
+  for my $i ( 0 .. $#$points ) {
+    my $s = $points->[$i]->{distance};
+    if (isPointInInterval(points=> $points, isLoop=> $isLoop, start=> $start - $lambda, stop=> $stop + $lambda, distance=> $s)) {
+      my $d1 = $s - $start;
+      my $d2 = $stop - $s;
+      if ($isLoop) {
+        # adjust distances to wrap around in loop
+        # in the interval, d1 and d2 must be positive
+        # in the transition region, d1 will be negative
+        $d1 -= $courseDistance * floor($d1 / $courseDistance);
+        $d2 -= $courseDistance * floor($d2 / $courseDistance);
+      }
+      if (isPointInInterval(points=> $points, isLoop=> $isLoop, start=> $start, stop=> $stop, distance=> $s)) {
+        my $f = $d1 / ($d1 + $d2);
+        my $z = $z1 * (1 - $f) + $z2 * $f + 4 * $f * (1 - $f) * $bow;
+        $points->[$i]->{ele} = $z;
+      } else {
+        my $ds;
+        if (isPointInInterval(points=> $points, isLoop=> $isLoop, start=> $start - $lambda, stop=> $start, distance=> $s)) {
+          $d1 -= $courseDistance if ($d1 > 0);
+          $ds = $start - $s;
+        } else {
+          $ds = $s - $stop;
+        }
+        $ds += $courseDistance if ($isLoop && ($ds < 0));
+        my $f = $d1 / ($d1 + $d2);
+        my $z = $z1 * (1 - $f) + $z2 * $f + 4 * $f * (1 - $f) * $bow;
+        my $h = (1 + cos($pi * $ds / $lambda)) / 2;
+        $points->[$i]->{ele} += $h * ($z - $points->[$i]->{ele});
+      }
+    }
+  }
+  return $points;
+}
+
+#
 # my heuristic bike speed model
 # see https://djconnel.blogspot.com/2013/01/calibrating-heuristic-bike-speed-model.html
 # extreme gradients: 1/3 gradient cuts speed 50%.
 #
 sub bikeSpeedModel {
-  my %vars = @_;
-  my $vMax   = $vars{vMax} // 17;
-  my $VAMMax = $vars{VAMMax} // 0.53;
-  my $v0     = $vars{v0} // 9.5;
-  my $g      = $vars{g} // 0;
+  my %var = @_;
+  my $vMax   = $var{vMax} // 17;
+  my $VAMMax = $var{VAMMax} // 0.53;
+  my $v0     = $var{v0} // 9.5;
+  my $g      = $var{g} // 0;
   # convert g to sine
   $g /= sqrt(1 + $g ** 2);
   my $a      = $vMax / $VAMMax;
@@ -2830,20 +3270,35 @@ sub bikeSpeedModel {
 #
 # if there is a distance field, calculate the distance between points, which is more complicated
 # on a loop course, which is why we need the total course distance
-# this requires the distance field be already present.
+# this requires the distance field be already present. It can also be called with distances
+# directly
 #
 sub distanceDifference {
-  my $p1 = shift;
-  my $p2 = shift;
+  my $p1 = shift // die("distanceDifference called with undefined first point\n");
+  my $p2 = shift // die("distanceDifference called with undefined second point\n");
+  my $d1;
+  if (ref($p1) eq "") {
+    $d1 = $p1;
+  } else {
+    $d1 = $p1->{distance} // die("distanceDifference called w/o distance field: " . join(", ", keys(%$p1)) . "\n");
+  }
+  my $d2;
+  if (ref($p2) eq "") {
+    $d2 = $p2;
+  } else {
+    $d2 = $p2->{distance} // die("distanceDifference called w/o distance field", join(", ", keys(%$p2)) . "\n");
+  }
+
   my $courseDistance = shift;
   my $isLoop = shift;
-  die("distanceDifference called w/o distance field\n") unless ((defined $p1->{distance}) && (defined $p2->{distance}));
-  my $d = $p2->{distance} - $p1->{distance};
+  my $d = $d2 - $d1;
   $d -= $courseDistance * floor($d / $courseDistance) if ($isLoop && ($courseDistance > 0)); # for loop courses
   return $d;
 }
+
 #
 # separation of 2 points in course distance.... similar to distance difference but either direction
+# points can also be distances (see distanceDifference)
 #
 sub pointSeparation {
   my $p1 = shift;
@@ -3205,7 +3660,7 @@ sub placeGradientSigns {
 
   note("placing gradient signs...\n");
 
-  my @waypoints;
+  my @waypoints = ();
 
   my @climbs =
     findClimbs(
@@ -3222,28 +3677,74 @@ sub placeGradientSigns {
   note("placeGradientSigns: number of climbs = ", scalar @climbs, "\n");
 
   my $nClimb = 0;
+  my @forwardSigns = ();
+  my @reverseSigns = ();
   for my $climb ( @climbs ) {
     $nClimb ++;
     my $ds = distanceDifference($points->[$climb->[0]], $points->[$climb->[1]], $courseDistance, $isLoop);
     my $dz = $points->[$climb->[1]]->{ele} - $points->[$climb->[0]]->{ele};
     my $g = $dz / $ds;
-    my $text = sprintf("%.2f", 100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", $dz) . " m altitude)";
-    note("gradient sign @ ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), "km to ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), " km: $text\n");
+    my $text = sprintf("%.2f", 100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", $dz) . " m)";
 
-    push @waypoints,
+    my $waypoint = 
       {
        lat   => $points->[$climb->[0]]->{lat},
        lon   => $points->[$climb->[0]]->{lon},
        ele   => $points->[$climb->[0]]->{ele},
-       name  => "$text",
        cmt   => "$text",
        desc  => "$text",
        src   => "processGPX",
        sym   => "sign",
-       type  => "sign",
+       type  => "signforward",
        fix   => 'dgps',
       };
+
+    # check that sign isn't too close to other waypoints
+    my $reject = 0;
+    for my $wp ( @forwardSigns ) {
+      if (pointsAreClose($waypoint, $wp, 1)) {
+        $reject = 1;
+        note("rejecting duplicate forward sign at $points->[$climb->[0]]->{distance} meters\n");
+        last;
+      }
+    }
+    unless ($reject) {
+      note("forward gradient sign @ ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), "km to ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), " km: $text\n");
+      # forward direction sign:
+      push @forwardSigns, $waypoint;
+    }
+
+    # reverse direction sign:
+    $text = sprintf("%.2f", -100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", -$dz) . " m)";
+    $waypoint =
+      {
+       lat   => $points->[$climb->[1]]->{lat},
+       lon   => $points->[$climb->[1]]->{lon},
+       ele   => $points->[$climb->[1]]->{ele},
+       cmt   => "$text",
+       desc  => "$text",
+       src   => "processGPX",
+       sym   => "sign",
+       type  => "signreverse",
+       fix   => 'dgps',
+      };
+
+    # check that sign isn't too close to other waypoints
+    $reject = 0;
+    for my $wp ( @reverseSigns ) {
+      if (pointsAreClose($waypoint, $wp, 1)) {
+        $reject = 1;
+        note("rejecting duplicate reverse sign at $points->[$climb->[1]]->{distance} meters\n");
+        last;
+      }
+    }
+    unless ($reject) {
+      note("reverse gradient sign @ ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), "km to ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), " km: $text\n");
+      # reverse direction sign:
+      push @reverseSigns, $waypoint;
+    }
   }
+  push @waypoints, @forwardSigns, @reverseSigns;
   return \@waypoints;
 }
 
@@ -3346,7 +3847,7 @@ sub processCircle {
   }
 
   for my $iCircle ( 0 .. $#circleStarts ) {
-    addDistanceField(points=> $points) unless (exists $points->[0]->{distance});
+    addDistanceFieldIfNeeded(points=> $points);
 
     note("fitting circle ", $iCircle + 1, " of ", scalar(@circleStarts), "\n");
     my $cStart = $circleStarts[$iCircle];
@@ -3435,7 +3936,7 @@ sub straightenPoints {
   my $iEnd   = $var{endIndex} // $#$points;
   my $isLoop = $var{isLoop} // 0;
 
-  addDistanceField(points=> $points) unless (exists $points->[0]->{distance});
+  addDistanceFieldIfNeeded(points=> $points);
 
   return if (@$points < ($isLoop ? 4 : 3));
 
@@ -3501,7 +4002,7 @@ sub processStraight {
   }
 
   for my $iStraight ( 0 .. $#straightStarts ) {
-    addDistanceField(points=> $points) unless (exists $points->[0]->{distance});
+    addDistanceFieldIfNeeded(points=> $points);
 
     note("fitting straight ", $iStraight + 1, " of ", scalar(@straightStarts), "\n");
     my $sStart = $straightStarts[$iStraight];
@@ -3704,18 +4205,18 @@ sub circuitFromPosition {
     return $points;
   }
 
+  # startIndex: first point of circuit
   my $startIndex;
-  ($points, $startIndex) = pointAtPosition( $position, $points, $isLoop );
+  ($points, $startIndex) = pointAtPosition( distance=> $position, points=> $points, isLoop=> $isLoop );
   return $points unless (defined $startIndex);
 
   # search ahead for next point close to this point
-  # search on invervals
-  my $stopIndex = ($isLoop) ? $startIndex : $#$points;
-  warn("startIndex = $startIndex; stopIndex = $stopIndex\n");
+  # search on intervals
+  my $stopIndex = ($isLoop) ? $startIndex : $#$points;  # quit searching at this point
 
-  my $p0 = $points->[$startIndex];
+  my $p0 = $points->[$startIndex];  # start point
 
-  my $flag = 0;
+  my $flag = 0;  # marks that we've gotten far enough away from start point
   my $count = 0;
   for (my $i = ($startIndex + 1) % @$points; $i != $stopIndex;) {
     my $p1 = $points->[$i];
@@ -3733,14 +4234,15 @@ sub circuitFromPosition {
 
     next if (pointsAreClose($p1, $p2));
 
+    # p1-p2 is a segment of nontrivial length
     my $pMatch;
-    if ( isPointOnRoad($p1, $p2, $p0) ) {
-      # the start point falls ont he segment from p1 to p2, so the circuit ends at p1
+    if ( isPointOnLine($p1, $p2, $p0) ) {
+      # the start point falls on the segment from p1 to p2, so the circuit ends at p1
       $count ++;
       if ($count >= $repeats) {
         # circuit identified with the required number of counts
         # circuit goes from startIndex to endIUndex inclusive
-        my $endIndex = $index;
+        my $endIndex = ($index + 1) % @$points;
         my @pNew;
         push @pNew, @$points[0 .. $startIndex - 1] if ($endIndex > $startIndex);  # add points at start if not part of circuit
         for my $c ( 1 .. $circuits ) {
@@ -3755,7 +4257,7 @@ sub circuitFromPosition {
             push @pNew, $p;
           }
         }
-        push @pNew, @$points[$endIndex + 1 .. $#$points] if ($endIndex > $startIndex);  # add points at end if not part of circuit
+        push @pNew, @$points[$endIndex .. $#$points] if ($endIndex > $startIndex);  # add points at end if not part of circuit
         deleteDerivedFields(\@pNew);
         return \@pNew;
       }
@@ -3839,6 +4341,14 @@ sub addDistanceField {
   }
 }
 
+sub addDistanceFieldIfNeeded {
+  my %var =@_;
+  my $points = $var{points} // [];
+  if (@$points) {
+    addDistanceField(points=> $points) unless ((defined $points->[0]->{distance}) && (defined $points->[-1]->{distance}));
+  }
+}
+
 #
 # calculate a gradient from altitude
 #
@@ -3878,7 +4388,7 @@ sub integrateGradientField {
   my $points = $var{points} // [];
   my $isLoop = $var{isLoop} // 0;
   return unless (@$points && (defined $points->[0]->{gradient}));
-  addDistanceField(points=> $points) unless ((defined $points->[0]->{distance}) && (defined $points->[-1]->{distance}));
+  addDistanceFieldIfNeeded(points=> $points);
   my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
   my $i = 0;
   my $iMax = $#$points;
@@ -4007,8 +4517,7 @@ sub calcCourseDistance {
   my $points = $var{points} // [];
   my $isLoop = $var{isLoop};
   return 0 unless @$points;
-  addDistanceField(points=> $points)
-    unless (defined $points->[-1]->{distance});
+  addDistanceFieldIfNeeded(points=> $points);
   my $distance = $points->[-1]->{distance};
   $distance += latlngDistance($points->[-1], $points->[0])
     if ($isLoop && @$points > 1);
@@ -4070,13 +4579,13 @@ sub reversePoints {
   for my $points ( @_ ) {
     @$points = reverse @$points;
     next unless (@$points);
-    if (exists $points->[0]->{distance}) {
-      my $dLast = $points->[-1]->{distance};
+    if (defined $points->[0]->{distance}) {
+      my $dMax = $points->[0]->{distance};
       for my $p ( @$points ) {
-        $p->{distance} = $dLast - $p->{distance};
+        $p->{distance} = $dMax - $p->{distance};
       }
     }
-    foreach my $f ( "heading", "curvature", "laneShift" ) {
+    for my $f ( "heading", "curvature", "laneShift" ) {
       if (exists $points->[0]->{$f}) {
         for my $p ( @$points ) {
           $p->{$f} = -$p->{$f};
@@ -4090,20 +4599,22 @@ sub reversePoints {
 # crop points
 #
 sub cropPoints {
-  my %vars = @_;
-  my $points = $vars{points} // die;
-  my $cropMin = $vars{min};
-  my $cropMax = $vars{max};
-  my $deleteRange = $vars{deleteRange} // [];
-  my $isLoop = $vars{isLoop} // 0;
+  my %var = @_;
+  my $points = $var{points} // die;
+  my $cropMin = $var{min};
+  my $cropMax = $var{max};
+  my $deleteRange = $var{deleteRange} // [];
+  my $isLoop = $var{isLoop} // 0;
 
   my @ranges = ();
 
   my $courseDistance = calcCourseDistance(points=>$points, isLoop=> $isLoop);
 
   # reference negative numbers to end of course
-  $cropMin -= $courseDistance * floor($cropMin / $courseDistance) if ((defined $cropMin) && ($cropMin < 0));
-  $cropMax -= $courseDistance * floor($cropMax / $courseDistance) if ((defined $cropMax) && ($cropMax < 0));
+  if ( $isLoop ) {
+    $cropMin -= $courseDistance * floor($cropMin / $courseDistance) if (defined $cropMin);
+    $cropMax -= $courseDistance * floor($cropMax / $courseDistance) if (defined $cropMax);
+  }
 
   # if cropMin and cropMax are reversed, treat them as a delete range
   if ((defined $cropMin) && (defined $cropMax) && ($cropMax < $cropMin)) {
@@ -4206,7 +4717,7 @@ sub cropPoints {
         my $d1 = $f * $ds;
         my $d2 = (1 - $f) * $ds;
         if (($d1 > 0.01) && ($d2 > 0.01)) {
-          push @pNew, interpolatePoint($points->[$i - 1], $p, $f);
+          push @pNew, interpolatePoint($points->[$i - 1], $p, $f, $courseDistance, $isLoop);
         }
       }
     }
@@ -4473,20 +4984,20 @@ sub splitPoints {
       $i1 = 0;
     } else {
       my $nLap = floor($s1 / $courseDistance);
-      ($points, $i1) = pointAtPosition($s1 - $courseDistance * $nLap, $points, $isLoop);
+      ($points, $i1) = pointAtPosition(distance=> $s1 - $courseDistance * $nLap, points=> $points, isLoop=> $isLoop);
       die("ERROR: unable to interpolate point at position $s1\n") unless (defined $i1);
     }
     if ($s2 >= $points->[-1]->{distance}) {
       if ($isLoop) {
         # if it's a loop, then wrap around
         my $nLap = floor($s2 / $courseDistance);
-        ($points, $i2) = pointAtPosition($s2 - $courseDistance * $nLap, $points, $isLoop);
+        ($points, $i2) = pointAtPosition(distance=> $s2 - $courseDistance * $nLap, points=> $points, isLoop=> $isLoop);
         $i2 += scalar(@$points) * $nLap;
       } else {
         $i2 = $#$points;
       }
     } else {
-      ($points, $i2) = pointAtPosition($s2, $points, $isLoop);
+      ($points, $i2) = pointAtPosition(distance=> $s2, points=> $points, isLoop=> $isLoop);
       die("ERROR: unable to interpolate point at position $s1\n") unless (defined $i2);
     }
 
@@ -4502,7 +5013,7 @@ sub splitPoints {
   }
 
   # distance field is invalid now: curvature, etc, are still fine
-  foreach my $s ( @splits ) {
+  for my $s ( @splits ) {
     deleteField2(field=> "distance", points=> $s);
   }
 
@@ -4579,7 +5090,7 @@ sub simplifyMonotonicProfile {
   my $isLoop = shift // 0;
   my $indices = shift // [0 .. $#$points];
 
-  addDistanceField(points=> $points) unless (defined $points->[0]->{distance});
+  addDistanceFieldIfNeeded(points=> $points);
   $courseDistance //= calcCourseDistance(points=> $points, isLoop=> $isLoop);
 
   # create a distance field of the index list
@@ -4849,112 +5360,113 @@ sub addExtensions {
 }
 
 
-my $addCurvature = 0;       # whether to not add a curvature field
-my $addDirection = 0;       # whether to not add a direction field
-my $addDistance = 0;        # whether to not add a distance field
-my $addGradient = 0;        # whether to not add a gradient field
-my $addGradientSigns = 0;   # whether to create list of gradient signs
-my $addSigma = 0;           # whether to create a sigma field when autosmoothing
-my $anchorSF = 0;           # whether to anchor the S/F
-my $append = 0;             # distance to append on finish (allows for a finish zone)
-my $arcFitDegs;             # maximum degrees use if we use spline interpolation
-my $arcFitEnd;              # where to end arc fitting
-my $arcFitMaxDegs = 60;     # maximum turn angle for spline
-my $arcFitStart;            # where to start arc fitting
-my $autoLoop;               # whether to automatically determine if it's a lappable course
+my $addCurvature = 0;  # whether to not add a curvature field
+my $addDirection = 0;  # whether to not add a direction field
+my $addDistance = 0;   # whether to not add a distance field
+my $addGradient = 0;   # whether to not add a gradient field
+my $addGradientSigns = 0; # whether to create list of gradient signs
+my $addSigma = 0;      # whether to create a sigma field when autosmoothing
+my $anchorSF = 0;      # whether to anchor the S/F
+my $append = 0;        # distance to append on finish (allows for a finish zone)
+my $arcFitDegs;        # maximum degrees use if we use spline interpolation
+my $arcFitEnd;         # where to end arc fitting
+my $arcFitMaxDegs = 60; # maximum turn angle for spline
+my $arcFitStart;       # where to start arc fitting
+my $autoLoop;          # whether to automatically determine if it's a lappable course
 my $autoSegmentMargin = 400; # minimum distance between auto-segments or between segments and start or finish banners
 my $autoSegmentFinishMargin = 20; # the margin forward to the finish line for auto segments
 my $autoSegmentStartMargin = 340; # the margin back to the start line for auto segments
 my $autoSegmentDefaultPower = 0.5; # default for gradient power in auto segments
 my $autoSegmentStretch = 0.05; # fractional amount to stretch auto-segments to hit peaks or valleys
 my $autoSegmentNames = ""; # comma separated list of names for the auto-segments
-my $autoSpacing;           # whether to do auto-spacing
-my $autoSplits = 0; # number of splits to put into the road based on distance
+my $autoSpacing;       # whether to do auto-spacing
+my $autoSplits = 0;    # number of splits to put into the road based on distance
 my $autoStraightenDeviation;  # maximum deviation for auto-straightening
 my $autoStraightenLength;  # minimum length for auto-straightening
-my $author;         # author, for GPX
-my $closeLoop;    # sets -loop and -copyPoint
-my $copyPoint;     # whether to make sure first point and last point in data coincide
-my $copyright;     # copyright field, for GPX
-my $cornerCrop;    # amount to "crop" from sharp corners before point interpolation
-my $cornerCropStart;  # where to begin corner cropping
-my $cornerCropEnd ;  # when to stop corner cropping
-my $cornerEffect = 1; # corner effect for smoothing
+my $author;            # author, for GPX
+my $closeLoop;         # sets -loop and -copyPoint
+my $copyPoint;         # whether to make sure first point and last point in data coincide
+my $copyright;         # copyright field, for GPX
+my $cornerCrop;        # amount to "crop" from sharp corners before point interpolation
+my $cornerCropArcFit;  # whether to do arc fit with corner crop
+my $cornerCropStart;   # where to begin corner cropping
+my $cornerCropEnd ;    # when to stop corner cropping
+my $cornerEffect = 1;  # corner effect for smoothing
 my $cropMax; # maximum distance of retained data (distance calculated in original coordinates
 my $cropMin; # minimum distance of retained data (distance calculated in original coordinates)
-my $crossingAngle;    # crossings need to cross by at least this angle
+my $crossingAngle;     # crossings need to cross by at least this angle
 my $crossingHeight = 2; # crossing should have same altitude, or at least this height
 my $crossingTransition; # transition length for crossings
-my $csv = 0;            # whether to use CSV instead of GPX
-my $description;        # description, for GPX metadata
-my $extend = 0;                  # apply to both append and prepend
-my $extendBack;              # amount to extend the route with a loop.
-my $finishCircuits  = 0;     # number of finish circuits
-my $finishCircuitDistance = -1; # km of finish circuit
-my $fixCrossings;            # whether to flatten crossings
-my $fixSteps;                # whether to flatten altitude steps
-my $gAutoSmooth = 0;            # auto-smoothing based on gradient
+my $csv = 0;           # whether to use CSV instead of GPX
+my $description;       # description, for GPX metadata
+my $extend = 0;        # apply to both append and prepend
+my $extendBack;        # amount to extend the route with a loop.
+my $finishCircuits  = 0; # number of finish circuits
+my $finishCircuitDistance; # km of finish circuit
+my $fixCrossings;      # whether to flatten crossings
+my $fixSteps;          # whether to flatten altitude steps
+my $gAutoSmooth = 0;   # auto-smoothing based on gradient
 my $gradientPower = 2; # power to raise gradient in evaluating segments for gradient signs
 my $gradientThreshold = 100; # minimum climb @ 10% grade to get a gradient sign
 my $gSmooth = 0;          # smoothing applied additionally to gradient
-my $isLoop;     # whether to apply periodic boundary conditions (smooth around the Loop)
-my $lAutoSmooth = 0;            # auto-smoothing based on position
-my $lSmooth;    # general smoothing, applies to positions and all other fields
-my $laneShift; # how much to shift lanes right (positive) or left (negative)
-my $shiftTransition; # length over which to transition lane shift (to each side)
-my $maxCornerCropDegs;   # maximum angle for corner cropping
-my $maxSlope = 30; # maximum gradient, in percent (if <1, will be converted to %)
-my $minCornerCropDegs;   # minimum angle for corner cropping
-my $minRadius;     # a minimum radius for corners: correct with lane shift
-my $minRadiusStart;  # where to begin applying minimum radius (meters)
-my $minRadiusEnd;    # where to end applying minimum radius (meters)
-my $namedSegments = "";         # named segments
-my $needHelp = 0;               # print the pod
-my $newKeywords = "";           # new keywords for the GPX file
-my $noSave = 0;                 # skip saving the file
-my $outFile = ""; # where to write the resulting GPX, unless -nosave is used
-my $outAndBack = 0;  # shorthand for creating an out-and-back course
-my $outAndBackLap = 0;  # shorthand for creating an out-and-back course with a loop to create a circuit
-my $prepend = 0; # distance to pre-pend on start (60 meters allows room for start): only for point-to-point
-my $prune;   # whether to prune points
-my $pruneD = 1; # distance a point can deviate in meters to avoid pruning.  also much match X-product.
-my $pruneX = 0.001;   # maximum cross product for pruning
-my $prunedg = 0.0005; # maximum difference in grade for point pruning
-my $quiet = 0;        # suppressed notes to standard error
-my $rCrossings = 6;   # how much lenth to flatten crossings, each side
-my $repeat = 0;       # number of copies of the course to add to the course
-my $reverse = 0;      # whether to reverse the course
-my $rLap;   # if the route is turned into an out-and-back, the radius of the return loop
-my $rTurnaround; # if the route is turned into an out-and-back, the radius of the outer loop
-my $rUTurn; # if the route is turned into an out-and-back, the radius of the two loops
+my $isLoop;            # whether to apply periodic boundary conditions (smooth around the Loop)
+my $lAutoSmooth = 0;   # auto-smoothing based on position
+my $lSmooth;           # general smoothing, applies to positions and all other fields
+my $laneShift;         # how much to shift lanes right (positive) or left (negative)
+my $shiftTransition;   # length over which to transition lane shift (to each side)
+my $maxCornerCropDegs; # maximum angle for corner cropping
+my $maxSlope = 30;     # maximum gradient, in percent (if <1, will be converted to %)
+my $minCornerCropDegs; # minimum angle for corner cropping
+my $minRadius;         # a minimum radius for corners: correct with lane shift
+my $minRadiusStart;    # where to begin applying minimum radius (meters)
+my $minRadiusEnd;      # where to end applying minimum radius (meters)
+my $namedSegments = ""; # named segments
+my $needHelp = 0;      # print the pod
+my $newKeywords = "";  # new keywords for the GPX file
+my $noSave = 0;        # skip saving the file
+my $outFile = "";      # where to write the resulting GPX, unless -nosave is used
+my $outAndBack = 0;    # shorthand for creating an out-and-back course
+my $outAndBackLap = 0; # shorthand for creating an out-and-back course with a loop to create a circuit
+my $prepend = 0;       # distance to pre-pend on start (60 meters allows room for start): only for point-to-point
+my $prune;             # whether to prune points
+my $pruneD = 1;        # distance a point can deviate in meters to avoid pruning.  also much match X-product.
+my $pruneX = 0.001;    # maximum cross product for pruning
+my $prunedg = 0.0005;  # maximum difference in grade for point pruning
+my $quiet = 0;         # suppressed notes to standard error
+my $rCrossings = 6;    # how much lenth to flatten crossings, each side
+my $repeat = 0;        # number of copies of the course to add to the course
+my $reverse = 0;       # whether to reverse the course
+my $rLap;              # if the route is turned into an out-and-back, the radius of the return loop
+my $rTurnaround;       # if the route is turned into an out-and-back, the radius of the outer loop
+my $rUTurn;            # if the route is turned into an out-and-back, the radius of the two loops
 my $saveCrossingsCSV;           # whether to save a CSV file with the crossings
 my $saveSimplifiedCourse = 0;   # whether to save a CSV file of a simplfied course, if generated (debugging)
-my $shiftEnd;      # where to end land shifting (define: don't end it)
+my $shiftEnd;          # where to end land shifting (define: don't end it)
 my $shiftSFDefault = 0;
 my $shiftSF = $shiftSFDefault; # amount to shift the S/F if a loop course:
-my $shiftStart; # where to start lane shifting (default: don't start it)
+my $shiftStart;        # where to start lane shifting (default: don't start it)
 my $simplifyPoints;    # whether to run simplification algorithm
 my $simplifyD = 0.3;   # threshold distance for simplification
 my $simplifyZ = 0.1;   # threshold altitude for simplification
-my $smoothAngle; # angle at which direction changes trigger point interpolation
-my $smoothStart; # where to start smoothing (default: beginning)
-my $smoothEnd;   # where to finish smoothing (default: end)
+my $smoothAngle;       # angle at which direction changes trigger point interpolation
+my $smoothStart;       # where to start smoothing (default: beginning)
+my $smoothEnd;         # where to finish smoothing (default: end)
 my $snap;              # whether to check for near-coincident road segments, and make them exactly coincide: upward direction: 1 = up, 2 = down, 0 = none
 my $snapAltitude = 1;  # how close altitude needs to be for snapping
 my $snapDistance = 2;  # number of meters threshold for point snapping
 my $snapTransition;    # whether to transition the altitude around snaps to match the source
 my $spacing;           # target point spacing: linear interpolate between existing points
 my $spliceDistance;    # spliced points must be closer than this to neighbor point
-my $splineDegs;               # minimum degrees use if we use spline interpolation
-my $splineEnd;                # where to stop spline fitting
-my $splineMaxDegs = 60;       # maximum turn angle for spline
-my $splineStart;              # where to start spline fitting
-my $splitNumber;              # number of split to output (default: all)
-my $startCircuits  = 0;       # number of start circuits
-my $startCircuitDistance = -1;# km of start circuit
-my $startTime;                # start time for activity
-my $stripSegments; # eliminate all existing segment definitions on input files
-my $title;         # title, for GPX file
+my $splineDegs;           # minimum degrees use if we use spline interpolation
+my $splineEnd;            # where to stop spline fitting
+my $splineMaxDegs = 60;   # maximum turn angle for spline
+my $splineStart;          # where to start spline fitting
+my $splitNumber;          # number of split to output (default: all)
+my $startCircuits  = 0;   # number of start circuits
+my $startCircuitDistance; # km of start circuit
+my $startTime;            # start time for activity
+my $stripSegments;        # eliminate all existing segment definitions on input files
+my $title;                # title, for GPX file
 my $selectedTrack = 0;    # which track to use
 my $vFlag = 0;            # print version
 my $xShift = 0;           # offset for altitude after scaling
@@ -4985,10 +5497,12 @@ my @selectiveLaneShift;   # allow lane shift to be specified in segments along t
 my @selectiveSmooth;      # alternative to specifying smoothing varying along the course
 my @selectiveSmoothG;     # alternative to specifying gradient smoothing varying along the course
 my @selectiveSmoothZ;     # alternative to specifying altitude smoothing varying along the course
+my @selectiveSpacing;     # set selective spacing over one or more intervals
 my @splitDistance;        # locations for splitting route
 my @straight;             # points for straight substitution
 my @straightEnd;          # ending point (meters) for a circular corner (one per run)
 my @straightStart;        # starting point for a circular corner (one per run)
+my @uniformGradient;      # points come in sets of 2: start point, finish point
 
 # shortcut options:
 my $auto = 0; # automatically set options based on the course (doesn't turn options off)
@@ -5001,11 +5515,17 @@ GetOptions (
             "addHeading!"   => \$addDirection,
             "addGradientSigns!" => \$addGradientSigns,
             "addSigma!"     => \$addSigma,
+            "align=i"        => \$snap,
+            "alignAltitude=f" => \$snapAltitude,
+            "alignDistance=f" => \$snapDistance,
+            "alignTransition=f" => \$snapTransition,
+            "alignZ=f"       => \$snapAltitude,
             "anchorSF!"     => \$anchorSF,
             "append=f"      => \$append,
             "arcFitDegs=f"  => \$arcFitDegs,
             "arcFitEnd=f"   => \$arcFitEnd,
-            "arcFitMaxDegs=f" => \$arcFitMaxDegs,
+            "arcFitMaxAngle=f" => \$arcFitMaxDegs,
+	    "arcFitMaxDegs=f" => \$arcFitMaxDegs,
             "arcFitStart=f" => \$arcFitStart,
             "author=s"      => \$author,
             "auto!"         => \$auto,
@@ -5039,11 +5559,12 @@ GetOptions (
             "circuitToPoint=f{1,30}"       => \@circuitToPosition,
             "circuitsToPoint=f{1,30}"      => \@circuitToPosition,
             "closed!"       => \$closeLoop,
-	    "closedLoop!"   => \$closeLoop,
+            "closedLoop!"   => \$closeLoop,
             "closeLoop!"    => \$closeLoop,
             "copyPoint!"    => \$copyPoint,
             "copyright=s"   => \$copyright,
             "cornerCrop=f" => \$cornerCrop,
+	    "cornerCropArcFit!" => \$cornerCropArcFit,
             "cornerCropEnd=f" => \$cornerCropEnd,
             "cornerCropStart=f" => \$cornerCropStart,
             "cornerEffect=f" => \$cornerEffect,
@@ -5066,7 +5587,7 @@ GetOptions (
             "finishCircuitDistance=f" => \$finishCircuitDistance,
             "finishCircuitStart=f" => \$finishCircuitDistance,
             "fixCrossings!"     => \$fixCrossings,
-	    "fixSteps!"         => \$fixSteps,
+            "fixSteps!"         => \$fixSteps,
             "flatten=f{1,1000}" => \@flatten,
             "gAutoSmooth=f" => \$gAutoSmooth,
             "gSmooth=f"     => \$gSmooth,
@@ -5090,15 +5611,17 @@ GetOptions (
             "loopRight!"    => \$loopRight,
             "loopL!"        => \$loopLeft,
             "loopR!"        => \$loopRight,
+	    "maxCornerCropAngle=f" => \$maxCornerCropDegs,
             "maxCornerCropDegs=f" => \$maxCornerCropDegs,
             "maxSlope=f"    => \$maxSlope,
+	    "minCornerCropAngle=f" => \$minCornerCropDegs,
             "minCornerCropDegs=f" => \$minCornerCropDegs,
             "minRadius=f"   => \$minRadius,
             "minRadiusStart=f" => \$minRadiusStart,
             "minRadiusEnd=f"   => \$minRadiusEnd,
             "name=s"        => \$title,
             "noSave!"       => \$noSave,
-	    "o=s"         => \$outFile,
+            "o=s"         => \$outFile,
             "out=s"         => \$outFile,
             "outAndBack!"   => \$outAndBack,
             "outAndBackLap!" => \$outAndBackLap,
@@ -5128,6 +5651,7 @@ GetOptions (
             "selectiveSmoothG=f{0,1000}" => \@selectiveSmoothG,
             "selectiveSmoothZ=f{0,1000}" => \@selectiveSmoothZ,
             "selectiveZSmooth=f{0,1000}" => \@selectiveSmoothZ,
+            "selectiveSpacing=f{0,1000}" => \@selectiveSpacing,
             "shiftEnd=f"    => \$shiftEnd,
             "shiftSF=f"     => \$shiftSF,
             "shiftStart=f"  => \$shiftStart,
@@ -5153,15 +5677,17 @@ GetOptions (
             "smoothG=f"     => \$gSmooth,
             "smoothZ=f"     => \$zSmooth,
             "snap=i"        => \$snap,
+            "snapAltitude=f" => \$snapAltitude,
             "snapDistance=f" => \$snapDistance,
             "snapTransition=f" => \$snapTransition,
-            "snapAltitude=f" => \$snapAltitude,
             "snapZ=f"       => \$snapAltitude,
             "spacing=f"     => \$spacing,
-	    "splice=s{1,100}" => \@splice,
-	    "spliceDistance=f"  => \$spliceDistance,
+            "splice=s{1,100}" => \@splice,
+            "spliceDistance=f"  => \$spliceDistance,
+	    "splineAngle=f"  => \$splineDegs,
             "splineDegs=f"  => \$splineDegs,
             "splineEnd=f"   => \$splineEnd,
+	    "splineMaxAngle=f" => \$splineMaxDegs,
             "splineMaxDegs=f" => \$splineMaxDegs,
             "splineStart=f"   => \$splineStart,
             "splitAt=f{1,100}" => \@splitDistance,
@@ -5177,6 +5703,7 @@ GetOptions (
             "stripSegments!" => \$stripSegments,
             "title=s"       => \$title,
             "track=i"       => \$selectedTrack,
+            "uniformGradient=f{1,1000}" => \@uniformGradient,
             "version!"      => \$vFlag,
             "v"             => \$vFlag,
             "xShift=f"      => \$xShift,
@@ -5208,7 +5735,6 @@ if ($vFlag ) {
 if ( defined $closeLoop ) {
   $copyPoint //= $closeLoop;
   $isLoop //= $closeLoop;
-  warn("DEBUG: -closeLoop: copyPoint = $copyPoint, isLoop = $isLoop\n");
 } else {
   $copyPoint //= 0;
 }
@@ -5362,8 +5888,8 @@ for my $file ( @files ) {
        (! defined $isLoop)
      ) {
     if (
-	(defined $cropMin) ||
-	(defined $cropMax)
+        (defined $cropMin) ||
+        (defined $cropMax)
        ) {
       $isLoop = 0;
     } else {
@@ -5432,7 +5958,7 @@ for my $file ( @files ) {
 
     }
     if (! defined $snapTransition) {
-      $snapTransition = 10;
+      $snapTransition = 0;
       note("setting -snapTransition $snapTransition meters...\n");
     }
 
@@ -5567,13 +6093,62 @@ for my $file ( @files ) {
   # points reference segments so segments order is also reversed
   if ($reverse) {
     note("reversing course direction..\n");
+    if ($isLoop && (! pointsAreClose($points->[0], $points->[-1]))) {
+      # push old first point to the back, so it stays the first point
+      push(@$points, shift @$points);
+      # fix point distances
+      if ((defined (my $d0 = $points->[0]->{distance})) && (defined (my $dL = $points->[-2]->{distance}))) {
+	for my $p ( @$points[0 .. $#$points - 1] ) {
+	  $p->{distance} -= $d0;
+	}
+	$points->[-1]->{distance} = $dL;
+      }
+    }
     reversePoints($points);
   }
 
+  #
+  # flatten selected sections
+  # points come in sets of 4: start point, altitude, finish point, altitude, lambda
+  #
+  if (@flatten) {
+    addDistanceField(points=> $points);
+    for (my $nf = 0; $nf < @flatten; $nf += 6) {
+      my $flattenStart = $flatten[$nf];
+      my $zFlatten1    = $flatten[$nf + 1] if ($nf < $#flatten);
+      my $flattenStop  = $flatten[$nf + 2] if ($nf + 1 < $#flatten);
+      my $zFlatten2    = $flatten[$nf + 3] if ($nf + 2 < $#flatten);
+      my $lambda       = $flatten[$nf + 4] if ($nf + 3 < $#flatten);
+      my $bow          = $flatten[$nf + 5] if ($nf + 4 < $#flatten);
+      $bow //= 0;
+      $lambda //= 10 + sqrt($zSmooth ** 2 + $lSmooth ** 2);
+      $flattenStop //= ($points->[-1]->{distance} + 1000 * $lambda + 1000);
+      $zFlatten2   //= $zFlatten1;
+      note("flattening course from $flattenStart ($zFlatten1 meters) to $flattenStop ($zFlatten2 meters)\n");
+      $points = applyUniformGradient(points=> $points, start=> $flattenStart, stop=> $flattenStop, z1=> $zFlatten1, z2=> $zFlatten2, lambda=> $lambda, bow=> $bow);
+    }
+  }
+
+  #
+  # flatten selected sections
+  # points come in sets of 4: start point, altitude, finish point, altitude, lambda
+  #
+  if (@uniformGradient) {
+    addDistanceField(points=> $points);
+    for (my $n = 0; $n < @uniformGradient; $n += 3) {
+      my $start = $uniformGradient[$n];
+      my $stop  = $uniformGradient[$n + 1] if ($n < $#uniformGradient);
+      my $bow   = $uniformGradient[$n + 2] if ($n + 1 < $#uniformGradient);
+      $bow //= 0;
+      note("applying uniform gradient between points from $start to $stop...\n");
+      $points = applyUniformGradient(points=> $points, start=> $start, stop=> $stop, bow=> $bow);
+    }
+  }
 
   # corner cropping
   $cornerCrop //= 0;
-  $minCornerCropDegs //= 75;
+  $cornerCropArcFit //= 1;
+  $minCornerCropDegs //= 45;
   unless (defined $maxCornerCropDegs) {
     if ($minCornerCropDegs < 90) {
       $maxCornerCropDegs = 135;
@@ -5591,6 +6166,7 @@ for my $file ( @files ) {
                   maxRadians => $maxCornerCropDegs * $deg2rad,
                   start      => $cornerCropStart,
                   end        => $cornerCropEnd,
+		  cornerCropArcFit => $cornerCropArcFit,
                   isLoop     => $isLoop
                  );
   }
@@ -5604,6 +6180,17 @@ for my $file ( @files ) {
                    minLength=> $autoStraightenLength,
                    maxDeviation=> $autoStraightenDeviation,
                   );
+  }
+
+  # startCircuits and finishCircuits without distance map to circuitsToPosition and circuitsFromPosition
+  if ($startCircuits > 0 && (! defined $startCircuitDistance)) {
+    push @circuitFromPosition, 0, $startCircuits, 1;
+    $startCircuits = 0;
+  }
+
+  if ($finishCircuits > 0 && (! defined $finishCircuitDistance)) {
+    push @circuitToPosition, 0, $finishCircuits, 1;
+    $finishCircuits = 0;
   }
 
   # circuits at position
@@ -5639,7 +6226,7 @@ for my $file ( @files ) {
     note("adding $startCircuits start circuits...\n");
     # get start circuit points
     my @circuitPoints = ();
-    addDistanceField(points=> $points) unless ( defined $points->[0]->{distance} );
+    addDistanceFieldIfNeeded(points=> $points);
     my $i = 0;
     while ($i <= $#$points) {
       if ($points->[$i]->{distance} <= $startCircuitDistance) {
@@ -5681,7 +6268,7 @@ for my $file ( @files ) {
   }
   deleteField2(points=> $points, field=> "distance") if ($circuitsAdded > 0);
 
-  # check for snapping
+  # check for snapping, but don't apply a snap transition yet
   if ( ($snap > 0) && ($snapDistance >= 0) ) {
     note("snapping repeated points (pass 1)...\n");
     $points =
@@ -5690,8 +6277,9 @@ for my $file ( @files ) {
                  snap=> $points,
                  snapDistance=> $snapDistance,
                  snapAltitude=> $snapAltitude,
-                 snapTransition=> $snapTransition,
+                 snapTransition=> 0,
                  spacing=> $spacing,
+                 isLoop=> $isLoop,
                 );
 
   }
@@ -5725,6 +6313,18 @@ for my $file ( @files ) {
     }
 
 
+  # straight processing
+  if (@straight || (@straightStart) || (@straightEnd)) {
+    note("processing straight fit(s)...\n");
+    processStraight(points=> $points, straight=> \@straight, straightStart=> \@straightStart, straightEnd=> \@straightEnd, isLoop=> $isLoop);
+  }
+
+  # circular fits
+  if (@circle || (@circleStart) || (@circleEnd)) {
+    note("processing circular fit(s)\n");
+    processCircle(points=> $points, circle=> \@circle, circleStart=> \@circleStart, circleEnd=> \@circleEnd, isLoop=> $isLoop);
+  }
+
   # interpolation if requested
   if ( @$points && ($spacing > 0) ) {
     $points =
@@ -5735,25 +6335,26 @@ for my $file ( @files ) {
                           );
   }
 
-  # straight processing
-  # if circular fits are required, those should be done before smoothing, so smoothing can
-  # reduce the anomalies.
-  if (@straight || (@straightStart) || (@straightEnd)) {
-    note("processing straight fit(s)...\n");
-    processStraight(points=> $points, straight=> \@straight, straightStart=> \@straightStart, straightEnd=> \@straightEnd, isLoop=> $isLoop);
-  }
-
-  # straight processing
-  # if circular fits are required, those should be done before smoothing, so smoothing can
-  # reduce the anomalies.
-  if (@circle || (@circleStart) || (@circleEnd)) {
-    note("processing circular fit(s)\n");
-    processCircle(points=> $points, circle=> \@circle, circleStart=> \@circleStart, circleEnd=> \@circleEnd, isLoop=> $isLoop);
+  #
+  # selective spacing
+  #
+  if ( @selectiveSpacing ) {
+    my @intervals = ();
+    my @spacings = ();
+    while (@selectiveSpacing) {
+      my $s  = shift(@selectiveSpacing);
+      my $i1 = shift(@selectiveSpacing);
+      my $i2 = shift(@selectiveSpacing);
+      push @intervals, [$i1, $i2];
+      push @spacings, $s;
+      $points = applySelectiveSpacing(points=> $points, intervals=> \@intervals, spacings=> \@spacings, isLoop=> $isLoop);
+    }
   }
 
   # check for snapping
   # this is done after point interpolation as well as before
   # since widely spaced points may not show a match
+  # snap transition is applied this time
   if ( ($snap > 0) && ($snapDistance >= 0) ) {
     note("snapping repeated points (pass 2)...\n");
     $points =
@@ -5764,6 +6365,7 @@ for my $file ( @files ) {
                  snapAltitude=> $snapAltitude,
                  snapTransition=> $snapTransition,
                  spacing=> $spacing,
+                 isLoop=> $isLoop,
                 );
 
   }
@@ -5846,7 +6448,7 @@ for my $file ( @files ) {
       }
 
       if ( $positiveSigmaFound ) {
-        note("smoothing...",
+        note("smoothing ",
              ($smoothLoop==0) ? "position" :
              ($smoothLoop==1) ? "altitude" :
              ($smoothLoop==2) ? "gradient" :
@@ -5882,8 +6484,7 @@ for my $file ( @files ) {
         if (@smoothSigmas) {
           if (@smoothPositions) {
             # construct sigma field from selective smoothin
-            addDistanceField(points=> $points)
-              unless (defined $points->[0]->{distance});
+            addDistanceFieldIfNeeded(points=> $points);
             my $positiveSigmaFound = 0;
             my @sigmas = ();
             for my $i ( 0 .. $#smoothSigmas ) {
@@ -5962,7 +6563,7 @@ for my $file ( @files ) {
   # anchoring: return start point and, if not a loop, finish point to original values
   # if anchoring requested
   if ( $anchorSF && (! $isLoop) ) {
-    addDistanceField(points=> $points) unless (exists $points->[0]->{distance});
+    addDistanceFieldIfNeeded(points=> $points);
 
     for my $d ( 1, -1 ) {
       my %sigma = (
@@ -6018,44 +6619,6 @@ for my $file ( @files ) {
   if ( ($arcFitRadians > 0) && (($lSmooth > 1) || ($zSmooth > 0)) ) {
     note("corner arcFit, post-smoothing...\n");
     $points = addSplines(points=> $points, minRadians=> $arcFitRadians, maxRadians=> $arcFitMaxRadians, isLoop=> $isLoop, splineType => "arcFit", start=> $arcFitStart, end=> $arcFitEnd);
-  }
-
-  #
-  # flatten selected sections
-  # points come in sets of 4: start point, altitude, finish point, altitude, lambda
-  #
-  if (@flatten) {
-    note("flattening...\n");
-    addDistanceField(points=> $points);
-    for (my $nf = 0; $nf < @flatten; $nf += 5) {
-      my $flattenStart = $flatten[$nf];
-      my $zFlatten1    = $flatten[$nf + 1] if ($nf < $#flatten);
-      my $flattenStop  = $flatten[$nf + 2] if ($nf + 1 < $#flatten);
-      my $zFlatten2    = $flatten[$nf + 3] if ($nf + 2 < $#flatten);
-      my $lambda       = $flatten[$nf + 4] if ($nf + 3 < $#flatten);
-      $lambda //= 10 + sqrt($zSmooth ** 2 + $lSmooth ** 2);
-      $flattenStop //= ($points->[-1]->{distance} + 1000 * $lambda + 1000);
-      $zFlatten2   //= $zFlatten1;
-      note("flattening course from $flattenStart ($zFlatten1 meters) to $flattenStop ($zFlatten2 meters)\n");
-      for my $i ( 0 .. $#$points ) {
-        my $s = $points->[$i]->{distance};
-        my $z = $points->[$i]->{ele};
-        if ($s >= $flattenStart) {
-          my $zFlatten = ( $zFlatten1 * ($flattenStop - $s) + $zFlatten2 * ($s - $flattenStart) ) / ($flattenStop - $flattenStart);
-          if ($flattenStop >= $s) {
-            $points->[$i]->{ele} = $zFlatten;
-            note("point $i: flattened to $points->[$i]->{ele}\n");
-          } elsif ($s < $flattenStop + $lambda) {
-            my $f = (1 + cos($pi * ($s - $flattenStop) / $lambda)) / 2;
-            $points->[$i]->{ele} = $f * $zFlatten + (1 - $f) * $z;
-          }
-        } elsif ($s > $flattenStart - $lambda) {
-          my $zFlatten = ( $zFlatten1 * ($flattenStop - $s) + $zFlatten2 * ($s - $flattenStart) ) / ($flattenStop - $flattenStart);
-          my $f = (1 + cos($pi * ($flattenStart - $s) / $lambda)) / 2;
-          $points->[$i]->{ele} = $f * $zFlatten + (1 - $f) * $z;
-        }
-      }
-    }
   }
 
   #
@@ -6136,9 +6699,9 @@ for my $file ( @files ) {
                 my $up1 = ($u + 1) % @$points;
                 my $vp1 = ($v + 1) % @$points;
                 my @cNew;
-                push @cNew, interpolatePoint($points->[$u], $points->[$up1], $gs[0]);
+                push @cNew, interpolatePoint($points->[$u], $points->[$up1], $gs[0], $courseDistance, $isLoop);
                 my $z1 = $cNew[-1]->{ele};
-                push @cNew, interpolatePoint($points->[$v], $points->[$vp1], $gs[1]);
+                push @cNew, interpolatePoint($points->[$v], $points->[$vp1], $gs[1], $courseDistance, $isLoop);
                 my $z2 = $cNew[-1]->{ele};
                 my $zAvg = ($z1 + $z2) / 2;
 
@@ -6198,8 +6761,18 @@ for my $file ( @files ) {
       for my $j ( 1 .. $#si ) {
         push @siNew, $si[$j] if (abs($si[$j] - $siNew[-1]) > 0.5);
       }
-
       @si = @siNew;
+    }
+
+    # correct for values out of the route
+    my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop) if ($isLoop);
+    if ($isLoop) {
+      my $n = 0;
+      for my $i (0 .. $#si) {
+        $si[$i] += $courseDistance if ($si[$i] < 0);
+        $si[$i] -= $courseDistance if ($si[$i] > $courseDistance);
+      }
+      @si = sort { $a <=> $b } @si;
     }
 
     # report simplified route
@@ -6222,18 +6795,20 @@ for my $file ( @files ) {
       note("adding additional points at crossings...\n");
       my @newPoints = $points->[0];
       my $j = 0;
-      for my $i ( 0 .. $#$points - 1) {
+      for my $i ( 0 .. $#$points) {
+        last unless (($i < $#$points) || $isLoop);
         my $s1 = $points->[$i]->{distance};
-        my $s2 = $points->[$i + 1]->{distance};
+        my $s2 = $points->[($i + 1) % @$points]->{distance};
+        $s2 += $courseDistance if $s2 < $s1;
         $j ++ while ( ($j <= $#si) && ($si[$j] <= $s1) );
-        while (($j < @si) && ($s2 > $si[$j])) {
+        while (($j <= $#si) && ($s2 > $si[$j])) {
           if ( (abs($si[$j] - $s1) > 0.5) && (abs($si[$j] - $s2) > 0.5) ) {
             my $f = ($si[$j] - $s1) / ($s2 - $s1);
-            push @newPoints, interpolatePoint($points->[$i], $points->[$i + 1], $f);
+            push @newPoints, interpolatePoint($points->[$i], $points->[$i + 1], $f, $courseDistance, $isLoop);
           }
           $j ++;
         }
-        push @newPoints, $points->[$i + 1]
+        push @newPoints, $points->[$i + 1] if ($i < $#$points);
       }
       $points = \@newPoints;
     }
@@ -6251,6 +6826,7 @@ for my $file ( @files ) {
       for my $c ( @crossings ) {
         my $sc = $c->{distance};
         my $ds = abs($sp - $sc);
+        $ds = $courseDistance - $ds if ($isLoop && $ds > $courseDistance / 2);
         if ($ds < $r2) {
           if ($ds < $r1) {
             $p->{ele} = $c->{ele};
@@ -6265,7 +6841,7 @@ for my $file ( @files ) {
 
   #
   # create named segments
-
+  #
   note("number of named segments = ", scalar(@namedSegments), "\n");
   addDistanceField(points=> $points)
     if ( @namedSegments );
@@ -6285,9 +6861,9 @@ for my $file ( @files ) {
     }
     note("defining segment \"$name\" from $start meters to $end meters ...\n");
     my ($pStart, $pEnd);
-    ($points, $pStart) = pointAtPosition($start, $points, $isLoop);
+    ($points, $pStart) = pointAtPosition(distance=> $start, points=> $points, isLoop=> $isLoop);
     die("ERROR: unable to find the segment start point at positon $start.\n") unless (defined $pStart);
-    ($points, $pEnd)   = pointAtPosition($end, $points, $isLoop);
+    ($points, $pEnd)   = pointAtPosition(distance=> $end, points=> $points, isLoop=> $isLoop);
     die("ERROR unable to find the segment end point at positon $end.\n") unless (defined $pEnd);
 
     # find a segment number
@@ -6366,7 +6942,7 @@ for my $file ( @files ) {
   #
   if ( ($laneShift != 0) || (@selectiveLaneShift > 0) ) {
     note("lane shift...\n");
-    addDistanceField(points=> $points) unless (defined $points->[0]->{distance});
+    addDistanceFieldIfNeeded(points=> $points);
     # process lane shift
     if ( $laneShift != 0 ) {
       my $shiftDistance = $shiftTransition // 20 * abs($laneShift) ** (2/3);
@@ -6753,7 +7329,7 @@ for my $file ( @files ) {
         # direction = 1 : interpolation between point -1 => point 0
         # direction = -1 : interpolation between point 1 => point 0
 
-        my $pNew = interpolatePoint($points->[-1], $points->[0], ($direction > 0) ? $f : (1 - $f));
+        my $pNew = interpolatePoint($points->[-1], $points->[0], ($direction > 0) ? $f : (1 - $f), $courseDistance, $isLoop);
         shift @$points
           if (pointsAreClose($points->[0], $pNew));
         pop @$points
@@ -6783,7 +7359,7 @@ for my $file ( @files ) {
 
     # figure out if we want to curve the road to split this from the return road
     if ( ($prepend == $append) && ($rTurnaround > 0) ) {
-      my $p3 = interpolatePoint($p1, $p2, -0.5 * $prepend / $d);
+      my $p3 = interpolatePoint($p1, $p2, -0.5 * $prepend / $d, $courseDistance, $isLoop);
       $p3->{ele} = $p1->{ele};
       $p3->{segment} = (defined $segmentName{$p1->{segment}}) ? 0 : $p1->{segment};
 
@@ -6809,14 +7385,14 @@ for my $file ( @files ) {
 
       unshift @{$points}, $p4, $p3;
     } else {
-      my $p3 = interpolatePoint($p1, $p2, -$prepend / $d);
+      my $p3 = interpolatePoint($p1, $p2, -$prepend / $d, $courseDistance, $isLoop);
       $p3->{ele} = $p1->{ele};
       unshift @{$points}, $p3;
     }
   }
   if ( (! $isLoop) && ($append > 0) && (($rTurnaround <= 0) || ($rLap <= 0)) ) {
     my $p1 = $points->[-1];
-    my $i = $#$points - 1;;
+    my $i = $#$points - 1;
     my $d;
     $i --
       while ((($d = latlngDistance($p1, $points->[$i])) < 10) && ($i > 0));
@@ -6824,7 +7400,7 @@ for my $file ( @files ) {
 
     # figure out if we want to curve the road to split this from the return road
     if ( ($prepend == $append) && ($rTurnaround > 0) ) {
-      my $p3 = interpolatePoint($p1, $p2, -0.5 * $prepend / $d);
+      my $p3 = interpolatePoint($p1, $p2, -0.5 * $prepend / $d, $courseDistance, $isLoop);
       $p3->{ele} = $p1->{ele};
       $p3->{segment} = (defined $segmentName{$p1->{segment}}) ? 0 : $p1->{segment};
 
@@ -6854,7 +7430,7 @@ for my $file ( @files ) {
       }
       push @$points, $p3, $p4;
     } else {
-      my $p3 = interpolatePoint($p1, $p2, -$append / $d);
+      my $p3 = interpolatePoint($p1, $p2, -$append / $d, $courseDistance, $isLoop);
       $p3->{ele} = $p1->{ele};
       $p3->{segment} = (defined $segmentName{$p1->{segment}}) ? 0 : $p1->{segment};
       if ( $p3->{segment} != $points->[-1]->{segment} ) {
@@ -6867,20 +7443,7 @@ for my $file ( @files ) {
   }
 
   # copy the first point to the last point if specified
-  if (
-      $copyPoint &&
-      (
-       ($points->[0]->{lat} != $points->[-1]->{lat}) ||
-       ($points->[0]->{lon} != $points->[-1]->{lon}) ||
-       ($points->[0]->{ele} != $points->[-1]->{ele})
-      )
-     ) {
-    my %p = %{$points->[0]};
-    $p{segment} = $points->[-1]->{segment};
-    $p{distance} = $points->[-1]->{distance} + latlngDistance($points->[-1], $points->[0]) if (defined $points->[-1]->{distance});
-    note("copying point first point to end of the loop...\n");
-    push @$points, \%p;
-  }
+  copyPoint($points) if ($copyPoint);
 
   # split a route.
   # split a route at particular distance points, or into an equal number of pieces
@@ -6984,7 +7547,6 @@ for my $file ( @files ) {
     note("quality score of final course = ", sprintf("%.4f", $score), "\n");
     note("direction score of final course = ", sprintf("%.4f", $scoreD), "\n");
     note("altitude score of final course = ", sprintf("%.4f", $scoreZ), "\n");
-
     note("distance from last point to first point = ", sprintf("%.3f", latlngDistance($points->[-1], $points->[0])), " meters\n");
 
 
@@ -7039,7 +7601,10 @@ for my $file ( @files ) {
       deleteField2(points=> $points, field=> "heading");
     }
 
-    $gpx->waypoints($waypoints) if (defined $waypoints);
+    # add waypoints
+    if (defined $waypoints) {
+      $gpx->waypoints_add(@$waypoints);
+    }
 
     # create segments for track
     # when a segment ID changes, that means to start a new segment
@@ -7141,7 +7706,7 @@ for my $file ( @files ) {
           my $points = $segment->{points};
           unless (@keys) {
             @keys = keys %{$points->[0]};
-            print $fcsv join( ",", "track", "segment", @keys ), "\n";;
+            print $fcsv join( ",", "track", "segment", @keys ), "\n";
           }
           for my $p ( @$points ) {
             print $fcsv join( ",", $nTrack, $nSegment, @$p{@keys} ), "\n";
@@ -7171,10 +7736,11 @@ for my $file ( @files ) {
         for my $segment ( @{$track->{segments}} ) {
           addPointExtensions(points => $segment->{points});
         }
-
-        my $fNew = ($outFile eq "") ? setFileNameSuffix($file, "_processed.gpx") : $outFile;
+        my $fNew = ($outFile eq "") ? ($file eq "-") ? "-" : setFileNameSuffix($file, "_processed.gpx") : $outFile;
+	warn("fNew = $fNew\n");
         $fNew = setFileNameSuffix($fNew, sprintf("_split%d.gpx", $nSplit + 1)) // "-"
           if (scalar(@$splits) > 1);
+	warn("fNew = $fNew\n");
         note("saving processed data in file $fNew...\n");
         open my $fout, ">$fNew";
 
@@ -7205,7 +7771,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.56
+0.57
 
 =head1 DESCRIPTION
 
@@ -7347,7 +7913,7 @@ Options are case-insensitive and come in three varieties:
   spacing for point interpolation to 10 meters, and additionally turns on
   point interpolation.
 
-=item B<lists>: Some options allow for multiple values, for example C<-flatten>
+=item B<lists>: Some options allow for multiple values, for example C<-uniformGradient>
   or C<-autoSegments>.  See details in the description of the specific option.
 
 =back
@@ -7429,6 +7995,26 @@ This writes the autosmoothing "sigma" to the GPX file as an extensions
 field, but only if C<-autosmoothingZ> is positive.  It is useful for
 tuning the autosmoothing scale length.
 
+=item B<C<-align>> <option>
+
+Synonym for C<-snap>
+
+=item B<C<-alignAltitude>> <meters>
+
+Synonym for C<-snapAltitudes>
+
+=item B<C<-alignDistance>> <meters>
+
+Synonym for C<-snapDistance>
+
+=item B<C<-alignTransition>> <meters>
+
+Synonym for C<-snapTransition>
+
+=item B<C<-alignZ>> <meters>
+
+This is a synonym for C<-snapAltitude>.
+
 =item B<C<-anchorSF>>
 
 For point-to-point routes, this specifies that the start and finish
@@ -7458,6 +8044,7 @@ Negative values crop the course by the negative distance.  So
 useful for preventing RGT from connecting the finish and start points,
 which has a 100 meter threshold, as this is written.
 
+=item B<C<-arcFitAngle>> <degrees>
 =item B<C<-arcFitDegs>> <degrees>
 
 If arc fits are desired, specifying this will cause arc fit
@@ -7489,6 +8076,7 @@ See also C<-arcFitMaxDegs>.
 Where to end arc fitting, if any.  The default is to end any arc
 fitting at the end of the course.
 
+=item B<C<-arcFitMaxAngle>> <degrees>
 =item B<C<-arcFitMaxDegs>> <degrees>
 
 If a C<-arcFitDegs> option is specified, specifying this limit the
@@ -7758,7 +8346,7 @@ distance from the start of the track.  The code will go to a point
 that distance from the start. It will then search forward to where the
 course returns to the specified point and define that as a circuit.
 
-If the number of circuits is greater than 1, it will repeat thse
+If the number of circuits is greater than 1, it will repeat these
 points to create multiple circuits.  If the number is zero, it will
 delete the points.  If the number is one, then nothing will change.
 
@@ -7809,6 +8397,12 @@ arc. Corner cropping allows for a reduction in smoothing and avoids
 C<-minAngle> causing corners to bow outward.  This is only done if the
 straight segmenrs before and after the corner have sufficient length
 for the interpolated points to be placed.
+
+=item B<C<-cornerCropArcFit>>
+
+Whether to do arc fits when corner cropping.  This is the default, so
+to turn it on use C<-nocornerCropArcFit>.  Without arc fitting, the
+cropped corner will be angular.
 
 =item B<C<-cornerCropEnd>> <meters>
 
@@ -8006,6 +8600,11 @@ without having to identify the position where the circuits begin.  So
 for example C<-circuitToPosition 0 3> would generate three finishing
 circuits automatically.
 
+If C<-finishCircuits> is specified but not C<-finishCircuitDistance>,
+then the result is equivalent to C<-circuitToPosition> to position 0
+(counting from end) with one repeat (meaning the circuit starts the
+penultimate time it reaches the finish point).
+
 =item B<C<-finishCircuits>> <count>
 
 A finishing circuit starting at the position specified by the
@@ -8013,6 +8612,11 @@ B<C<-finishCircuitDistance>> option, in meters, will be appended
 to the initial data this number of times.  A value of 1 here
 implies adding one copy, which will result in two laps of the
 circuit.
+
+If C<-finishCircuits> is specified but not C<-finishCircuitDistance>,
+then the result is equivalent to C<-circuitToPosition> to position 0
+(counting from end) with one repeat (meaning the circuit starts the
+penultimate time it reaches the finish point).
 
 =item B<C<-finishCircuitStart>> <meters>
 
@@ -8047,13 +8651,13 @@ This option is not invoked by C<-auto>, so if you are using Strava
 Route Editor to generate GPX files, you will probably want to specify
 this option in addition to a possible C<-auto>.
 
-=item B<C<-flatten>> <start-meters> <altitude-meters> <end-meters> <altitude-meters> <transition-meters> ...
+=item B<C<-flatten>> <start-meters> <altitude-meters> <end-meters> <altitude-meters> <transition-meters> <bow-meters> ...
 
-This important option allows the route to be flattened over a
-specified coordinate range, with a specified transition length.  This
-has been used where there are overpasses in a route, where it is
-important that the altitude difference between the upper and lower
-roadway be maintained, even with altitude smoothing.
+This option allows the route to be flattened over a specified
+coordinate range, with a specified transition length.  This has been
+used where there are overpasses in a route, where it is important that
+the altitude difference between the upper and lower roadway be
+maintained, even with altitude smoothing.
 
 You sepecify a starting distance, then the altitude at that point,
 then a finish distance, then (optionally) an altitude at the second
@@ -8064,13 +8668,23 @@ one).
 The transition length is used to describe a distance over which a
 cosine weighting term is used to transition between the fixed
 altitude, and the prior altitude for those points.  This should be
-made long enough to avoid excessive deviations in gradient, yet small
-enough to limit the extent of the influence of the command.
+made long enough to avoid excessive deviations in gradient.
 
-Multiple sets of five numbers can be provided, in which case altitude
+Bow describes how far up (positive) or down (negative) the center of
+the segment is raised relative to the straight line connecting the
+endpoints.  This may be useful for suspension bridges, for example.
+
+Multiple sets of six numbers can be provided, in which case altitude
 flattening is done over each of the specified segments.
 
-Distances are calculated I<after> smoothing but before cropping or extension.
+Distances are calculated I<before> most route processing, after possible
+route reversal. So if you are using C<-reverse>, specify the distance
+values from the start of the route after reversal.  It is done before
+possibly adding circuits, so the adjusted altitudes will be available
+on all circuits.
+
+If you want a uniform gradient but do not want to specify the endpoint
+altitudes, consider C<-uniformGradient> instead.
 
 =item B<C<-gAutoSmooth>>
 
@@ -8186,6 +8800,7 @@ Specify that turnaround loops should loop to the right (US, for example).
 The default is to base it on the C<-laneShift> (left for a negative
 lane shift, else positive).
 
+=item B<C<-maxCornerCropAngles>> <degrees>
 =item B<C<-maxCornerCropDegs>> <degrees>
 
 The maximum angle at which corner cropping should be done, for example
@@ -8200,6 +8815,7 @@ to not have been converted into percent, so the number will be
 multiplied by 100.  With the closure of RGT it is unlikely this
 has any remaining utility.
 
+=item B<C<-minCornerCropAngle>> <degrees>
 =item B<C<-minCornerCropDegs>> <degrees>
 
 The minimum angle at which corner cropping should be done, for example
@@ -8570,6 +9186,36 @@ C<-selectiveSmoothZ 15 4000 50 5000 15>
 
 an alias for -selectiveSmoothZ
 
+=item B<C<-selectiveSpacing>> <meters> ...
+
+This applies selective point spacing on the course before other
+processing.  It is done in addition to the C<-spacing> and
+C<-autoSpacing> specifications.  If the specified value is larger than
+the spacing implied from those options, then there is little effect,
+since those will be applied first.  If the spacings in this option are
+smaller, then they will be applied after those values, possibly
+further reducing the point spacing.
+
+Values are specified in groups of three, with the first being a
+spacing in meters, the second being a start of the interval for this
+spacing, and the third being the end of the interval for this spacing.
+Additional sets of three points can then be specified.  On loop
+courses only the end point can be before the start point, in which
+case the interval will wrap around the S/F point.
+
+The following is an example of applying a 1 meter spacing to the region from
+1000 meters to 1100 meters, then 2 meter spacing from 1100 to 1200 meters:
+
+C<-selectiveSmooth 1 1000 1100 2 1100 1200>
+
+On many commands involving intervals, if the stop point is before the
+start point, that implies the interval is after the start point and
+before the end point but not between.  On point-to-point courses that
+makes no sense here, so these intervals are rejected on point-to-point
+courses.  Of course on loop courses (C<-loop>, C<-lap>, or
+C<-autoLoop>) wrapping around still makes perfect sense, so this is
+still the interpretation.
+
 =item B<C<-shiftEnd>> <meters>
 
 The position at which lane shifting should end. This is useful in case
@@ -8842,18 +9488,15 @@ This is a nice clean replacement
 
 =item B<C<-snapTransition>> <meters>
 
-B<WARNING>: this may be buggy.  Check results carefully.
-
 This is an I<experimental> feature whereby points within this distance
-of a snap transition on partially syncronized in altitude, with a
-transition weighting depending on distance along the course.  This is
-designed to avoid having divergent roads having different slopes while
-still overlapping, which can create "ridges" in the pavement which in
-real life would cause riders to crash.  It's experimental, however,
-and there is no guarantee it will help rather than hurt, because of
-the way smoothing affects points near snap transitions, and snapping
-is almost always combined with smoothing to avoid abrupt jumps in
-position.
+of a snap transition on partially syncronized in altitude with a zero
+gradient, with a transition weighting depending on geometrical
+distance from the snap transition.  This is designed to avoid having
+divergent roads having different slopes while still overlapping It's
+experimental, however, and there is no guarantee it will help rather
+than hurt, because of the way smoothing affects points near snap
+transitions, and snapping is almost always combined with smoothing to
+avoid abrupt jumps in position.
 
 =item B<C<-snapZ>> <meters>
 
@@ -8909,6 +9552,7 @@ This allows specification of how close the spliced segment must be to
 a point in the original file to be considered a candidate for
 splicing.  The default is 250 meters.
 
+=item B<C<-splineAngle>> <degrees>
 =item B<C<-splineDegs>> <degrees>
 
 If splines are desired, specifying this will cause spline
@@ -8923,6 +9567,7 @@ point.
 Where to end spline fitting, if any.  The default is to end any spline
 fitting at the end of the course. This can "wrap around".
 
+=item B<C<-splineMaxAngle>> <degrees>
 =item B<C<-splineMaxDegs>> <degrees>
 
 If a C<-splineDegs> option is specified, specifying this limit the
@@ -8966,20 +9611,19 @@ just omitting this option.
 
 Sometimes races start with multiple circuits of a loop, before leaving
 the circuit for a remainder of the course.  This option allows you to
-repeat a beginning portion of the GPX file as a finishing circuit.
-To do this, you specify the distance to the end of the circuit, then
-an use the C<-startCircuits> option to specify how many copies of this
+repeat a beginning portion of the GPX file as a finishing circuit.  To
+do this, you specify the distance to the end of the circuit, then an
+use the C<-startCircuits> option to specify how many copies of this
 circuit should be prepended to the route at the beginning.
 
 If the start/end of the circuit lap is not the same place as the desired
 beginning of the route, then you'll need to specify a C<-cropMin> value to remove
 some of the initial circuit
 
-An alternative to this option is the newer C<-circuitFromPosition>
-which if specified with a position of 0 will generate starting
-circuits without having to identify the position where the circuits
-end.  So for example C<-circuitToPosition 0 3> would generate three
-starting circuits automatically.
+If C<-startCircuits> is specified but not C<-startCircuitDistance>,
+then the result is equivalent to C<-circuitFromPosition> from position
+0 with one repeat (meaning the circuit ends the first time it returns
+to the starting point).
 
 =item B<C<-startCircuitEnd>> <meters>
 
@@ -8992,6 +9636,11 @@ value in meters specified with the C<-startCircuitDistance> option) to be
 added to the beginning of the data.  So a value 1 means adding one
 copy, which implies two laps of the circuit, including the one defined
 in the original file.
+
+If C<-startCircuits> is specified but not C<-startCircuitDistance>,
+then the result is equivalent to C<-circuitFromPosition> from position
+0 with one repeat (meaning the circuit ends the first time it returns
+to the starting point).
 
 =item B<C<-startTime>> "<time string>"
 
@@ -9020,37 +9669,41 @@ affect the distance to the nearer points.  This is recommended.
 A minimum number of points is needed to straighten a segment.  If
 insufficient points are available, then nothing will be done.
 
+Straight fitting is done by finding the endpoints of the straight
+segment using the provided distances.  Only existing points will be
+used: no point interpolation will be done. Then for points between
+these endpoints, a projection operator is used to map the new point
+onto the segment connecting the two endpoints.  The original data
+should be close to straight so this projection operation does not
+result in any retrograde motion.  This would result in 180 degree
+turns.  So if the points are nearly straight, and the end points are
+good, this can help straighten out sections of road which should be
+perfectly straight.  The points are moved onto the projected position
+on the line segment, but the elevations (or other parameters) are not
+changed.  So the assumption is that moving onto the staight line is
+perpendicular to any altitude gradients.  This could result in a road
+with a constant gradient but following a curvy path ending up with a
+non-constant gradient.  So check altitudes with care.  One possible
+approach is to use the C<-uniformGradient> option to interpolate the
+altitudes, after doing the straight-line fit.
+
 =item B<C<-straightEnd>> <meters> (1 or more)
 
 Set one or more distances for straight fitting.
 
-See C<-straightStart>
+See C<-straightStart> and C<-straight>.
 
 =item B<C<-straightStart>> <meters> (1 or more)
 
 Set one or more start distances for straight fitting.
 
-Straight fitting is done by finding the endpoints of the straight segment
-using the provided distances.  Only existing points will be used: no point
-interpolation will be done. Then for points between these endpoints, a projection
-operator is used to map the new point onto the segment connecting the two endpoints.
-The original data should be close to straight so this projection operation does
-not result in any retrograde motion.  This would result in 180 degree turns.
-So if the points are nearly straight, and the end points are good, this can
-help straighten out sections of road which should be perfectly straight.
-The points are moved onto the projected position on the line segment, but
-the elevations (or other parameters) are not changed.  So the assumption is that
-moving onto the staight line is perpendicular to any altitude gradients.
-This could result in a road with a constant gradient but following a curvy
-path ending up with a non-constant gradient.  So check altitudes with care.
-One possible approach is to use the C<-flatten> option to interpolate the altitudes,
-after doing the straight-line fit.
-
-If multiple values are listed, then multiple sections will be replaced.
-Distances will be updated after each circular segment replacement.
-So if you want to do multiple circular replacements, either list them
+If multiple values are listed, then multiple sections will be
+replaced.  Distances will be updated after each segment replacement.
+So if you want to do multiple circular replacements, list them
 from further to closer relative to the start to avoid the distances
 for later fits being affected by earlier fits.
+
+See C<-straight> for comments.
 
 =item B<C<-stripSegments>>
 
@@ -9069,6 +9722,20 @@ Specify which track (1, 2, 3, ...) within the file to use.  The default
 is 1.  If you specify 0 or a negative number, the default will be used.
 Track number can also be specified by putting a suffix after the filename,
 for example "file.gpx:2" for the second track in file.gpx.
+
+=item B<C<-uniformGradient>> <start-meters> <end-meters> <bow-meters> ...
+
+This is similar to C<-flatten>, except instead of setting a fixed altitude at each endpoint,
+interpolates altitudes from the course.  One common application is bridges or tunnels, where
+a mapping program may use altitudes from the Earth, while the bridge or tunnel more typically
+takes a uniform gradient.   Suspension bridges, for example, may be more parabolic
+in nature, and that will require future support.  This is done before most route processing,
+but after C<-join> and C<-splice>, and after C<-reverse>.
+
+The third number, if any, is a bow term, which is how much the center point is above
+or below the straight line connecting the start and finish point.  This results in a uniformly
+graded gradient rather than a uniform gradient.  It is useful for suspension bridges, for example,
+which have a curved trajectory.
 
 =item B<C<-v>> or B<C<-version>>
 
@@ -9116,13 +9783,13 @@ C<-zScale 2 -zShift 100> will change an altitude 0 to an altitude
 
 Distance on the route to end altitude shift.  There will be a transition
 outside of this range.  This is also used for C<-zScale> and C<-zOffset>
-(it affects all)..
+(it affects each).
 
 =item B<C<-zShiftStart>> <meters>
 
 Distance on the route to start altitude shift.  There will be a transition
 outside of this range.  This is also used for C<-zScale> and C<-zOffset>
-(it affects all)..
+(it affects each).
 
 =item B<C<-zSmooth>>
 
@@ -9225,26 +9892,23 @@ automatically chosen.
 
 The following example was from a criterium course:
 
-C<processGPX -laneShift -7 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -splineDegs 12 -minRadius 6 -prune -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx>
+C<processGPX -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx>
 
 The course has an out-and-back section ending in a loop.  In the
-actual race, the out-and-back is separated by cones. However, for RGT
-cycling, riders use the full road width of 8 meters, so the out and
-back portions needed to be separated.
+actual race, the out-and-back is separated by cones.  But Biketerra
+does not have a way to specify riders have riders go out and back on
+the same road except for full out-and-back courses.  So here a
+separate road out and back are used.  This creates four lanes.
 
 Options:
 
 =over
 
-=item B<C<-laneshift -6>>
+=item B<C<-laneshift -3>>
 
 Riders remain to the left left on the out-and-back portion, so each
 direction is shifted 4 meters to the left.  The negative number
 implies left, a positive number implies right.
-
-At one time a lane shift of 4 meters was adequate, but with changes to
-"asset" placement, a larger lane shift is now needed.  This example
-uses 7 meters to the left (UK, perhaps).
 
 =item B<C<-shiftStart 740 -shiftEnd 1390>>
 
@@ -9283,20 +9947,14 @@ spacing.
 This option is almost always a good idea, setting the spacing in the
 corners to provide adequare resolution.
 
-=item B<C<-splineDegs 12>>
+=item B<C<-cornerCrop 6>>
 
-This option helps improve prevent corners from "collapsing" when they
-don't have enough points to define the curve in the original GPX file.
-Instead of being interpreted as polygons with straight segments, they
-will be interpreted as smooth curves, if there are corners bending
-more than this angle (12 degrees, in this example).  This is usually a
-good idea if there are tight turns.
+If there are tight corners in the GPX file, this replaces the rounded
+forner with a circular arc before further processing.
 
 =item B<C<-minRadius 6>>
 
-If a corner turns out sharper than 6 meters, RGT will try to increase the radius
-of the turn by extending the road outward, with a smooth transition into
-and out of the correction.
+Make sure the corner isn't too sharp for BikeTerra.
 
 =item B<C<-prune>>
 
@@ -9351,6 +10009,10 @@ then return, with a default lane shift.
 This example uses the -outAndBackLap shortcut to create an
 out-and-back circuit with loops at both ends to create a circuit.
 
+Point-to-point routes on BikeTerra have automatically generated
+turnarounds at the end so this is nor normally needed there, unless
+for example you prefer having larger-radius turnarounds.
+
 C<processGPX -outAndBackLap outSection.gpx -out outAndBackCircuit.gpx>
 
 =over
@@ -9368,7 +10030,10 @@ This is from a road course with an out-and-back section.  Note C<-RUTurn>
 is not used here, since in this example, the loop at the end of the
 out-and-back is part of the original route.
 
-C<processGPX -crop 38730 -anchorSF -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothZ 20 -snapDistance 5 -snap 1 -autoSegments 10 0.5 -minRadius 6 NoonRide.gpx>
+BikeTerra automatically adds turnarounds to the end of point-to-point
+routes.  so this is not typically necessary.
+
+C<processGPX -crop 38730 -anchorSF -spacing 10 -autoSpacing -smoothAngle 20 -prune -smooth 10 -smoothZ 20 -snapDistance 5 -snap 1 -autoSegments 10 0.5 -cornerCrop 6 -minRadius 6 NoonRide.gpx>
 
 =over
 
@@ -9452,6 +10117,11 @@ strongly average gradient should be used in segment placement: a
 higher number places a higher value on segments having a higher
 average gradient.
 
+=item B<C<-cornerCrop 6>>
+
+It is generally good practice to set C<-cornerCrop> to match C<-minRadius>,
+to replace sharp corners with circular arcs before further processing.
+
 =item B<C<-minRadius 6>>
 
 If a corner turns out sharper than 6 meters, RGT will try to increase
@@ -9494,7 +10164,7 @@ This specifies the name of the file to which the result is written
 
 =back
 
-=head2 Multi-step processing: selective smoothing
+=head2 selective smoothing
 
 Here is an example where an urban route with reasonably sharp corners,
 except it followed an oval path around a park.  The oval path came out
@@ -9515,6 +10185,8 @@ then 5 meters from there up to 1540 meter distance, and from there 15
 meters again to the end of the lap.
 
 =back
+
+=head2 multi-step processing
 
 But an alternate approach is to run the code twice, smoothing in two
 steps.
@@ -9592,6 +10264,55 @@ This sets the minimum radius of corners to 6 meters.  This is done in the second
 here to include effects from processing in both steps.
 
 =item B<C<-out processed.gpx>>
+
+=back
+
+=head2 adjusting gradient for bridges or tunnels
+
+Typically tunnels are built with a constant gradient.  Route editors
+may not produce this uniform gradient, so it can be useful to "manually"
+set the gradient to uniform.  Or, on climbs with poor altitude resolution,
+you might want to set the gradient to uniform over certain sections.
+
+Here the C<-uniformGradient> option can be useful, for example:
+
+C<processGPX -auto -simplify -uniformGradient 1000 1500 input.gpx -out output.gpx>
+
+Options here include:
+
+=over
+
+=item B<C<-auto>>
+
+This specifies a reasonable set of smoothing parameters.
+
+=item B<C<-simplify>>
+
+Reduce the number of points after processing beyond that which
+C<-prune> would produce.
+
+=item B<C<-uniformGradient 1000 1500>>
+
+This specifies that the gradient from 1000 meters to 1500 meters is to be set
+to be uniform.  This is done before any other processing, so additional smoothing
+may transition the gradient at the start and finish of the interval.
+
+=back
+
+For suspension bridges, for example, a uniform gradient might not be appropriate.
+These may have a smoothly varying gradient, producing a parabolic shape.  In this case, you
+would provide a third parameter to C<-uniformGradient>.  For example:
+
+C<processGPX -auto -simplify -uniformGradient 2000 2400 3 input.gpx -out output.gpx>
+
+=over
+
+=item B<C<-uniformGradient 2000 2400 3>>
+
+This specifies that instead of a uniform, linear increase in gradient from the
+start at 2000 meters to the finish at 2400 meters, the center is raised 3 meters
+relative to the straight line, with the transition to 0 meters at the start
+points and stop points.
 
 =back
 
@@ -9747,6 +10468,11 @@ For example:
 
 C<processGPX -cropMin 60 -cropMax -140 RGTRoute.gpx -out BikeTerraRoute.gpx>
 
+For circuits, you don't need to crop the end of the route, but the S/F
+point should be shifted:
+
+C<processGPX -cropMin 60 RGTCircuit.gpx -out BikeTerraCircuit.gpx>
+
 =head1 BUGS
 
 =over
@@ -9763,13 +10489,25 @@ The snapping algorithm makes certain assumptions to reduce computation
 time and can be conflused for sufficiently complicated routes.  More
 testing is needed.
 
-=item B<C<-snapTransition> is suspect.>
+=item B<C<-snapTransition> may cause issues.>
+
+If there are gaps in a snapping range, then snapTransition may cause unnecessary flattening of the course
 
 =item B<snapping and segments>
 
 If segments are defined before snapping, the code will try to assign
 the appropriate segment to each snapped point, but this is imperfect.
 It is better to define segments after snapping points.
+
+=item B<gradient signs apply to only forward direction.>
+
+On BikeTerra, for example, routes can be ridden in either direction,
+and the present gradient sign approach is only in the forward
+direction.
+
+=item B<climbs only detected in forward direction.>
+
+Climb detection applies only to riding routes in the forward direction.
 
 =back
 
