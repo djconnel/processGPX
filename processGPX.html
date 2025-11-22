@@ -248,7 +248,11 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Negative values crop the course by the negative distance. So &quot;<code>-append -100</code>&quot; will move the finish line back 100 meters. This was useful for preventing RGT from connecting the finish and start points, which has a 100 meter threshold, as this is written.</p>
 
 </dd>
-<dt id="arcFitAngle-degrees-item--arcFitDegs-degrees"><b><code>-arcFitAngle</code></b> &lt;degrees&gt; =item <b><code>-arcFitDegs</code></b> &lt;degrees&gt;</dt>
+<dt id="arcFitAngle-degrees"><b><code>-arcFitAngle</code></b> &lt;degrees&gt;</dt>
+<dd>
+
+</dd>
+<dt id="arcFitDegs-degrees"><b><code>-arcFitDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
 <p>If arc fits are desired, specifying this will cause arc fit interpolation to be done for corners turning at least this much, but less than the <code>-arcFitMaxDegs</code> option. A typical value is 5 degrees. This angle is the angle between interpolated course points</p>
@@ -266,7 +270,11 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Where to end arc fitting, if any. The default is to end any arc fitting at the end of the course.</p>
 
 </dd>
-<dt id="arcFitMaxAngle-degrees-item--arcFitMaxDegs-degrees"><b><code>-arcFitMaxAngle</code></b> &lt;degrees&gt; =item <b><code>-arcFitMaxDegs</code></b> &lt;degrees&gt;</dt>
+<dt id="arcFitMaxAngle-degrees"><b><code>-arcFitMaxAngle</code></b> &lt;degrees&gt;</dt>
+<dd>
+
+</dd>
+<dt id="arcFitMaxDegs-degrees"><b><code>-arcFitMaxDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
 <p>If a <code>-arcFitDegs</code> option is specified, specifying this limit the maximum angle corner for which arc fit interpolation will be applied. ArcFits are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. ArcFits have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using arc fit interpolation: strange results can occur if the corner is too sharp.</p>
@@ -832,7 +840,11 @@ Pod::Usage   : for the -help option</code></pre>
 <p>RGT supported a &quot;maximum slope&quot; option for magic roads. This option allows that to be changed from a default. It is specified in percent. If you specify a number &lt; 1, then that will be assumed to not have been converted into percent, so the number will be multiplied by 100. With the closure of RGT it is unlikely this has any remaining utility.</p>
 
 </dd>
-<dt id="minCornerCropAngle-degrees-item--minCornerCropDegs-degrees"><b><code>-minCornerCropAngle</code></b> &lt;degrees&gt; =item <b><code>-minCornerCropDegs</code></b> &lt;degrees&gt;</dt>
+<dt id="minCornerCropAngle-degrees"><b><code>-minCornerCropAngle</code></b> &lt;degrees&gt;</dt>
+<dd>
+
+</dd>
+<dt id="minCornerCropDegs-degrees"><b><code>-minCornerCropDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
 <p>The minimum angle at which corner cropping should be done, for example 60 degrees.</p>
@@ -1352,7 +1364,11 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This allows specification of how close the spliced segment must be to a point in the original file to be considered a candidate for splicing. The default is 250 meters.</p>
 
 </dd>
-<dt id="splineAngle-degrees-item--splineDegs-degrees"><b><code>-splineAngle</code></b> &lt;degrees&gt; =item <b><code>-splineDegs</code></b> &lt;degrees&gt;</dt>
+<dt id="splineAngle-degrees"><b><code>-splineAngle</code></b> &lt;degrees&gt;</dt>
+<dd>
+
+</dd>
+<dt id="splineDegs-degrees"><b><code>-splineDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
 <p>If splines are desired, specifying this will cause spline interpolation to be done for corners turning at least this much, but less than the <code>-splineMaxDegs</code> option. A typical value is 5 degrees. This angle is the angle between course points, not an angle of a total turn: the algorithm only looks at points ahead of and behind a given point.</p>
@@ -1364,7 +1380,11 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Where to end spline fitting, if any. The default is to end any spline fitting at the end of the course. This can &quot;wrap around&quot;.</p>
 
 </dd>
-<dt id="splineMaxAngle-degrees-item--splineMaxDegs-degrees"><b><code>-splineMaxAngle</code></b> &lt;degrees&gt; =item <b><code>-splineMaxDegs</code></b> &lt;degrees&gt;</dt>
+<dt id="splineMaxAngle-degrees"><b><code>-splineMaxAngle</code></b> &lt;degrees&gt;</dt>
+<dd>
+
+</dd>
+<dt id="splineMaxDegs-degrees"><b><code>-splineMaxDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
 <p>If a <code>-splineDegs</code> option is specified, specifying this limit the maximum angle corner for which spline interpolation will be applied. Splines are good for gradual, rounded corners but are not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Splines have the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using spline interpolation: strange results can occur if the corner is too sharp.</p>

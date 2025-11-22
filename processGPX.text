@@ -246,7 +246,8 @@ OPTIONS
         useful for preventing RGT from connecting the finish and start
         points, which has a 100 meter threshold, as this is written.
 
-    "-arcFitAngle" <degrees> =item "-arcFitDegs" <degrees>
+    "-arcFitAngle" <degrees>
+    "-arcFitDegs" <degrees>
         If arc fits are desired, specifying this will cause arc fit
         interpolation to be done for corners turning at least this much, but
         less than the "-arcFitMaxDegs" option. A typical value is 5 degrees.
@@ -275,7 +276,8 @@ OPTIONS
         Where to end arc fitting, if any. The default is to end any arc
         fitting at the end of the course.
 
-    "-arcFitMaxAngle" <degrees> =item "-arcFitMaxDegs" <degrees>
+    "-arcFitMaxAngle" <degrees>
+    "-arcFitMaxDegs" <degrees>
         If a "-arcFitDegs" option is specified, specifying this limit the
         maximum angle corner for which arc fit interpolation will be
         applied. ArcFits are good for gradual, rounded corners but are not
@@ -947,7 +949,8 @@ OPTIONS
         multiplied by 100. With the closure of RGT it is unlikely this has
         any remaining utility.
 
-    "-minCornerCropAngle" <degrees> =item "-minCornerCropDegs" <degrees>
+    "-minCornerCropAngle" <degrees>
+    "-minCornerCropDegs" <degrees>
         The minimum angle at which corner cropping should be done, for
         example 60 degrees.
 
@@ -1626,7 +1629,8 @@ OPTIONS
         to a point in the original file to be considered a candidate for
         splicing. The default is 250 meters.
 
-    "-splineAngle" <degrees> =item "-splineDegs" <degrees>
+    "-splineAngle" <degrees>
+    "-splineDegs" <degrees>
         If splines are desired, specifying this will cause spline
         interpolation to be done for corners turning at least this much, but
         less than the "-splineMaxDegs" option. A typical value is 5 degrees.
@@ -1638,7 +1642,8 @@ OPTIONS
         Where to end spline fitting, if any. The default is to end any
         spline fitting at the end of the course. This can "wrap around".
 
-    "-splineMaxAngle" <degrees> =item "-splineMaxDegs" <degrees>
+    "-splineMaxAngle" <degrees>
+    "-splineMaxDegs" <degrees>
         If a "-splineDegs" option is specified, specifying this limit the
         maximum angle corner for which spline interpolation will be applied.
         Splines are good for gradual, rounded corners but are not good for

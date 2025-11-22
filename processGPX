@@ -39,7 +39,7 @@ use Pod::Usage;
 # version 0.56: moved file loading to a proc, added -closeLoop
 # version 0.57: added -uniformGradient, moved -flatten to pre-smoothing and pre-circuit creation; added bow term to -flatten,
 #               added -selectiveSpacing; fixed fixCrossings on laps, allowed start/endCircuit to trigger circuitTo/FromPosition
-#               fixed bug in circuits, added -align as synonym for -snap, waypoints fixed, -merge close -snap segments,
+#               fixed bug in circuits, added -align as synonym for -snap, waypoints fixed, merge close -snap segments,
 #               -snapTransition recoded, reduced snapStep in large routes, added cornerCropArcFit, fixed problem with
 #               interpolatePoint and distance field on loops, improved S/F interpolation with cropped corners
 #               fixed -reverse to retain start point on loops, fixed reversePoints distance, reduced minCornerCropDegs default,
@@ -8045,6 +8045,7 @@ useful for preventing RGT from connecting the finish and start points,
 which has a 100 meter threshold, as this is written.
 
 =item B<C<-arcFitAngle>> <degrees>
+
 =item B<C<-arcFitDegs>> <degrees>
 
 If arc fits are desired, specifying this will cause arc fit
@@ -8077,6 +8078,7 @@ Where to end arc fitting, if any.  The default is to end any arc
 fitting at the end of the course.
 
 =item B<C<-arcFitMaxAngle>> <degrees>
+
 =item B<C<-arcFitMaxDegs>> <degrees>
 
 If a C<-arcFitDegs> option is specified, specifying this limit the
@@ -8816,6 +8818,7 @@ multiplied by 100.  With the closure of RGT it is unlikely this
 has any remaining utility.
 
 =item B<C<-minCornerCropAngle>> <degrees>
+
 =item B<C<-minCornerCropDegs>> <degrees>
 
 The minimum angle at which corner cropping should be done, for example
@@ -9553,6 +9556,7 @@ a point in the original file to be considered a candidate for
 splicing.  The default is 250 meters.
 
 =item B<C<-splineAngle>> <degrees>
+
 =item B<C<-splineDegs>> <degrees>
 
 If splines are desired, specifying this will cause spline
@@ -9568,6 +9572,7 @@ Where to end spline fitting, if any.  The default is to end any spline
 fitting at the end of the course. This can "wrap around".
 
 =item B<C<-splineMaxAngle>> <degrees>
+
 =item B<C<-splineMaxDegs>> <degrees>
 
 If a C<-splineDegs> option is specified, specifying this limit the
