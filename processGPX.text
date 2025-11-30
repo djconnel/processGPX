@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.57
+    0.58
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -1855,76 +1855,6 @@ OPTIONS
     "-zSigma"
         Synonym for "-smoothZ"
 
-    The code has been enhanced to handle "named segments" as was interpreted
-    by RGT. Segments are defined in the GPX standard such that a "track"
-    consists of a series of "segments", and a "segment" consists of a series
-    of "trackpoints". In RGT, segments are assumed to be contiguous, such
-    that a route is defined as the first segment, connected to the second
-    segment, connected to the third segment, etc.
-
-    RGT no longer exists, but this code is retained since there is a chance
-    another game will implement similar functionality. If the details
-    differ, then this code will be updated to accomodate that.
-
-    Segments can be either named or unnamed. Named segments are intepreted
-    by RGT to be timed separately, similar to Strava segments, where times
-    it takes riders to go from the beginning to end of the segment are
-    recorded. This program interacts with segments in several ways:
-
-        1. if the input file has segments defined in the manner required by
-        RGT, then these segments will be retained, unless the
-        "-stripSegments" option is used. If there are gaps between segments,
-        then these gaps will be filled with additional segments, such that
-        there is no ambiguity about whether a gap belongs to the prior or
-        following segment.
-
-        2. Adjacent unnamed segments will be merged, so for example the
-        artificial segments assigned to gaps between segments will be
-        assigned to adjacent unnamed segment(s).
-
-        3. You can define your own segments using the "-segments" option.
-        This is followed by a comma-delimited list of a start position, a
-        finish position, and a name, followed optionally by more of these
-        three items. So it can be followed by a number of comma-delimited
-        elements divisible by three. For each triplet, a segment is formed
-        between the first coordinate and the second coordinate and assigned
-        the name of the third element (if non-blank). For example,
-        "-segment" 1000,2000,"timed km" creates a segment from 1000 meters
-        into the route, up to 2000 meters into the route, and named the
-        segment "timed km". These coordinates are of course affected by
-        other operations performed by this code so order of these operations
-        is important. The segments are evaluated after most operations such
-        as smoothing, but before cropping, so the coordinates do not take
-        into account potential crops.
-
-        4. A more powerful way to create segments is to do so automatically.
-        This uses an algorithm which examines the route profile and
-        identifies what it considers to be "climbs". The default is for no
-        automatic segments to be generated, so to request this, the
-        "-autoSegments" option is used. It's followed by two numbers. The
-        first is the threshold for a climb: small bumps in the road are not
-        assigned for timing. The number is vertical meters at a reference
-        10% grade. The second number is a power which describes how much
-        weight is put on steepness for defining a climb. A typical range is
-        0.3 to 3.0, with 0.5 to 1.0 working fairly well in many cases. A
-        lower number will tend to create longer segments rather than
-        focusing on steep sections, and will tend to combine sections which
-        are separated by plateaus or brief descents. A larger number will
-        tent to split these segmented climbs into individual climbs, so for
-        example if a road is 10% for 1 km, then flat for 500 meters, then 8%
-        for the next km, that might be considered one climb or two.
-        Additionally automatic segments need to be separated from each
-        other. The amount of this separation is specified with the
-        -autoSegmentMargin option (default is 400). There's also minimum
-        spacings to the start (-autoSegmentStartMargin) and finish
-        (-autoSegmentFinishMargin) lines. If climbs would be too close to
-        each other, the lower rated one is ignored, as are climbs which
-        would be too close to the start and/or finish. So if you're
-        designing a route for a hillclimbing competition, unless the finish
-        is sufficiently past the start of the climb and the start is
-        suffiently separate from the start of the climb, there will not be a
-        segment defined for the climb.
-
 EXAMPLES
   "-auto" option
     The "-auto" option attempts to use "reasonable" parameters which may not
@@ -2425,6 +2355,77 @@ EXAMPLES
     point should be shifted:
 
     "processGPX -cropMin 60 RGTCircuit.gpx -out BikeTerraCircuit.gpx"
+
+NAMED SEGMENTS
+    The code has been enhanced to handle "named segments" as was interpreted
+    by RGT. Segments are defined in the GPX standard such that a "track"
+    consists of a series of "segments", and a "segment" consists of a series
+    of "trackpoints". In RGT, segments are assumed to be contiguous, such
+    that a route is defined as the first segment, connected to the second
+    segment, connected to the third segment, etc.
+
+    RGT no longer exists, but this code is retained since there is a chance
+    another game will implement similar functionality. If the details
+    differ, then this code will be updated to accomodate that.
+
+    Segments can be either named or unnamed. Named segments are intepreted
+    by RGT to be timed separately, similar to Strava segments, where times
+    it takes riders to go from the beginning to end of the segment are
+    recorded. This program interacts with segments in several ways:
+
+        1. if the input file has segments defined in the manner required by
+        RGT, then these segments will be retained, unless the
+        "-stripSegments" option is used. If there are gaps between segments,
+        then these gaps will be filled with additional segments, such that
+        there is no ambiguity about whether a gap belongs to the prior or
+        following segment.
+
+        2. Adjacent unnamed segments will be merged, so for example the
+        artificial segments assigned to gaps between segments will be
+        assigned to adjacent unnamed segment(s).
+
+        3. You can define your own segments using the "-segments" option.
+        This is followed by a comma-delimited list of a start position, a
+        finish position, and a name, followed optionally by more of these
+        three items. So it can be followed by a number of comma-delimited
+        elements divisible by three. For each triplet, a segment is formed
+        between the first coordinate and the second coordinate and assigned
+        the name of the third element (if non-blank). For example,
+        "-segment" 1000,2000,"timed km" creates a segment from 1000 meters
+        into the route, up to 2000 meters into the route, and named the
+        segment "timed km". These coordinates are of course affected by
+        other operations performed by this code so order of these operations
+        is important. The segments are evaluated after most operations such
+        as smoothing, but before cropping, so the coordinates do not take
+        into account potential crops.
+
+        4. A more powerful way to create segments is to do so automatically.
+        This uses an algorithm which examines the route profile and
+        identifies what it considers to be "climbs". The default is for no
+        automatic segments to be generated, so to request this, the
+        "-autoSegments" option is used. It's followed by two numbers. The
+        first is the threshold for a climb: small bumps in the road are not
+        assigned for timing. The number is vertical meters at a reference
+        10% grade. The second number is a power which describes how much
+        weight is put on steepness for defining a climb. A typical range is
+        0.3 to 3.0, with 0.5 to 1.0 working fairly well in many cases. A
+        lower number will tend to create longer segments rather than
+        focusing on steep sections, and will tend to combine sections which
+        are separated by plateaus or brief descents. A larger number will
+        tent to split these segmented climbs into individual climbs, so for
+        example if a road is 10% for 1 km, then flat for 500 meters, then 8%
+        for the next km, that might be considered one climb or two.
+        Additionally automatic segments need to be separated from each
+        other. The amount of this separation is specified with the
+        -autoSegmentMargin option (default is 400). There's also minimum
+        spacings to the start (-autoSegmentStartMargin) and finish
+        (-autoSegmentFinishMargin) lines. If climbs would be too close to
+        each other, the lower rated one is ignored, as are climbs which
+        would be too close to the start and/or finish. So if you're
+        designing a route for a hillclimbing competition, unless the finish
+        is sufficiently past the start of the climb and the start is
+        suffiently separate from the start of the climb, there will not be a
+        segment defined for the climb.
 
 BUGS
     lane shifting and sharp corners

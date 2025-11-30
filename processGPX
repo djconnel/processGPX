@@ -40,12 +40,14 @@ use Pod::Usage;
 # version 0.57: added -uniformGradient, moved -flatten to pre-smoothing and pre-circuit creation; added bow term to -flatten,
 #               added -selectiveSpacing; fixed fixCrossings on laps, allowed start/endCircuit to trigger circuitTo/FromPosition
 #               fixed bug in circuits, added -align as synonym for -snap, waypoints fixed, merge close -snap segments,
+#               forward and reverse direction gradient signs generated instead of just forward direction (BikeTerra roads are 2-way)
 #               -snapTransition recoded, reduced snapStep in large routes, added cornerCropArcFit, fixed problem with
 #               interpolatePoint and distance field on loops, improved S/F interpolation with cropped corners
 #               fixed -reverse to retain start point on loops, fixed reversePoints distance, reduced minCornerCropDegs default,
 #               Angle alias for Degs on options
+# version 0.58: added binomial search, fixed bug interpolating fields in arcFit
 
-my $version = "0.57"; # make sure this matches pod value
+my $version = "0.58"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -729,7 +731,6 @@ sub interpolatePoint {
   return $p;
 }
 
-
 #
 # return a new list of points and the index of a point at a given
 # position.  The point is interpolated if necessary
@@ -739,6 +740,42 @@ sub pointAtPosition {
   my $s0 = $var{distance} // die("pointAtPosition requires a distance parameters.\n");
   my $points = $var{points} // [];
   my $isLoop = $var{isLoop} // 0;
+  my $close = $var{close} // 0.01;
+
+  my @pNew = ();
+
+  my @i = bracketPosition(points=> $points, distance=> $s0, isLoop=> $isLoop, close=> $close);
+  return undef if (@i == 0);
+  return ($points, $i[0]) if (@i == 1);
+  my ($i1, $i2) = @i;
+  my $s1 = $points->[$i1]->{distance};
+  my $s2 = $points->[$i1]->{distance};
+  my $d12;
+  my $d10;
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+  if ($isLoop) {
+    $d12 = distanceDifference($s1, $s2, $courseDistance, $isLoop);
+    $d10 = distanceDifference($s1, $s0, $courseDistance, $isLoop);
+  } else {
+    $d12 = $s2 - $s1;
+    $d10 = $s0 - $s1;
+  }
+  my $f = $d10 / $d12;
+  my $pNew = interpolatePoint($points->[$i1], $points->[$i2], $f, $courseDistance, $isLoop);
+  my @newPoints = (@$points[0 .. $i1], $pNew, @$points[$i2 .. $#$points]);
+  return (\@newPoints, $i2);
+}
+
+#
+# return a pair of indices which bracket the given position
+# may also return a single point if there is an close match
+#
+sub bracketPosition {
+  my %var = @_;
+  my $s0 = $var{distance} // die("bracketPosition requires a distance parameter.\n");
+  my $points = $var{points} // [];
+  my $isLoop = $var{isLoop} // 0;
+  my $close = $var{close} // 0.01;
 
   my @pNew = ();
 
@@ -746,76 +783,58 @@ sub pointAtPosition {
 
   # handling of open loop
   my $courseDistance = $points->[-1]->{distance};
-  $courseDistance += latlngDistance( $points->[-1], $points->[0] ) if ($isLoop);
-  return ($points, 0)     if (abs($s0 - $points->[0]->{distance}) < 0.001);
-  return ($points, undef) if (($s0 < $points->[0]->{distance}) || ($s0 > $courseDistance));
-
-  my $pointAdded = 0;
+  if ($isLoop) {
+    $courseDistance += latlngDistance( $points->[-1], $points->[0] ) if ($isLoop);
+    $s0 -= $courseDistance * floor($s0 / $courseDistance);
+    return ((0)) if (($s0 < 0.01) || ($s0 > $courseDistance - 0.01));
+    my $sLast = $points->[-1]->{distance};
+    return (($#$points)) if (abs($s0 - $sLast) < 0.01);
+    if ($s0 > $sLast) {
+      return (0, 1);
+    }
+  } else {
+    return ((0)) if (abs($s0) < $close);
+    return (($#$points)) if (abs($s0 - $courseDistance) < $close);
+    return (()) if (($s0 < 0) || ($s0 > $courseDistance));
+  }
   my $pIndex;
 
-  # this should be a binary search...
-  for ( my $i = 1 ; $i <= $#$points; $i ++ ) {
-    push @pNew, $points->[$i - 1];
-    if ( ($s0 > 0) && ($points->[$i]->{distance} >= $s0) && ($points->[$i - 1]->{distance} < $s0) ) {
-      my $ds = $points->[$i]->{distance} - $points->[$i - 1]->{distance};
-      my $f = ($s0 - $points->[$i - 1]->{distance}) / $ds;
-      my $d1 = $f * $ds;
-      my $d2 = (1 - $f) * $ds;
-      if (($d1 < 0.01) && ($d1 < $ds / 2)) {
-        $pIndex = $i - 1;
-      } elsif (($d2 < 0.01) && ($d1 >= $ds / 2)) {
-        $pIndex = $i;
-      } else {
-        push @pNew, interpolatePoint($points->[$i - 1], $points->[$i], $f, $courseDistance, $isLoop);
-        $pIndex = $#pNew;
-      }
-    }
-    # add new point if necessary: only if we've not found the point yet
-    if ( ($i == $#$points ) && (! $pointAdded) && (! (defined $pIndex)) ) {
-      my %p = %{$points->[0]};
-      $p{distance} = $courseDistance;
-      push @{$points}, \%p;
-      $pIndex = $#$points;
-      $pointAdded ++;
+  # binomial search for bracketing points
+  my $i1 = 0;
+  my $i2 = $#$points;
+  while ($i2 > $i1 + 1) {
+    my $i = int(($i1 + $i2) / 2);   # mid point
+    my $s = $points->[$i]->{distance};
+    return (($i)) if (abs($s0 - $s) < $close);
+    if ($s > $s0) {
+      $i2 = $i;
+    } else {
+      $i1 = $i;
     }
   }
-
-  # add the last point unless it was added here for interpolation
-  push @pNew, $points->[-1] unless ($pointAdded);
-
-  # return
-  return (\@pNew, $pIndex);
+  return (($i1 == $i2) ? ($i1) : ($i1, $i2));
 }
 
 sub fieldAtPosition {
   my %var = @_;
-  my $s0 = $var{distance} // die("pointAtPosition requires a distance parameters.\n");
+  my $s0 = $var{distance} // die("fieldPosition requires a distance parameter.\n");
   my $points = $var{points} // [];
   my $field = $var{field} // die("fieldAtPosition requires a field specification\n");
   my $isLoop = $var{isLoop} // 0;
+  my $close = 1e-3;
 
-  # handling of open loop
-  my $courseDistance = calcCourseDistance(isLoop=> $isLoop, points=> $points) if ($isLoop);
-  if ($isLoop) {
-    $s0 -= $courseDistance * floor($s0 / $courseDistance);
-  }
-  for my $i ( 0 .. $#$points ) {
-    last if ((! $isLoop) && ($i == $#$points));
-    my $s1 = $points->[$i]->{distance};
-    my $s2 = $points->[($i + 1) % @$points]->{distance};
-    $s2 += $courseDistance if ($isLoop && $s2 < $s1);
-    if (($s1 <= $s0) && ($s2 >= $s0)) {
-      my $f1 = $points->[$i]->{$field};
-      if ($s0 == $s1) {
-        return $f1;
-      }
-      my $f2 = $points->[($i + 1) % @$points]->{$field};
-      die("ERROR: trying to interpolate undefined field $field\n") unless ((defined $f1) && (defined $f2));
-      my $f = ($s0 - $s1) / ($s2 - $s1);
-      return( $f1 * (1 - $f) + $f2 * $f );
-    }
-  }
-  return undef;
+  my @i = bracketPosition(points=> $points, distance=> $s0, isLoop=> $isLoop, close=> $close);
+
+  return undef if (@i == 0);
+  return $points->[$i[0]]->{$field} if (@i == 1);
+  my $f1 = $points->[$i[0]]->{$field};
+  return $f1 if ($points->[$i[0]]->{distance} == $points->[$i[1]]->{distance});
+  my $f2 = $points->[$i[1]]->{$field};
+  die("ERROR: trying to interpolate undefined field $field\n") unless ((defined $f1) && (defined $f2));
+  my $s1 = $points->[$i[0]]->{distance};
+  my $s2 = $points->[$i[1]]->{distance};
+  my $f = ($s0 - $s1) / ($s2 - $s1);
+  return( $f1 * (1 - $f) + $f2 * $f );
 }
 
 # for splines...
@@ -1381,6 +1400,7 @@ sub cropCorners {
       my $arcPoint2 = $pNew[-1];
       my $arcPoint3 = $p1;
       my $arcPoint4 = $p2;
+      # update distances in arcpoints
       my $newPoints = arcFit($arcPoint1, $arcPoint2, $arcPoint3, $arcPoint4, $cornerCrop);
       push @pNew, @$newPoints;
     }
@@ -1500,7 +1520,12 @@ sub arcFit {
 
   # distance from p1 to new corner point
   if (abs($a) > 0.01) {
-    $p1 = addVectorToPoint($p1, [$a * $c1, $a * $s1]);
+    my $f = $a / (2 * $R + $a);
+    my $dz = ($p2->{ele} - $p1->{ele}) * $f;
+    my $d1 = $p1->{distance};
+    $p1 = addVectorToPoint($p1, [$a * $c1, $a * $s1, $dz]);
+    $d1 += $a;
+    $p1->{distance} = $d1;
     push @points, $p1;
     @xy01 = latlng2dxdy($p0, $p1); # new p1
     @xy12 = latlng2dxdy($p1, $p2); # new p1
@@ -1508,7 +1533,12 @@ sub arcFit {
 
   if (abs($b) > 0.01) {
     # distance from p2 to new corner point
-    $px = addVectorToPoint($p2, [-$b * $c2, -$b * $s2]);
+    my $f = $b / (2 * $R + $b);
+    my $dz = ($p1->{ele} - $p2->{ele}) * $f;
+    my $d2 = $p2->{distance};
+    $px = addVectorToPoint($p2, [-$b * $c2, -$b * $s2, $dz]);
+    $d2 -= $b;
+    $px->{distance} = $d2;
     $p2 = $px;
     @xy12 = latlng2dxdy($p1, $p2); # new p2
     @xy23 = latlng2dxdy($p2, $p3); # new p2
@@ -1538,7 +1568,7 @@ sub arcFit {
   # if we need to add the extra point, do it here
   push @points, $px if (defined $px);
 
-  interpolateFields($p2, @points, $p3);
+  interpolateFields($p1, @points, $p2);
 
   return \@points;
 }
@@ -3213,32 +3243,27 @@ sub applyUniformGradient {
     my $spacing = $d / $N;
     $points = applySelectiveSpacing(points=> $points, isLoop=> $isLoop, spacings=> [$spacing], intervals=> [[$start, $stop]]);
   }
+
   for my $i ( 0 .. $#$points ) {
     my $s = $points->[$i]->{distance};
     if (isPointInInterval(points=> $points, isLoop=> $isLoop, start=> $start - $lambda, stop=> $stop + $lambda, distance=> $s)) {
       my $d1 = $s - $start;
       my $d2 = $stop - $s;
+      my $dd = $stop - $start;
       if ($isLoop) {
         # adjust distances to wrap around in loop
-        # in the interval, d1 and d2 must be positive
-        # in the transition region, d1 will be negative
-        $d1 -= $courseDistance * floor($d1 / $courseDistance);
-        $d2 -= $courseDistance * floor($d2 / $courseDistance);
+        $d1 -= $courseDistance * floor($d1 / $courseDistance + 0.5);
+        $d2 -= $courseDistance * floor($d2 / $courseDistance + 0.5);
+	$dd -= $courseDistance * floor($d2 / $courseDistance);
       }
-      if (isPointInInterval(points=> $points, isLoop=> $isLoop, start=> $start, stop=> $stop, distance=> $s)) {
+      if ($d1 > 0 && $d2 > 0) {
         my $f = $d1 / ($d1 + $d2);
         my $z = $z1 * (1 - $f) + $z2 * $f + 4 * $f * (1 - $f) * $bow;
         $points->[$i]->{ele} = $z;
       } else {
-        my $ds;
-        if (isPointInInterval(points=> $points, isLoop=> $isLoop, start=> $start - $lambda, stop=> $start, distance=> $s)) {
-          $d1 -= $courseDistance if ($d1 > 0);
-          $ds = $start - $s;
-        } else {
-          $ds = $s - $stop;
-        }
-        $ds += $courseDistance if ($isLoop && ($ds < 0));
-        my $f = $d1 / ($d1 + $d2);
+	# in transition region
+	my $ds = ($d1 > 0) ? -$d2 : -$d1;
+        my $f = $ds / $lambda;
         my $z = $z1 * (1 - $f) + $z2 * $f + 4 * $f * (1 - $f) * $bow;
         my $h = (1 + cos($pi * $ds / $lambda)) / 2;
         $points->[$i]->{ele} += $h * ($z - $points->[$i]->{ele});
@@ -6130,7 +6155,7 @@ for my $file ( @files ) {
   }
 
   #
-  # flatten selected sections
+  # apply uniform gradient in selected sections
   # points come in sets of 4: start point, altitude, finish point, altitude, lambda
   #
   if (@uniformGradient) {
@@ -7737,10 +7762,8 @@ for my $file ( @files ) {
           addPointExtensions(points => $segment->{points});
         }
         my $fNew = ($outFile eq "") ? ($file eq "-") ? "-" : setFileNameSuffix($file, "_processed.gpx") : $outFile;
-	warn("fNew = $fNew\n");
         $fNew = setFileNameSuffix($fNew, sprintf("_split%d.gpx", $nSplit + 1)) // "-"
           if (scalar(@$splits) > 1);
-	warn("fNew = $fNew\n");
         note("saving processed data in file $fNew...\n");
         open my $fout, ">$fNew";
 
@@ -7771,7 +7794,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.57
+0.58
 
 =head1 DESCRIPTION
 
@@ -9806,80 +9829,6 @@ Synonym for C<-smoothZ>
 
 =back
 
-
-The code has been enhanced to handle "named segments" as was interpreted
-by RGT.  Segments are defined in the GPX standard such that a "track"
-consists of a series of "segments", and a "segment" consists of a
-series of "trackpoints".  In RGT, segments are assumed to be
-contiguous, such that a route is defined as the first segment,
-connected to the second segment, connected to the third segment, etc.
-
-RGT no longer exists, but this code is retained since there is a
-chance another game will implement similar functionality.  If the
-details differ, then this code will be updated to accomodate that.
-
-Segments can be either named or unnamed.  Named segments are
-intepreted by RGT to be timed separately, similar to Strava segments,
-where times it takes riders to go from the beginning to end of the
-segment are recorded.  This program interacts with segments in several
-ways:
-
-=over
-
-1. if the input file has segments defined in the manner required by
-RGT, then these segments will be retained, unless the C<-stripSegments>
-option is used.  If there are gaps between segments, then these gaps
-will be filled with additional segments, such that there is no
-ambiguity about whether a gap belongs to the prior or following
-segment.
-
-2. Adjacent unnamed segments will be merged, so for example the
-artificial segments assigned to gaps between segments will be assigned
-to adjacent unnamed segment(s).
-
-3. You can define your own segments using the C<-segments> option.  This
-is followed by a comma-delimited list of a start position, a finish
-position, and a name, followed optionally by more of these three
-items.  So it can be followed by a number of comma-delimited elements
-divisible by three.  For each triplet, a segment is formed between the
-first coordinate and the second coordinate and assigned the name of
-the third element (if non-blank).  For example, C<-segment>
-1000,2000,"timed km" creates a segment from 1000 meters into the
-route, up to 2000 meters into the route, and named the segment "timed
-km".  These coordinates are of course affected by other operations
-performed by this code so order of these operations is important.  The
-segments are evaluated after most operations such as smoothing, but
-before cropping, so the coordinates do not take into account potential
-crops.
-
-4. A more powerful way to create segments is to do so automatically.
-This uses an algorithm which examines the route profile and identifies
-what it considers to be "climbs".  The default is for no automatic
-segments to be generated, so to request this, the C<-autoSegments> option
-is used.  It's followed by two numbers.  The first is the threshold
-for a climb: small bumps in the road are not assigned for timing.  The
-number is vertical meters at a reference 10% grade.  The second number
-is a power which describes how much weight is put on steepness for
-defining a climb.  A typical range is 0.3 to 3.0, with 0.5 to 1.0
-working fairly well in many cases.  A lower number will tend to create
-longer segments rather than focusing on steep sections, and will tend
-to combine sections which are separated by plateaus or brief descents.
-A larger number will tent to split these segmented climbs into
-individual climbs, so for example if a road is 10% for 1 km, then flat
-for 500 meters, then 8% for the next km, that might be considered one
-climb or two.  Additionally automatic segments need to be separated
-from each other.  The amount of this separation is specified with the
--autoSegmentMargin option (default is 400).  There's also minimum
-spacings to the start (-autoSegmentStartMargin) and finish
-(-autoSegmentFinishMargin) lines. If climbs would be too close to each
-other, the lower rated one is ignored, as are climbs which would be
-too close to the start and/or finish.  So if you're designing a route
-for a hillclimbing competition, unless the finish is sufficiently past
-the start of the climb and the start is suffiently separate from the
-start of the climb, there will not be a segment defined for the climb.
-
-=back
-
 =head1 EXAMPLES
 
 =head2 C<-auto> option
@@ -10477,6 +10426,81 @@ For circuits, you don't need to crop the end of the route, but the S/F
 point should be shifted:
 
 C<processGPX -cropMin 60 RGTCircuit.gpx -out BikeTerraCircuit.gpx>
+
+=head1 NAMED SEGMENTS
+
+The code has been enhanced to handle "named segments" as was interpreted
+by RGT.  Segments are defined in the GPX standard such that a "track"
+consists of a series of "segments", and a "segment" consists of a
+series of "trackpoints".  In RGT, segments are assumed to be
+contiguous, such that a route is defined as the first segment,
+connected to the second segment, connected to the third segment, etc.
+
+RGT no longer exists, but this code is retained since there is a
+chance another game will implement similar functionality.  If the
+details differ, then this code will be updated to accomodate that.
+
+Segments can be either named or unnamed.  Named segments are
+intepreted by RGT to be timed separately, similar to Strava segments,
+where times it takes riders to go from the beginning to end of the
+segment are recorded.  This program interacts with segments in several
+ways:
+
+=over
+
+1. if the input file has segments defined in the manner required by
+RGT, then these segments will be retained, unless the C<-stripSegments>
+option is used.  If there are gaps between segments, then these gaps
+will be filled with additional segments, such that there is no
+ambiguity about whether a gap belongs to the prior or following
+segment.
+
+2. Adjacent unnamed segments will be merged, so for example the
+artificial segments assigned to gaps between segments will be assigned
+to adjacent unnamed segment(s).
+
+3. You can define your own segments using the C<-segments> option.  This
+is followed by a comma-delimited list of a start position, a finish
+position, and a name, followed optionally by more of these three
+items.  So it can be followed by a number of comma-delimited elements
+divisible by three.  For each triplet, a segment is formed between the
+first coordinate and the second coordinate and assigned the name of
+the third element (if non-blank).  For example, C<-segment>
+1000,2000,"timed km" creates a segment from 1000 meters into the
+route, up to 2000 meters into the route, and named the segment "timed
+km".  These coordinates are of course affected by other operations
+performed by this code so order of these operations is important.  The
+segments are evaluated after most operations such as smoothing, but
+before cropping, so the coordinates do not take into account potential
+crops.
+
+4. A more powerful way to create segments is to do so automatically.
+This uses an algorithm which examines the route profile and identifies
+what it considers to be "climbs".  The default is for no automatic
+segments to be generated, so to request this, the C<-autoSegments> option
+is used.  It's followed by two numbers.  The first is the threshold
+for a climb: small bumps in the road are not assigned for timing.  The
+number is vertical meters at a reference 10% grade.  The second number
+is a power which describes how much weight is put on steepness for
+defining a climb.  A typical range is 0.3 to 3.0, with 0.5 to 1.0
+working fairly well in many cases.  A lower number will tend to create
+longer segments rather than focusing on steep sections, and will tend
+to combine sections which are separated by plateaus or brief descents.
+A larger number will tent to split these segmented climbs into
+individual climbs, so for example if a road is 10% for 1 km, then flat
+for 500 meters, then 8% for the next km, that might be considered one
+climb or two.  Additionally automatic segments need to be separated
+from each other.  The amount of this separation is specified with the
+-autoSegmentMargin option (default is 400).  There's also minimum
+spacings to the start (-autoSegmentStartMargin) and finish
+(-autoSegmentFinishMargin) lines. If climbs would be too close to each
+other, the lower rated one is ignored, as are climbs which would be
+too close to the start and/or finish.  So if you're designing a route
+for a hillclimbing competition, unless the finish is sufficiently past
+the start of the climb and the start is suffiently separate from the
+start of the climb, there will not be a segment defined for the climb.
+
+=back
 
 =head1 BUGS
 
