@@ -37,7 +37,7 @@
     </ul>
   </li>
   <li><a href="#NAMED-SEGMENTS">NAMED SEGMENTS</a></li>
-  <li><a href="#BUGS">BUGS</a></li>
+  <li><a href="#BUGS-and-ISSUES">BUGS and ISSUES</a></li>
   <li><a href="#AUTHORS">AUTHORS</a></li>
   <li><a href="#LICENSE">LICENSE</a></li>
 </ul>
@@ -52,7 +52,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.58</p>
+<p>0.59</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -900,21 +900,23 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>This is a short-cut for creating an out-and-back, with a loop at the end of the magic road, then a return. It defaults to shifting the road to the right. If you want the left (UK, for example) then specify the <code>-laneShift</code> option as well. It should obviously not be combined with <code>-lap</code> unless you add <code>-rLap</code>.</p>
 
-<p>If you want a different lane shift, or a different loop radius, you can specify these with <code>-laneShift</code> and/or <code>-rTurnaround</code>. You probably alao want to add some smoothing, so <code>-auto</code> is a good option.</p>
+<p>If you want a different lane shift than the default 4 meters, or a different loop radius than the default 8 meters, you can specify these with <code>-laneShift</code> and/or <code>-rTurnaround</code>. You probably alao want to add some smoothing, so <code>-auto</code> is a good option.</p>
 
-<p>If you use this option, then the starting route should be just the &quot;out&quot; section, not the &quot;back&quot;. The code will generate the turn-around loop and the return road, which will be shifted by default for a 12 meter separation, which given the 8 meter road width, results in a 4-meter median between the out and back.</p>
+<p>If you use this option, then the starting route should be just the &quot;out&quot; section, not the &quot;back&quot;. The code will generate the turn-around loop and the return road, which will be shifted.</p>
 
-<p>With the lane shift, you should make sure there&#39;s no sharp corners in the out section, or these could become excessively sharp after the lane shift. As a result, this option specifies defaults for point interpolation, spline fitting, point smoothing, and minimum radius. These options can be over-ridden by explictly specifying the appropriate options.</p>
+<p>To avoid issues with sharp corners, <code>-cornerCrop</code> and <code>-minRadius</code> are set by default. You can tune these parameters if corners aren&#39;t what you want.</p>
 
 <p>This option is generally not needed with BikeTerra which automatically forms turn-around loops at each end of a point-to-point course.</p>
+
+<p>For routes with sharp corners, for example tight switchbacks, this can give highly anomalous results due to the lane shift. You can try adding a lot of smoothing, for example <code>-smooth 20</code>.</p>
 
 </dd>
 <dt id="outAndBackLap"><b><code>-outAndBackLap</code></b></dt>
 <dd>
 
-<p>This is the same as <code>-outAndBack</code>, except also adds a turn-around to create a lappable course. If you want the turnaround and lap loops to be different than the default radius, then you can specify these separately with -rTurnaround and/or <code>-rLap</code>.</p>
+<p>This is the same as <code>-outAndBack</code> (read that section as well), except also adds a turn-around to create a lappable course. If you want the turnaround and lap loops to be different than the default radius, then you can specify these separately with -rTurnaround and/or <code>-rLap</code>.</p>
 
-<p>This option should not be used with BikeTerra which automatically forms turn-around loops at each end of a point-to-point course.</p>
+<p>This option is not generally needed with BikeTerra which automatically forms turn-around loops at each end of a point-to-point course.</p>
 
 </dd>
 <dt id="outAndBackLoop"><b><code>-outAndBackLoop</code></b></dt>
@@ -1250,7 +1252,11 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>Provide a Gaussian sigma value for smoothing of position and altitude. The result will sharp corners will be rounded to corners with approximately this radius, and grade fluctuations over less distance than this will be lost. Typically altitude needs more smoothing than position, so additional altitude smoothing is required.</p>
 
-<p>Synonym for <code>-smoothZ</code></p>
+</dd>
+<dt id="smoothing-meters"><b><code>-smoothing</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Synonym for <code>-smooth</code></p>
 
 </dd>
 <dt id="smoothAngle-degrees"><b><code>-smoothAngle</code></b> &lt;degrees&gt;</dt>
@@ -2083,7 +2089,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>The code has been enhanced to handle &quot;named segments&quot; as was interpreted by RGT. Segments are defined in the GPX standard such that a &quot;track&quot; consists of a series of &quot;segments&quot;, and a &quot;segment&quot; consists of a series of &quot;trackpoints&quot;. In RGT, segments are assumed to be contiguous, such that a route is defined as the first segment, connected to the second segment, connected to the third segment, etc.</p>
 
-<p>RGT no longer exists, but this code is retained since there is a chance another game will implement similar functionality. If the details differ, then this code will be updated to accomodate that.</p>
+<p>RGT no longer exists, but this code is retained since there is a chance another game will implement similar functionality. If the details differ, then this code will be updated to accomodate that. If anyone knows of any other games which support a similar function, let me know.</p>
 
 <p>Segments can be either named or unnamed. Named segments are intepreted by RGT to be timed separately, similar to Strava segments, where times it takes riders to go from the beginning to end of the segment are recorded. This program interacts with segments in several ways:</p>
 
@@ -2099,20 +2105,14 @@ Pod::Usage   : for the -help option</code></pre>
 
 </ul>
 
-<h1 id="BUGS">BUGS</h1>
+<h1 id="BUGS-and-ISSUES">BUGS and ISSUES</h1>
 
 <dl>
 
 <dt id="lane-shifting-and-sharp-corners"><b>lane shifting and sharp corners</b></dt>
 <dd>
 
-<p>If you apply more lane shift than the radius of the tightest corner, the corner could end up with a non-positive radius, which is not what you want.</p>
-
-</dd>
-<dt id="snapping-isnt-perfect"><b>snapping isn&#39;t perfect.</b></dt>
-<dd>
-
-<p>The snapping algorithm makes certain assumptions to reduce computation time and can be conflused for sufficiently complicated routes. More testing is needed.</p>
+<p>Lane shifting with sharp corners can cause issues, so should always be combined with sufficient smoothing. If you apply line shifting, make sure there is sufficient smoothing.</p>
 
 </dd>
 <dt id="snapTransition-may-cause-issues"><b><code>-snapTransition</code> may cause issues.</b></dt>
@@ -2124,19 +2124,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="snapping-and-segments"><b>snapping and segments</b></dt>
 <dd>
 
-<p>If segments are defined before snapping, the code will try to assign the appropriate segment to each snapped point, but this is imperfect. It is better to define segments after snapping points.</p>
-
-</dd>
-<dt id="gradient-signs-apply-to-only-forward-direction"><b>gradient signs apply to only forward direction.</b></dt>
-<dd>
-
-<p>On BikeTerra, for example, routes can be ridden in either direction, and the present gradient sign approach is only in the forward direction.</p>
-
-</dd>
-<dt id="climbs-only-detected-in-forward-direction"><b>climbs only detected in forward direction.</b></dt>
-<dd>
-
-<p>Climb detection applies only to riding routes in the forward direction.</p>
+<p>If segments are defined before snapping, the code will try to assign the appropriate segment to each snapped point, but this is imperfect. It is better to define segments after snapping points. This is unimportant for Biketerra, which ignores segments.</p>
 
 </dd>
 </dl>

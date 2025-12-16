@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.58
+    0.59
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -1015,36 +1015,37 @@ OPTIONS
         specify the "-laneShift" option as well. It should obviously not be
         combined with "-lap" unless you add "-rLap".
 
-        If you want a different lane shift, or a different loop radius, you
-        can specify these with "-laneShift" and/or "-rTurnaround". You
-        probably alao want to add some smoothing, so "-auto" is a good
-        option.
+        If you want a different lane shift than the default 4 meters, or a
+        different loop radius than the default 8 meters, you can specify
+        these with "-laneShift" and/or "-rTurnaround". You probably alao
+        want to add some smoothing, so "-auto" is a good option.
 
         If you use this option, then the starting route should be just the
         "out" section, not the "back". The code will generate the
-        turn-around loop and the return road, which will be shifted by
-        default for a 12 meter separation, which given the 8 meter road
-        width, results in a 4-meter median between the out and back.
+        turn-around loop and the return road, which will be shifted.
 
-        With the lane shift, you should make sure there's no sharp corners
-        in the out section, or these could become excessively sharp after
-        the lane shift. As a result, this option specifies defaults for
-        point interpolation, spline fitting, point smoothing, and minimum
-        radius. These options can be over-ridden by explictly specifying the
-        appropriate options.
+        To avoid issues with sharp corners, "-cornerCrop" and "-minRadius"
+        are set by default. You can tune these parameters if corners aren't
+        what you want.
 
         This option is generally not needed with BikeTerra which
         automatically forms turn-around loops at each end of a
         point-to-point course.
 
-    "-outAndBackLap"
-        This is the same as "-outAndBack", except also adds a turn-around to
-        create a lappable course. If you want the turnaround and lap loops
-        to be different than the default radius, then you can specify these
-        separately with -rTurnaround and/or "-rLap".
+        For routes with sharp corners, for example tight switchbacks, this
+        can give highly anomalous results due to the lane shift. You can try
+        adding a lot of smoothing, for example "-smooth 20".
 
-        This option should not be used with BikeTerra which automatically
-        forms turn-around loops at each end of a point-to-point course.
+    "-outAndBackLap"
+        This is the same as "-outAndBack" (read that section as well),
+        except also adds a turn-around to create a lappable course. If you
+        want the turnaround and lap loops to be different than the default
+        radius, then you can specify these separately with -rTurnaround
+        and/or "-rLap".
+
+        This option is not generally needed with BikeTerra which
+        automatically forms turn-around loops at each end of a
+        point-to-point course.
 
     "-outAndBackLoop"
         An alias for "-outAndBackLap"
@@ -1441,7 +1442,8 @@ OPTIONS
         smoothing than position, so additional altitude smoothing is
         required.
 
-        Synonym for "-smoothZ"
+    "-smoothing" <meters>
+        Synonym for "-smooth"
 
     "-smoothAngle" <degrees>
         For "-autoSpacing", determines how dense to place points such that
@@ -2366,7 +2368,8 @@ NAMED SEGMENTS
 
     RGT no longer exists, but this code is retained since there is a chance
     another game will implement similar functionality. If the details
-    differ, then this code will be updated to accomodate that.
+    differ, then this code will be updated to accomodate that. If anyone
+    knows of any other games which support a similar function, let me know.
 
     Segments can be either named or unnamed. Named segments are intepreted
     by RGT to be timed separately, similar to Strava segments, where times
@@ -2427,16 +2430,11 @@ NAMED SEGMENTS
         suffiently separate from the start of the climb, there will not be a
         segment defined for the climb.
 
-BUGS
+BUGS and ISSUES
     lane shifting and sharp corners
-        If you apply more lane shift than the radius of the tightest corner,
-        the corner could end up with a non-positive radius, which is not
-        what you want.
-
-    snapping isn't perfect.
-        The snapping algorithm makes certain assumptions to reduce
-        computation time and can be conflused for sufficiently complicated
-        routes. More testing is needed.
+        Lane shifting with sharp corners can cause issues, so should always
+        be combined with sufficient smoothing. If you apply line shifting,
+        make sure there is sufficient smoothing.
 
     "-snapTransition" may cause issues.
         If there are gaps in a snapping range, then snapTransition may cause
@@ -2446,15 +2444,7 @@ BUGS
         If segments are defined before snapping, the code will try to assign
         the appropriate segment to each snapped point, but this is
         imperfect. It is better to define segments after snapping points.
-
-    gradient signs apply to only forward direction.
-        On BikeTerra, for example, routes can be ridden in either direction,
-        and the present gradient sign approach is only in the forward
-        direction.
-
-    climbs only detected in forward direction.
-        Climb detection applies only to riding routes in the forward
-        direction.
+        This is unimportant for Biketerra, which ignores segments.
 
 AUTHORS
     Daniel Connelly <djconnel@gmail.com>
