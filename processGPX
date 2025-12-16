@@ -46,8 +46,10 @@ use Pod::Usage;
 #               fixed -reverse to retain start point on loops, fixed reversePoints distance, reduced minCornerCropDegs default,
 #               Angle alias for Degs on options
 # version 0.58: added binomial search, fixed bug interpolating fields in arcFit
+# version 0.59: autoLoop is the default, added -smoothing alias, added cornercrop to outandback, tuned -outAndBack, curvature check
+#               on lane shift, moved "duration" to extensions.
 
-my $version = "0.58"; # make sure this matches pod value
+my $version = "0.59"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -161,9 +163,9 @@ sub points2String {
     for my $k ( @labels ) {
       # special handling of linked lists with index field
       if (((ref $p->{$k}) ne "") && (defined $p->{$k}->{index})) {
-	push @vals, $p->{$k}->{index};
+        push @vals, $p->{$k}->{index};
       } else {
-	push @vals, (defined $p->{$k}) ? $p->{$k} : "undefined";
+        push @vals, (defined $p->{$k}) ? $p->{$k} : "undefined";
       }
     }
     my ($x, $y) = latlng2dxdy($p0, $p);
@@ -717,10 +719,10 @@ sub interpolatePoint {
           $p->{$k} = 0;
         }
       } elsif (($k eq "distance") && ($courseDistance > 0))  {
-	# distance must be treated specially on courses
-	my $d = $p1->{distance} + distanceDifference($p1, $p2, $courseDistance, $isLoop) * $f;
-	$d -= $courseDistance * floor($d / $courseDistance);
-	$p->{$k} = $d;
+        # distance must be treated specially on courses
+        my $d = $p1->{distance} + distanceDifference($p1, $p2, $courseDistance, $isLoop) * $f;
+        $d -= $courseDistance * floor($d / $courseDistance);
+        $p->{$k} = $d;
       } elsif (($p1->{$k} =~ /^$number_regexp$/o) && ($p2->{$k} =~ /^$number_regexp$/o)) {
         $p->{$k} = $p1->{$k} * (1 - $f) + $p2->{$k} * $f;
       } else {
@@ -1149,8 +1151,8 @@ sub checkAutoLoop {
   $i1 -- while ((latlngDistance($points->[$i1], $points->[$i2]) < 10) && ($i1 > $i2 - @$points));
   $i3 ++ while ((latlngDistance($points->[$i2], $points->[$i3]) < 10) && ($i3 < $#$points));
   my $isLoop = (
-                (latlngDistance($points->[0], $points->[-1]) < 150) &&
                 (@$points > 2) &&
+                (latlngDistance($points->[0], $points->[-1]) < 150) &&
                 (latlngDotProduct($points->[$i1], $points->[$i2], $points->[$i2], $points->[$i3]) > -0.1)
                );
   note("autoLoop detection: " . ($isLoop ? "true" : "false") . "\n");
@@ -1325,45 +1327,45 @@ sub cropCorners {
     while ($dp2 < $dc2 - $epsilon) {
       # we reached end of points: if this is a lap course we've already cropped beginning of lap, so add arc
       if  ( $isLoop ) {
-	if ($i + 1 > $#$points) {
-	  my $p1 = $pNew[-1];
-	  my $p2 = $pNew[0];
-	  if ( $cornerCropArcFit ) {
-	    # corner wraps around: interpolate points
-	    my $newPoints = arcFit($pNew[-2], $p1, $p2, $pNew[1], $cornerCrop);
-	    # arc fit: pick closest point
-	    my $iClosest;
-	    my $dClosest = latlngDistance($p1, $points->[0]);
-	    for my $iFit ( 0 .. $#$newPoints ) {
-	      my $dFit = latlngDistance($newPoints->[$iFit], $points->[0]);
-	      if ($dFit < $dClosest) {
-		$iClosest = $iFit;
-		$dClosest = $dFit;
-	      }
-	    }
-	    # check if we need to shift the S/F
-	    if (latlngDistance($p2, $points->[0]) > $dClosest) {
-	      if (defined $iClosest) {
-		push @pNew, @$newPoints[0 .. $iClosest - 1];
-		# add the curve points to the beginning of the new points
-		unshift @pNew, @$newPoints[$iClosest .. $#$newPoints];
-	      } else {
-		# closest point is first crop point
-		pop @pNew;
-		unshift @pNew, $p1;
-	      }
-	    }
-	  } else {
-	    # interpolate new S/F point
-	    my $f = ($courseDistance - $p1->{distance}) / ($courseDistance + $p2->{distance} - $p1->{distance});
-	    if ($f * $cornerCrop < 0.1) {
-	      pop @pNew;
-	      unshift @pNew, $p1;
-	    }
-	    elsif ((1 - $f) * $cornerCrop > 0.1) {
-	      unshift @pNew, interpolatePoint($p1, $p2, $f, $courseDistance, $isLoop);
-	    }
-	  }
+        if ($i + 1 > $#$points) {
+          my $p1 = $pNew[-1];
+          my $p2 = $pNew[0];
+          if ( $cornerCropArcFit ) {
+            # corner wraps around: interpolate points
+            my $newPoints = arcFit($pNew[-2], $p1, $p2, $pNew[1], $cornerCrop);
+            # arc fit: pick closest point
+            my $iClosest;
+            my $dClosest = latlngDistance($p1, $points->[0]);
+            for my $iFit ( 0 .. $#$newPoints ) {
+              my $dFit = latlngDistance($newPoints->[$iFit], $points->[0]);
+              if ($dFit < $dClosest) {
+                $iClosest = $iFit;
+                $dClosest = $dFit;
+              }
+            }
+            # check if we need to shift the S/F
+            if (latlngDistance($p2, $points->[0]) > $dClosest) {
+              if (defined $iClosest) {
+                push @pNew, @$newPoints[0 .. $iClosest - 1];
+                # add the curve points to the beginning of the new points
+                unshift @pNew, @$newPoints[$iClosest .. $#$newPoints];
+              } else {
+                # closest point is first crop point
+                pop @pNew;
+                unshift @pNew, $p1;
+              }
+            }
+          } else {
+            # interpolate new S/F point
+            my $f = ($courseDistance - $p1->{distance}) / ($courseDistance + $p2->{distance} - $p1->{distance});
+            if ($f * $cornerCrop < 0.1) {
+              pop @pNew;
+              unshift @pNew, $p1;
+            }
+            elsif ((1 - $f) * $cornerCrop > 0.1) {
+              unshift @pNew, interpolatePoint($p1, $p2, $f, $courseDistance, $isLoop);
+            }
+          }
           last pointLoop;
         }
       } elsif ($i > $#$points) {
@@ -1441,7 +1443,6 @@ sub arcFit {
   my $p1 = shift;
   my $p2 = shift;
   my $p3 = shift;
-
   my $RMax = shift;             # maximum distance to center
   my $dd = shift // ($pi / 16); # minimum angle point fit
 
@@ -1837,9 +1838,10 @@ sub fixZigZags {
   my %var = @_;
   my $points = $var{points} // [];
   my $isLoop = $var{isLoop} // 0;
+  my $verbose= $var{verbose} // 1;
 
   for my $zigZagIter ( 1 .. 10 ) {
-    note("checking for zig-zags iteration $zigZagIter...\n");
+    note("checking for zig-zags iteration $zigZagIter...\n") if ($verbose);
     my $dzigZag = 100;
     my @UTurns = ();
     my $iStart = $isLoop ? 0 : 1;
@@ -1865,7 +1867,8 @@ sub fixZigZags {
                sprintf("%.4f km: (%g, %g)", 0.001 * $p1->{distance}, $p1->{lon}, $p1->{lat}),
                " to ",
                sprintf("%.4f km: (%g, %g)", 0.001 * $p2->{distance}, $p2->{lon}, $p2->{lat}),
-               " : separation = ", sprintf("%.4f", $p2->{distance} - $p1->{distance}), " meters\n");
+               " : separation = ", sprintf("%.4f", $p2->{distance} - $p1->{distance}), " meters\n")
+            if ($verbose);
 
           # repairing zig-zags...
           # zig-zags are two U-turns within a specified distance
@@ -2027,6 +2030,11 @@ sub applyLaneShift {
 
   return $points unless (@$points);
 
+  # use curvature to limit lane shifts
+  addCurvatureField(points=> $points, isLoop=> $isLoop);
+  addDistanceFieldIfNeeded(points=> $points);
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+
   my @pNew = ();
 
   # create list of (x, y) coordinates
@@ -2066,6 +2074,24 @@ sub applyLaneShift {
       $dir2 = $dirs[$i];
     }
 
+    # check for excessive shift: R = 1/curvature, shift > R, shift x curvature > 1
+    my $t = $points->[$i]->{curvature} * $points->[$i]->{shift};
+    if ($t < -0.75) {
+      $points->[$i]->{shift} = -0.75 / $points->[$i]->{curvature};
+      # check to make sure lane shift isn't changing too rapidly to nearby points
+      for my $dir (-1, 1) {
+        my $j = $i + $dir;
+        while (1) {
+          my $d = pointSeparation($points->[$j], $points->[$i], $courseDistance, $isLoop);
+          my $dShift = $points->[$j]->{shift} - $points->[$i]->{shift};
+          last if (2 * abs($dShift) < $d);
+          $points->[$j]->{shift} = $points->[$i]->{shift} + ($dShift <=> 0) * $d / 2;
+          last if ((! $isLoop) && (($j == 0) || ($j == $#$points)));
+          $j = ($j + $dir) % @$points;
+        }
+      }
+    }
+
     # for sharp turns repeat a point: there's no way to decide if it's an "inside" or "outside" sharp turn
     if ( ($isLoop || (($i > 0) && ($i < $#$points))) && (abs($dir2 - $dir1) > 0.99 * $pi) ) {
       my @pTurns = ();
@@ -2084,8 +2110,10 @@ sub applyLaneShift {
     push @pNew, shiftVertex(point=> $points->[$i], directions=> [$dir1, $dir2], distance=> $points->[$i]->{shift});
   }
 
-  deleteDerivedFields( \@pNew );
-  return \@pNew;
+  deleteDerivedFields( $points );
+  $points = \@pNew;
+
+  return $points;
 }
 
 #
@@ -2901,64 +2929,64 @@ sub snapPoints {
       $points->[0]->{isStart} = 1;
       my $pointCount = 0;
       for (my $p = $points->[0]; defined $p; $p = $p->{next}) {
-	last if ($pointCount && $p->{isStart});
-	$pointCount ++;
-	my $side;
-	my $pSnap;
-	if (defined $p->{snapFrom}) {
-	  if ((defined $p->{next}) && (! defined $p->{next}->{snapFrom})) {
-	    $pSnap = $p;
-	    $side = "start";
-	  }
-	  if ((defined $p->{prev}) && (! defined $p->{prev}->{snapFrom})) {
-	    next if (defined $pSnap);
-	    $pSnap = $p;
-	    $side = "stop";
-	  }
-	}
+        last if ($pointCount && $p->{isStart});
+        $pointCount ++;
+        my $side;
+        my $pSnap;
+        if (defined $p->{snapFrom}) {
+          if ((defined $p->{next}) && (! defined $p->{next}->{snapFrom})) {
+            $pSnap = $p;
+            $side = "start";
+          }
+          if ((defined $p->{prev}) && (! defined $p->{prev}->{snapFrom})) {
+            next if (defined $pSnap);
+            $pSnap = $p;
+            $side = "stop";
+          }
+        }
 
-	if (defined $pSnap) {
-	  # refine spacing near transition
+        if (defined $pSnap) {
+          # refine spacing near transition
           my $sSnap = $pSnap->{distance};
           my $spacing = $snapTransition / 5;
           $spacing = 1 if ($spacing < 1);
 
-	  # refining happens both sides of the snap
-	  for my $p0 ( $pSnap, $pSnap->{snapFrom} ) {
-	    next unless (defined $p0);
-	    my $sMin  = $p0->{distance} - 2 * $snapTransition;
-	    my $sMax  = $p0->{distance} + 2 * $snapTransition;
+          # refining happens both sides of the snap
+          for my $p0 ( $pSnap, $pSnap->{snapFrom} ) {
+            next unless (defined $p0);
+            my $sMin  = $p0->{distance} - 2 * $snapTransition;
+            my $sMax  = $p0->{distance} + 2 * $snapTransition;
 
-	    note("processing $side snap transition between $sMin and $sMax (elevation = $p0->{ele})\n");
+            note("processing $side snap transition between $sMin and $sMax (elevation = $p0->{ele})\n");
 
-	    # add points after snap point
-	    $points =  applySelectiveSpacing(points=> $points, intervals=> [[$sMin, $sMax]], spacings=> [$spacing], isLoop=> $isLoop);
-	  }
+            # add points after snap point
+            $points =  applySelectiveSpacing(points=> $points, intervals=> [[$sMin, $sMax]], spacings=> [$spacing], isLoop=> $isLoop);
+          }
 
-	  # update next and prev fields
-	  createLinks(points=> $points, isLoop=> $isLoop);
+          # update next and prev fields
+          createLinks(points=> $points, isLoop=> $isLoop);
 
-	  # process transitions
-	  for my $p0 ( $pSnap, $pSnap->{snapFrom} ) {
-	    my $pt1 = $p0;
-	    $pt1 = $pt1->{prev} while ((defined $pt1->{prev}) && latlngDistance($pt1->{prev}, $p0) < $snapTransition);
-	    my $pt2 = $p0;
-	    $pt2 = $pt2->{next} while ((defined $pt2->{next}) && latlngDistance($pt2->{next}, $p0) < $snapTransition);
-	    $pt2->{next}->{stop} = 1 if (defined $pt2->{stop});
-	    # adjust the elevations
-	    for (my $pt = $pt1; (defined $pt) && (! defined $pt->{stop}); $pt = $pt->{next}) {
-	      # smoothing is based on point separation, not distance difference
-	      my $fd = latlngDistance($p0, $pt) / $snapTransition;
-	      if (abs($fd) < 1) {
-		my $f = (1 + cos($pi * $fd)) / 2;
-		$pt->{ele} = (1 - $f) * $pt->{ele} + $f * $p0->{ele};
-	      } else {
-		last;
-	      }
-	    }
-	    delete $pt2->{next}->{stop} if (defined $pt2->{next});
-	  }
-	}
+          # process transitions
+          for my $p0 ( $pSnap, $pSnap->{snapFrom} ) {
+            my $pt1 = $p0;
+            $pt1 = $pt1->{prev} while ((defined $pt1->{prev}) && latlngDistance($pt1->{prev}, $p0) < $snapTransition);
+            my $pt2 = $p0;
+            $pt2 = $pt2->{next} while ((defined $pt2->{next}) && latlngDistance($pt2->{next}, $p0) < $snapTransition);
+            $pt2->{next}->{stop} = 1 if (defined $pt2->{stop});
+            # adjust the elevations
+            for (my $pt = $pt1; (defined $pt) && (! defined $pt->{stop}); $pt = $pt->{next}) {
+              # smoothing is based on point separation, not distance difference
+              my $fd = latlngDistance($p0, $pt) / $snapTransition;
+              if (abs($fd) < 1) {
+                my $f = (1 + cos($pi * $fd)) / 2;
+                $pt->{ele} = (1 - $f) * $pt->{ele} + $f * $p0->{ele};
+              } else {
+                last;
+              }
+            }
+            delete $pt2->{next}->{stop} if (defined $pt2->{next});
+          }
+        }
       }
     }
     # end of snap transition
@@ -3254,15 +3282,15 @@ sub applyUniformGradient {
         # adjust distances to wrap around in loop
         $d1 -= $courseDistance * floor($d1 / $courseDistance + 0.5);
         $d2 -= $courseDistance * floor($d2 / $courseDistance + 0.5);
-	$dd -= $courseDistance * floor($d2 / $courseDistance);
+        $dd -= $courseDistance * floor($d2 / $courseDistance);
       }
       if ($d1 > 0 && $d2 > 0) {
         my $f = $d1 / ($d1 + $d2);
         my $z = $z1 * (1 - $f) + $z2 * $f + 4 * $f * (1 - $f) * $bow;
         $points->[$i]->{ele} = $z;
       } else {
-	# in transition region
-	my $ds = ($d1 > 0) ? -$d2 : -$d1;
+        # in transition region
+        my $ds = ($d1 > 0) ? -$d2 : -$d1;
         my $f = $ds / $lambda;
         my $z = $z1 * (1 - $f) + $z2 * $f + 4 * $f * (1 - $f) * $bow;
         my $h = (1 + cos($pi * $ds / $lambda)) / 2;
@@ -3711,7 +3739,7 @@ sub placeGradientSigns {
     my $g = $dz / $ds;
     my $text = sprintf("%.2f", 100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", $dz) . " m)";
 
-    my $waypoint = 
+    my $waypoint =
       {
        lat   => $points->[$climb->[0]]->{lat},
        lon   => $points->[$climb->[0]]->{lon},
@@ -5260,6 +5288,7 @@ sub addPointExtensions {
         heading
         curvature
         distance
+	duration
         gradient
         shift
         sigma
@@ -5550,7 +5579,7 @@ GetOptions (
             "arcFitDegs=f"  => \$arcFitDegs,
             "arcFitEnd=f"   => \$arcFitEnd,
             "arcFitMaxAngle=f" => \$arcFitMaxDegs,
-	    "arcFitMaxDegs=f" => \$arcFitMaxDegs,
+            "arcFitMaxDegs=f" => \$arcFitMaxDegs,
             "arcFitStart=f" => \$arcFitStart,
             "author=s"      => \$author,
             "auto!"         => \$auto,
@@ -5589,7 +5618,7 @@ GetOptions (
             "copyPoint!"    => \$copyPoint,
             "copyright=s"   => \$copyright,
             "cornerCrop=f" => \$cornerCrop,
-	    "cornerCropArcFit!" => \$cornerCropArcFit,
+            "cornerCropArcFit!" => \$cornerCropArcFit,
             "cornerCropEnd=f" => \$cornerCropEnd,
             "cornerCropStart=f" => \$cornerCropStart,
             "cornerEffect=f" => \$cornerEffect,
@@ -5636,10 +5665,10 @@ GetOptions (
             "loopRight!"    => \$loopRight,
             "loopL!"        => \$loopLeft,
             "loopR!"        => \$loopRight,
-	    "maxCornerCropAngle=f" => \$maxCornerCropDegs,
+            "maxCornerCropAngle=f" => \$maxCornerCropDegs,
             "maxCornerCropDegs=f" => \$maxCornerCropDegs,
             "maxSlope=f"    => \$maxSlope,
-	    "minCornerCropAngle=f" => \$minCornerCropDegs,
+            "minCornerCropAngle=f" => \$minCornerCropDegs,
             "minCornerCropDegs=f" => \$minCornerCropDegs,
             "minRadius=f"   => \$minRadius,
             "minRadiusStart=f" => \$minRadiusStart,
@@ -5696,6 +5725,7 @@ GetOptions (
             "simplifyDistance=f" => \$simplifyD,
             "simplifyZ=f"   => \$simplifyZ,
             "smooth=f"      => \$lSmooth,
+            "smoothing=f"   => \$lSmooth,
             "smoothAngle=f" => \$smoothAngle,
             "smoothEnd=f"   => \$smoothEnd,
             "smoothStart=f" => \$smoothStart,
@@ -5709,10 +5739,10 @@ GetOptions (
             "spacing=f"     => \$spacing,
             "splice=s{1,100}" => \@splice,
             "spliceDistance=f"  => \$spliceDistance,
-	    "splineAngle=f"  => \$splineDegs,
+            "splineAngle=f"  => \$splineDegs,
             "splineDegs=f"  => \$splineDegs,
             "splineEnd=f"   => \$splineEnd,
-	    "splineMaxAngle=f" => \$splineMaxDegs,
+            "splineMaxAngle=f" => \$splineMaxDegs,
             "splineMaxDegs=f" => \$splineMaxDegs,
             "splineStart=f"   => \$splineStart,
             "splitAt=f{1,100}" => \@splitDistance,
@@ -5781,14 +5811,15 @@ if ( $outAndBack || $outAndBackLap ) {
     $rLap //= 0;
   }
   $autoSpacing //= 1;
-  $lSmooth //= 5;
-  $laneShift //= (@selectiveLaneShift ? 0 : 6);
+  $lSmooth //= 6;
+  $laneShift //= (@selectiveLaneShift ? 0 : 4);
   $minRadius //= 6;
+  $cornerCrop //= 3 + $minRadius + abs($laneShift);
   $prune //= 1;
   $rTurnaround //= 8;
   $rUTurn //= 8;
   $spacing //= 10;
-  $splineDegs //= 0;
+  $isLoop = 0;
 }
 
 
@@ -5908,7 +5939,7 @@ for my $file ( @files ) {
   #
   # autoLoop: automatically determine if -loop should be invoked
   #
-  $autoLoop //= $auto;
+  $autoLoop //= 1;
   if ( $autoLoop &&
        (! defined $isLoop)
      ) {
@@ -6035,9 +6066,11 @@ for my $file ( @files ) {
     }
   }
 
-  warn("segment names:\n");
-  for my $ns (sort {$a <=> $b} (keys %segmentName)) {
-    warn("segment $ns: $segmentName{$ns}\n");
+  if ( keys %segmentName ) {
+    note("named segments:\n");
+    for my $ns (sort {$a <=> $b} (keys %segmentName)) {
+      note("segment $ns: $segmentName{$ns}\n");
+    }
   }
 
   # autospacing triggered if max angle specified
@@ -6123,10 +6156,10 @@ for my $file ( @files ) {
       push(@$points, shift @$points);
       # fix point distances
       if ((defined (my $d0 = $points->[0]->{distance})) && (defined (my $dL = $points->[-2]->{distance}))) {
-	for my $p ( @$points[0 .. $#$points - 1] ) {
-	  $p->{distance} -= $d0;
-	}
-	$points->[-1]->{distance} = $dL;
+        for my $p ( @$points[0 .. $#$points - 1] ) {
+          $p->{distance} -= $d0;
+        }
+        $points->[-1]->{distance} = $dL;
       }
     }
     reversePoints($points);
@@ -6191,7 +6224,7 @@ for my $file ( @files ) {
                   maxRadians => $maxCornerCropDegs * $deg2rad,
                   start      => $cornerCropStart,
                   end        => $cornerCropEnd,
-		  cornerCropArcFit => $cornerCropArcFit,
+                  cornerCropArcFit => $cornerCropArcFit,
                   isLoop     => $isLoop
                  );
   }
@@ -6867,10 +6900,10 @@ for my $file ( @files ) {
   #
   # create named segments
   #
-  note("number of named segments = ", scalar(@namedSegments), "\n");
-  addDistanceField(points=> $points)
-    if ( @namedSegments );
-
+  if ( @namedSegments) {
+    note("number of named segments = ", scalar(@namedSegments), "\n");
+    addDistanceField(points=> $points);
+  }
   for my $s ( @namedSegments ) {
     chomp($s);
 
@@ -7794,7 +7827,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.58
+0.59
 
 =head1 DESCRIPTION
 
@@ -8915,34 +8948,34 @@ road to the right.  If you want the left (UK, for example) then
 specify the C<-laneShift> option as well.  It should obviously not be
 combined with C<-lap> unless you add C<-rLap>.
 
-If you want a different lane shift, or a different loop radius, you
-can specify these with C<-laneShift> and/or C<-rTurnaround>.  You probably
-alao want to add some smoothing, so C<-auto> is a good option.
+If you want a different lane shift than the default 4 meters, or a
+different loop radius than the default 8 meters, you can specify these
+with C<-laneShift> and/or C<-rTurnaround>.  You probably alao want to
+add some smoothing, so C<-auto> is a good option.
 
 If you use this option, then the starting route should be just the
 "out" section, not the "back".  The code will generate the turn-around
-loop and the return road, which will be shifted by default for a 12
-meter separation, which given the 8 meter road width, results in a
-4-meter median between the out and back.
+loop and the return road, which will be shifted.
 
-With the lane shift, you should make sure there's no sharp corners in
-the out section, or these could become excessively sharp after the
-lane shift.  As a result, this option specifies defaults for point
-interpolation, spline fitting, point smoothing, and minimum radius.
-These options can be over-ridden by explictly specifying the
-appropriate options.
+To avoid issues with sharp corners, C<-cornerCrop> and C<-minRadius>
+are set by default.  You can tune these parameters if corners aren't
+what you want.
 
 This option is generally not needed with BikeTerra which automatically
 forms turn-around loops at each end of a point-to-point course.
 
+For routes with sharp corners, for example tight switchbacks, this can
+give highly anomalous results due to the lane shift.  You can try adding a lot of
+smoothing, for example C<-smooth 20>.
+
 =item B<C<-outAndBackLap>>
 
-This is the same as C<-outAndBack>, except also adds a turn-around to
-create a lappable course.  If you want the turnaround and lap loops to be
-different than the default radius, then you can specify these separately with
--rTurnaround and/or C<-rLap>.
+This is the same as C<-outAndBack> (read that section as well), except
+also adds a turn-around to create a lappable course.  If you want the
+turnaround and lap loops to be different than the default radius, then
+you can specify these separately with -rTurnaround and/or C<-rLap>.
 
-This option should not be used with BikeTerra which automatically
+This option is not generally needed with BikeTerra which automatically
 forms turn-around loops at each end of a point-to-point course.
 
 =item B<C<-outAndBackLoop>>
@@ -9381,7 +9414,9 @@ approximately this radius, and grade fluctuations over less distance
 than this will be lost.  Typically altitude needs more smoothing than
 position, so additional altitude smoothing is required.
 
-Synonym for C<-smoothZ>
+=item B<C<-smoothing>> <meters>
+
+Synonym for C<-smooth>
 
 =item B<C<-smoothAngle>> <degrees>
 
@@ -10439,6 +10474,8 @@ connected to the second segment, connected to the third segment, etc.
 RGT no longer exists, but this code is retained since there is a
 chance another game will implement similar functionality.  If the
 details differ, then this code will be updated to accomodate that.
+If anyone knows of any other games which support a similar function,
+let me know.
 
 Segments can be either named or unnamed.  Named segments are
 intepreted by RGT to be timed separately, similar to Strava segments,
@@ -10502,41 +10539,27 @@ start of the climb, there will not be a segment defined for the climb.
 
 =back
 
-=head1 BUGS
+=head1 BUGS and ISSUES
 
 =over
 
 =item B<lane shifting and sharp corners>
 
-If you apply more lane shift than the radius of the tightest corner,
-the corner could end up with a non-positive radius, which is not what
-you want.
-
-=item B<snapping isn't perfect.>
-
-The snapping algorithm makes certain assumptions to reduce computation
-time and can be conflused for sufficiently complicated routes.  More
-testing is needed.
+Lane shifting with sharp corners can cause issues, so should always be
+combined with sufficient smoothing.  If you apply line shifting, make
+sure there is sufficient smoothing.
 
 =item B<C<-snapTransition> may cause issues.>
 
-If there are gaps in a snapping range, then snapTransition may cause unnecessary flattening of the course
+If there are gaps in a snapping range, then snapTransition may cause
+unnecessary flattening of the course
 
 =item B<snapping and segments>
 
 If segments are defined before snapping, the code will try to assign
 the appropriate segment to each snapped point, but this is imperfect.
-It is better to define segments after snapping points.
-
-=item B<gradient signs apply to only forward direction.>
-
-On BikeTerra, for example, routes can be ridden in either direction,
-and the present gradient sign approach is only in the forward
-direction.
-
-=item B<climbs only detected in forward direction.>
-
-Climb detection applies only to riding routes in the forward direction.
+It is better to define segments after snapping points.  This is
+unimportant for Biketerra, which ignores segments.
 
 =back
 
@@ -10546,8 +10569,8 @@ Daniel Connelly <F<djconnel@gmail.com>>
 
 =head1 LICENSE
 
-This application is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself.
+This application is free software; you can redistribute it and/or
+modify it under the same terms as Perl itself.
 
 =cut
 # eof
