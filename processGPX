@@ -1,4 +1,4 @@
-#! /usr/bin/env perl -w
+#! /usr/bin/env perl
 use strict;
 use Getopt::Long;
 use Geo::Gpx;
@@ -48,8 +48,11 @@ use Pod::Usage;
 # version 0.58: added binomial search, fixed bug interpolating fields in arcFit
 # version 0.59: autoLoop is the default, added -smoothing alias, added cornercrop to outandback, tuned -outAndBack, curvature check
 #               on lane shift, moved "duration" to extensions.
+# version 0.60: added -repeatedLaps, added corner counting, limited distance on curvature calculation, added -addCornerWaypoints and
+#               -addGradientWaypoints (presently equivalent to -addGradientSigns but may split in the future)
+#               added options for loading BikeTerra routes directly -BTRoute: and BTGPX, fixed -autoSmoothZ
 
-my $version = "0.59"; # make sure this matches pod value
+my $version = "0.60"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -59,34 +62,76 @@ $0 =~ s(.*/)();
 # a function which transitions from 1 (x = -1) to 1/2 (x = 0) to 0 ( x = 1 )
 my $pi2 = atan2(1, 0);
 
+
+#
+# load a URL as a string
+#
+sub loadURL {
+  my $url = shift();
+  my $http = HTTP::Tiny->new();
+  my $res  = $http->get($url);
+  my $s;
+  if ( $res->{success} ) {
+    $s = $res->{content};
+  } else {
+    warn "Attempt to download JSON data from URL = $url failed:\n$res->{status} $res->{reason}\n";
+    eval { $s = `curl $url` };
+    eval { $s = `wget -O - $url` } unless ( defined $s );
+  }
+  return $s;
+}
+
+
 #
 # load a file and return a points list
+# this also handles BikeTerra routes
 #
 sub loadGPX {
+  require HTTP::Tiny;
   my %var = @_;
   my $GPXFile = $var{GPXFile};
   my $nSegment = $var{nSegment} // 0;
   my $stripSegments = $var{stripSegments} // 0;
   my $nTrack = $var{track} // 1;
-
   my $trkIndex = 0;
   my %segmentNames;
 
-  if (my ($f, $t) = ($GPXFile =~ /(.*)\:(\d+)$/)) {
-    $GPXFile = $f;
-    $trkIndex = ($t > 0) ? $t - 1: 0;
-    $nTrack = $t;
+  # handle BikeTerra routes
+  my $BTRoute;
+  if (($BTRoute) = ($GPXFile =~ /^B(?:ike)?T(?:erra)?Route:(\d+)/i)) {
+    return loadBTRoute($BTRoute);
   }
-  open my $fp, "<$GPXFile"
-    or die("ERROR opening file $GPXFile");
+
+  # handle BikeTerra GPXFile
   my $xml;
-  {
+  if (($BTRoute) = ($GPXFile =~ /^B(?:ike)?T(?:erra)?GPX:(\d+)/i)) {
+    note("processing BikeTerra GPX file for route " . $BTRoute . "\n");
+    my $url = "https://biketerra.nyc3.cdn.digitaloceanspaces.com/routes/raw/$BTRoute.gpx";
+    note("BikeTerra url= $url\n");
+    $xml = loadURL($url);
+
+    if (my ($f, $t) = ($GPXFile =~ /^(\w+:\d+):(\d+)/)) {
+      $GPXFile = $f;
+      $trkIndex = ($t > 0) ? $t - 1: 0;
+      $nTrack = $t;
+    }
+  }
+  # handle GPX filename
+  else {
+    open my $fp, "<$GPXFile"
+      or die("ERROR opening file $GPXFile");
     my $tmp = $/;
     $/ = undef;
     $xml = <$fp>;
     $/ = $tmp;
+    close $fp;
+
+    if (my ($f, $t) = ($GPXFile =~ /(.*)\:(\d+)$/)) {
+      $GPXFile = $f;
+      $trkIndex = ($t > 0) ? $t - 1: 0;
+      $nTrack = $t;
+    }
   }
-  close $fp;
 
   # Parse GPX from open file
   my $gpx = Geo::Gpx->new( xml => $xml );
@@ -124,7 +169,7 @@ sub loadGPX {
   # initially the segment ID = segment index
   # this may change if segments are modified
 
-  if ((! $stripSegments) && (defined $extensions) && (defined $extensions->{segmentName}->{$nTrack})) {
+  if ((! $stripSegments) && (defined $extensions) && (defined $extensions->{segmentName}) && (defined $extensions->{segmentName}->{$nTrack})) {
     for my $s ( keys %{$extensions->{segmentName}->{$nTrack}} ) {
       my $nS = $nSegment0 + $s;
       $segmentNames{$nS} = $extensions->{segmentName}->{$nTrack}->{$s};
@@ -143,6 +188,75 @@ sub loadGPX {
          };
 }
 
+#
+# load a BikeTerra route as GPX
+#
+sub loadBTRoute {
+  my $BTRoute = shift;
+  require JSON;
+  note("processing BikeTerra route data for route " . $BTRoute . "\n");
+  my $url = "https://biketerra.com/routes/$BTRoute/__data.json";
+  my $json = JSON->new->allow_nonref();
+  my $s = loadURL($url);
+  my $data = $json->decode($s);
+  my $nodes = $data->{nodes};
+  die "Failed to load data for route $BTRoute\n" unless ((defined $nodes) && (ref($nodes) eq 'ARRAY') && (scalar(@$nodes) > 2));
+  use Data::Dumper;
+  my $route_data = $data->{nodes}->[2]->{data};
+  die "Failed to load data for route $BTRoute\n" unless ((defined $route_data) && (ref($route_data) eq 'ARRAY'));
+  my $route_info = $route_data->[0];
+  die "Unexpected JSON structure: data[0] not a HASH\n" if ref($route_info) ne 'HASH';
+  my $lat_lng_idx    = $route_info->{latLngData};
+  my $route_meta_idx = $route_info->{route};
+
+  my $route_meta_struct = $route_data->[$route_meta_idx];
+  my %metadata;
+  my @fields = qw(id title distance elevation geo_city geo_county geo_state geo_country);
+
+  for my $field (@fields) {
+    next unless ref($route_meta_struct) eq 'HASH' && exists $route_meta_struct->{$field};
+    my $idx = $route_meta_struct->{$field};
+    if (defined($idx) && $idx =~ /^\d+$/ && $idx > 0) {
+	$metadata{$field} = $route_data->[$idx];
+    }
+  }
+
+  my $route_name = $metadata{title} // ("Route " . ($metadata{id} // "Unknown"));
+
+  my $point_indices = $route_data->[$lat_lng_idx];
+  die "Unexpected latLngData structure\n" if ref($point_indices) ne 'ARRAY';
+
+  my @points;
+  for my $point_idx (@$point_indices) {
+    my $point_refs = $route_data->[$point_idx];
+    next unless ref($point_refs) eq 'ARRAY' && @$point_refs >= 3;
+    my $lat = $route_data->[$point_refs->[0]];
+    my $lon = $route_data->[$point_refs->[1]];
+    my $ele = $route_data->[$point_refs->[2]];
+    push @points, { lat => $lat, lon => $lon, ele => $ele };
+  }
+
+  # Parse GPX from open file
+  my $gpx = Geo::Gpx->new();
+
+  my $track =
+    {
+     'name' => $route_name,
+     'segments'=> [ {points => \@points } ],
+    };
+  $gpx->tracks_add($track);
+  return {
+	  xml=> "",
+	  gpx=> $gpx,
+	  points=> \@points,
+	  nTrack=> 1,
+	  track=>  $gpx->tracks()->[0],
+	  waypoints=> [],
+	  nSegment=> 1,
+	  segmentNames=> {},
+	  extensions=> {},
+	 };
+}
 
 # debugging function for printing out points
 # uses a reference point, then the points to be printed
@@ -187,6 +301,16 @@ sub copyPoint {
   return $points;
 }
 
+sub copyField {
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $field = $var{field} // return $points;
+  my $newField = $var{newField} // return $points;
+  for my $p ( @$points ) {
+    $p->{$newField} = $p->{$field};
+  }
+  return $points;
+}
 
 #
 # add next and prev fields to points, for linked-list behavior
@@ -1968,7 +2092,7 @@ sub fixSteps {
         abs($g2) > 0.001
        ) {
       $stepCount ++;
-      note("fixing step # $stepCount between $p2->{distance} and $p3->{distance} meters (" . ($interpolatedPoints + 1) . ")...\n");
+      # note("fixing step # $stepCount between $p2->{distance} and $p3->{distance} meters (" . ($interpolatedPoints + 1) . ")...\n");
       if (abs($g1) > abs($g2)) {
         # interpolate p2 altitude
         for my $n ( 0 .. $interpolatedPoints ) {
@@ -3366,442 +3490,6 @@ sub pointSeparation {
 }
 
 #
-# Fiets climb rating, modified
-# Fiets is gradient times altitude
-# this uses gradient to gradientPower times altitude (> 1 => more focus on gradient)
-# gradient is normalized to 10%, so if the gradient averages 10%, the rating
-# equals the altitude gain
-#
-sub climbRating {
-  my %var = @_;
-  my ($p1, $p2) = @{$var{points}};
-  my $gradientPower = $var{gradientPower} // 2;
-  my $courseDistance = $var{courseDistance};
-  my $isLoop = $var{isLoop} // 0;
-  my $dz = $p2->{ele} - $p1->{ele};
-  my $ds = distanceDifference($p1, $p2, $courseDistance, $isLoop);
-  return (($ds == 0) ? 0 : $dz * abs((10 * $dz / $ds)) ** $gradientPower);
-}
-
-
-#
-# add automatic segments
-#
-sub addAutoSegments {
-  my %var = @_;
-  my $courseDistance = $var{courseDistance};
-  my $gradientPower = ($var{gradientPower} // 2);
-  my $isLoop = $var{isLoop};
-  my $margin = $var{margin} // 400;
-  my $finishMargin = $var{finishMargin} // 0;
-  my $startMargin = $var{startMargin} // 0;
-  my $names = $var{names};
-  my $points = $var{points};
-  my $segmentDefined = $var{segmentDefined} // {};
-  my $segmentName = $var{segmentNames} // {};
-  my $simplifyPoints = $var{simplifyPoints} // 1;
-  my $stretch = $var{stretch};
-  my $threshold = $var{threshold} // 100;
-  note("creating auto-segments...\n");
-
-  addDistanceField(points=> $points);
-  $courseDistance //= calcCourseDistance(isLoop=> $isLoop, points=> $points);
-  # these terms were important in RGT
-  my $dMin = $startMargin;
-  my $dMax = $courseDistance - $finishMargin;
-
-  my @c =
-    findClimbs(
-               points => $points,
-               courseDistance=> $courseDistance,
-               simplifyPoints=> $simplifyPoints,
-               shiftCircuit=> 0,
-               gradientPower=> $gradientPower,
-               threshold=> $threshold,
-               isLoop=> $isLoop,
-               sign=> 1,
-              );
-
-  # adjust margin for rounding error
-  my $m = 0.999 * $margin;
-
-  my @climbs = ();
-  for my $c ( sort {$a->[0] <=> $b->[0]} @c ) {
-    # if we are too close to the S or finish line, consider nudging the climb endpoints, if that
-    # doesn't reduce the climb length too much
-    my $d1 = $points->[$c->[0]]->{distance};
-    my $d2 = $points->[$c->[1]]->{distance};
-    my $L  = $d2 - $d1;
-
-    if (($d1 < $dMin) && (($dMin - $d1) < 0.02 * $L)) {
-      $c->[0] ++
-        while (
-               ($c->[0] < $c->[1] - 1) &&
-               ($points->[$c->[0]]->{distance} < $dMin) &&
-               ($points->[$c->[0] + 1]->{distance} - $d1 < 0.02 * $L)
-              );
-      note(sprintf("shifted start of climb from %.3f meters to %.3f meters to accomodate start margin\n", $d1, $points->[$c->[0]]->{distance}))
-        if ($points->[$c->[0]]->{distance} > $d1);
-      # add interpolation code here
-    }
-
-    if (($d2 > $dMax) && (($d2 - $dMax) < 0.02 * $L)) {
-      $c->[1] --
-        while (
-               ($c->[1] > $c->[0] + 1) &&
-               ($points->[$c->[1]]->{distance} > $dMax) &&
-               ($d2 - $points->[$c->[1] - 1]->{distance} < 0.02 * $L)
-              );
-      note(sprintf("shifted end of climb from %.3f meters to %.3f meters to accomodate finish margin\n", $d2, $points->[$c->[1]]->{distance}))
-        if ($points->[$c->[1]]->{distance} < $d2);
-      # add interpolation code here
-    }
-
-    if (
-        ( $points->[$c->[0]]->{distance} >= $dMin ) &&
-        ( $points->[$c->[1]]->{distance} <= $dMax )
-       ) {
-      if ( (@climbs == 0) || ($points->[$c->[0]]->{distance} > $points->[$climbs[-1]->[1]]->{distance} + $m) ) {
-        note(sprintf("autoSegments: identified climb from %.3f to %.3f km\n", $points->[$c->[0]]->{distance} / 1000, $points->[$c->[1]]->{distance} / 1000));
-        push @climbs, $c;
-      } else {
-        warn("autoSegments: removing detected lower-rated climb due to inadequate margin to higher-rated adjacent climb.\n");
-        # climb is too close to preceding climb: take the one with the higher rating
-        my $r1 = climbRating(
-                             points=> [$points->[$climbs[-1]->[0]], $points->[$climbs[-1]->[1]]],
-                             gradientPower=> $gradientPower,
-                             courseDistance=> $courseDistance,
-                             isLoop => $isLoop,
-                            );
-        my $r2 = climbRating(
-                             points=> [$points->[$c->[0]], $points->[$c->[1]]],
-                             gradientPower=> $gradientPower,
-                             courseDistance=> $courseDistance,
-                             isLoop => $isLoop,
-                            );
-        if ($r2 < $r1) {
-          pop @climbs;
-          push @climbs, $c;
-        }
-      }
-    }
-  }
-
-  #
-  # insert climbs into points -- need to be a bit careful to not
-  # create point triplets is fhte climb happens to begin/end on point pairs,
-  # for example existing segment boundaries
-  #
-  my @newPoints = ();
-  my $nS = 1;
-  my $i0 = 0;
-  my $i1 = 0;
-
-  for my $nc ( 0 .. $#climbs ) {
-    my $climb = $climbs[$nc];
-
-    # maximum distance to shift points to find peak or valley
-    my $d = $stretch * ($points->[$climb->[1]]->{distance} - $points->[$climb->[0]]->{distance});
-
-    # see if we can find a point within the search distance which is an altitude minimum
-    my $j0 = $climb->[0];
-    my $j = $j0 - 1;
-    while (
-           ($j > 0) &&
-           ($points->[$j]->{distance} > $points->[$j0]->{distance} - $d) &&
-           (($points->[$j]->{distance} >= $dMin)) &&
-           (($nc == 0) || ($points->[$j]->{distance} >= $points->[$climbs[$nc - 1]->[1]]->{distance} + $m))
-          ) {
-      if (($points->[$j + 1]->{ele} >  $points->[$j]->{ele}) &&
-          ($points->[$j - 1]->{ele} >= $points->[$j]->{ele})
-         ) {
-        note(sprintf("autoSegments: extending climb start from %.3f to %.3f km\n", $points->[$climb->[0]]->{distance} / 1000, $points->[$j]->{distance} / 1000));
-        $climb->[0] = $j;
-        last;
-      }
-      $j --;
-    }
-
-    my $j1 = $climb->[1];
-    $j = $j1 + 1;
-    while (
-           ($j < $#$points) &&
-           ($points->[$j]->{distance} < $points->[$j1]->{distance} + $d) &&
-           ($points->[$j]->{distance} <= $dMax) &&
-           (($nc == $#climbs) || ($points->[$j]->{distance} <= $points->[$climbs[$nc + 1]->[0]]->{distance} - $m))
-          ) {
-      if (($points->[$j + 1]->{ele} <= $points->[$j]->{ele}) &&
-          ($points->[$j - 1]->{ele} <  $points->[$j]->{ele})
-         ) {
-        note(sprintf("autoSegments: extending climb finish from %.3f to %.3f km\n", $points->[$climb->[1]]->{distance} / 1000, $points->[$j]->{distance} / 1000));
-        $climb->[1] = $j;
-        last;
-      }
-      $j ++;
-    }
-
-    $nS ++ while ($segmentDefined->{$nS});
-    $segmentDefined->{$nS} ++;
-    $segmentName->{$nS} = (defined $names->[$nc]) ? $names->[$nc] : ( (@climbs > 1) ? ("GPM " . ($nc + 1)) : "GPM" );
-
-    # if the climb limits are at point pairs, move each to the appropriate point
-    $climb->[0] ++ while ( ($climb->[0] < $climb->[1]) && ($points->[$climb->[0] + 1]->{distance} < $points->[$climb->[0]]->{distance} + 0.05) );
-    $climb->[1] -- while ( ($climb->[1] > $climb->[0]) && ($points->[$climb->[1]]->{distance} < $points->[$climb->[1] - 1]->{distance} + 0.05) );
-
-    # points up to the climb
-    $i1 = $climb->[0] - 1;
-    push @newPoints, @$points[$i0 .. $i1];
-
-    # shift to the climb
-    $i0 = $climb->[0];
-    $i1 = $climb->[1];
-
-    # we may need to create a copy of the first point of the climb
-    if (($i0 > 0) && ($points->[$i0]->{distance} > $points->[$i0 - 1]->{distance} + 0.05)) {
-      my %p = %{$points->[$i0]};
-      push @newPoints, \%p;
-    }
-
-    # copy all of the points up to the final point in the climb
-    my $s = $points->[$i1]->{segment};
-    for my $i ( $i0 .. $i1 ) {
-      if ( ( $i == $i0 ) || ($points->[$i]->{distance} > $points->[$i - 1]->{distance} + 0.05) ) {
-        push @newPoints, $points->[$i];
-        $points->[$i]->{segment} = $nS;
-      }
-    }
-
-    # if the next point is not a pair with the last copied point, then duplicate the last point of the climb
-    if ( ($i1 < $#$points) && ($points->[$i1 + 1]->{distance} > $points->[$i1]->{distance} + 0.05) ) {
-      my %p = %{$points->[$i1]};
-      $p{segment} = $s;
-      push @newPoints, \%p;
-    }
-
-    # starting point for the next insertion
-    $i0 = $i1 + 1;
-  }
-
-  # points following the last climb
-  push @newPoints, @$points[$i0 .. $#$points];
-
-  return \@newPoints;
-}
-
-#
-# findClimbs
-# a proc to return route portions which are climbs according to the algorithm
-#
-sub findClimbs {
-  my %var = @_;
-  my $points = $var{points};
-  my $indices = $var{indices};
-  my $simplifyPoints = $var{simplifyPoints} // 1;
-  my $shiftCircuit = $var{shiftCircuit} // 1;
-  my $courseDistance = $var{courseDistance};
-  my $gradientPower = ($var{gradientPower} // 2);
-  my $threshold = ($var{threshold} // 100);
-  my $isLoop = $var{isLoop};
-  my $sign = $var{sign} // 1; # sign: 1 for climbs, -1 for descents, 0 for both
-
-  # minimum rating... units are meters ( @ 10% gradient)
-  # this is normalized to 10% gradient,
-  my $rating0 = $threshold;
-
-  unless (defined $indices) {
-    if ($simplifyPoints) {
-      $indices = simplifyProfile($points, $gradientPower, $courseDistance, $isLoop);
-    } else {
-      $indices = [0 .. $#$points];
-    }
-  }
-
-  # for circuits, we want to shift the points to the altitude minimum
-  # no gradient signs will cross the altitude minimum on a loop
-  if ($shiftCircuit) {
-    # shift the points to the altitude minimum
-    my $zMin = $points->[0]->{ele};
-    my $izMin = 0;
-    for my $i ( 1 .. $#$indices ) {
-      if ($points->[$indices->[$i]]->{ele} < $zMin) {
-        $zMin = $points->[$indices->[$i]]->{ele};
-        $izMin = $i;
-      }
-    }
-    if ($izMin > 0) {
-      my @indices = @$indices[$izMin .. $#$indices];
-      push @indices, @$indices[0 .. $izMin]; # repeat the first point
-      $indices = \@indices;
-    }
-  }
-
-  # find the segment of maximum Fiets
-  my $rating = $rating0;
-  my @range = ();
-  for my $j ( 1 .. $#$indices ) {
-    for my $i ( 0 .. $j - 1 ) {
-      my $r = climbRating(
-                          points=> [$points->[$indices->[$i]], $points->[$indices->[$j]]],
-                          gradientPower=> $gradientPower,
-                          courseDistance=> $courseDistance,
-                          isLoop=> $isLoop
-                         );
-      if ($sign == 0) {
-        $r = abs($r);
-      } else {
-        $r *= $sign;
-      }
-      if ($r > $rating) {
-        @range = ($i, $j);
-        $rating = $r;
-      }
-    }
-  }
-
-  my @climbs = ();
-  if (@range) {
-    push @climbs,
-      findClimbs(
-                 points => $points,
-                 simplifyPoints=> 0,
-                 courseDistance=> $courseDistance,
-                 shiftCircuit=> 0,
-                 gradientPower=> $gradientPower,
-                 threshold=> $threshold,
-                 isLoop=> $isLoop,
-                 sign=> $sign,
-                 indices=>  [ @$indices[0 .. $range[0]] ],
-                )
-      if ($range[0] > 0);
-
-    my @climb = map { $indices->[$_] } @range;
-    push @climbs, \@climb;
-
-    push @climbs,
-      findClimbs(
-                 points => $points,
-                 courseDistance=> $courseDistance,
-                 simplifyPoints=> 0,
-                 shiftCircuit=> 0,
-                 gradientPower=> $gradientPower,
-                 threshold=> $threshold,
-                 isLoop=> $isLoop,
-                 sign=> $sign,
-                 indices=>  [ @$indices[$range[1] .. $#$indices] ],
-                )
-      if ($range[1] < $#$indices);
-  }
-
-  return @climbs;
-}
-
-#
-# place gradient signs
-# simplify profile, then find max Fiets segment, then recurse
-#
-sub placeGradientSigns {
-  my %var = @_;
-  my $points = $var{points};
-  my $simplifyPoints = $var{simplifyPoints} // 1;
-  my $shiftCircuit = $var{shiftCircuit} // 1;
-  my $courseDistance = $var{courseDistance};
-  my $gradientPower = ($var{gradientPower} // 2);
-  my $threshold = ($var{threshold} // 100);
-  my $isLoop = $var{isLoop};
-
-  $courseDistance //= calcCourseDistance(isLoop=> $isLoop, points=> $points);
-
-  note("placing gradient signs...\n");
-
-  my @waypoints = ();
-
-  my @climbs =
-    findClimbs(
-               points => $points,
-               courseDistance=> $courseDistance,
-               simplifyPoints=> $simplifyPoints,
-               shiftCircuit=> $shiftCircuit,
-               gradientPower=> $gradientPower,
-               threshold=> $threshold,
-               isLoop=> $isLoop,
-               sign=> 0,
-              );
-
-  note("placeGradientSigns: number of climbs = ", scalar @climbs, "\n");
-
-  my $nClimb = 0;
-  my @forwardSigns = ();
-  my @reverseSigns = ();
-  for my $climb ( @climbs ) {
-    $nClimb ++;
-    my $ds = distanceDifference($points->[$climb->[0]], $points->[$climb->[1]], $courseDistance, $isLoop);
-    my $dz = $points->[$climb->[1]]->{ele} - $points->[$climb->[0]]->{ele};
-    my $g = $dz / $ds;
-    my $text = sprintf("%.2f", 100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", $dz) . " m)";
-
-    my $waypoint =
-      {
-       lat   => $points->[$climb->[0]]->{lat},
-       lon   => $points->[$climb->[0]]->{lon},
-       ele   => $points->[$climb->[0]]->{ele},
-       cmt   => "$text",
-       desc  => "$text",
-       src   => "processGPX",
-       sym   => "sign",
-       type  => "signforward",
-       fix   => 'dgps',
-      };
-
-    # check that sign isn't too close to other waypoints
-    my $reject = 0;
-    for my $wp ( @forwardSigns ) {
-      if (pointsAreClose($waypoint, $wp, 1)) {
-        $reject = 1;
-        note("rejecting duplicate forward sign at $points->[$climb->[0]]->{distance} meters\n");
-        last;
-      }
-    }
-    unless ($reject) {
-      note("forward gradient sign @ ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), "km to ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), " km: $text\n");
-      # forward direction sign:
-      push @forwardSigns, $waypoint;
-    }
-
-    # reverse direction sign:
-    $text = sprintf("%.2f", -100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", -$dz) . " m)";
-    $waypoint =
-      {
-       lat   => $points->[$climb->[1]]->{lat},
-       lon   => $points->[$climb->[1]]->{lon},
-       ele   => $points->[$climb->[1]]->{ele},
-       cmt   => "$text",
-       desc  => "$text",
-       src   => "processGPX",
-       sym   => "sign",
-       type  => "signreverse",
-       fix   => 'dgps',
-      };
-
-    # check that sign isn't too close to other waypoints
-    $reject = 0;
-    for my $wp ( @reverseSigns ) {
-      if (pointsAreClose($waypoint, $wp, 1)) {
-        $reject = 1;
-        note("rejecting duplicate reverse sign at $points->[$climb->[1]]->{distance} meters\n");
-        last;
-      }
-    }
-    unless ($reject) {
-      note("reverse gradient sign @ ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), "km to ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), " km: $text\n");
-      # reverse direction sign:
-      push @reverseSigns, $waypoint;
-    }
-  }
-  push @waypoints, @forwardSigns, @reverseSigns;
-  return \@waypoints;
-}
-
-#
 # circle procs:
 # fit a circle thru 3 points for replacing corners with circular sections
 # this is designed for tracks like the Polo fields in San Francisco
@@ -3841,9 +3529,10 @@ sub circle3PointFit {
 }
 
 #
-# given a set of points, fit a circle to those points
-# it does a 3-point fit thru the first and last points
-# and the center point
+# given a set of points, fit a circle to those points it does a
+# 3-point fit thru the first and last points and the center point.
+# This could be improved to use more points, for example using
+# various center points and averaging
 #
 sub fitCircle{
   my %var = @_;
@@ -4238,6 +3927,122 @@ sub autoStraighten {
 
 
 #
+# findArcs
+# this code looks for sections of the route which can be replaced with circular arcs
+#
+sub findArcs {
+  my %var = @_;
+  my $points = $var{points};
+  my $minAngle = $var{minAngle} // $pi / 4;
+  my $minRadius = $var{minRadius} // 10;
+  my $maxRadius = $var{maxRadius} // 100;
+  my $dMax = $var{dMax} // 10 + $maxRadius * 2;
+  my $applyUniformGradient = $var{applyUniformGradient} // 1;
+  my $isLoop = $var{isLoop};
+  my $courseDistance = $var{courseDistance};
+  note("findArcs called...\n");
+
+  $courseDistance //= calcCourseDistance(points=> $points, isLoop=> $isLoop) if ($isLoop);
+
+  # if it's a loop and last point matches first point, then remove it for now
+  my $pLast = pop(@$points) if ($isLoop and pointsAreClose($points->[0], $points->[-1]));
+
+  # check that curvature is available
+  unless (defined $points->[0]->{curvature}) {
+    addCurvatureField(points=> $points, isLoop=> $isLoop);
+  }
+  addDistanceFieldIfNeeded(points => $points);
+
+  # calculate stats of curvature across range of points
+  sub netStats {
+    my $points = shift // [];
+    my $iStart = shift // 0;
+    my $iEnd   = shift // $#$points;
+    my $courseDistance = shift;
+    my $isLoop = shift;
+    my $cSum  = 0;
+    my $c2Sum = 0;
+    my $cdSum = 0;
+    my $dSum  = 0;
+    my $d2Sum = 0;
+    my $dTot  = 0;
+    my $i = $iStart;
+    while ($i != $iEnd) {
+      warn("curvature: $i: $points->[$i]->{curvature}\n");
+      my $j = ($i + 1) % @$points;
+      warn("curvature: $j: $points->[$j]->{curvature}\n");
+      my $d = distanceDifference($points->[$i], $points->[$j], $courseDistance, $isLoop);
+      $cSum  += ( $points->[$i]->{curvature} + $points->[$j]->{curvature} ) * $d / 2;
+      $c2Sum += ( $points->[$i]->{curvature} ** 2 + $points->[$j]->{curvature} ** 2 ) * $d / 2;
+      $cdSum += ( $dSum * $points->[$i]->{curvature} + ($dSum + $d) * $points->[$j]->{curvature} ) * $d / 2;
+      $dSum  += ($dSum + $d / 2) * $d;
+      $dTot  += $d;
+      $d2Sum += ($dSum ** 2 + ($dSum + $d) ** 2) * $d / 2;
+      $i = $j
+    }
+    return { "distance"=> $dTot, "angle" => $cSum, "mean" => 0, "slope"=> 0, "var" => 0, "sigma"=> 0 }
+      if ($dTot <= 0);
+    my $var   = $c2Sum / $dTot - ($cSum / $dTot) ** 2;
+    my $mean  = $cSum / $dTot;
+    my $sigma = $var < 0 ? 0 : sqrt($var);
+    my $slope = ($dTot * $cdSum - $dSum * $cSum) / ($dTot * $d2Sum - $dSum ** 2);
+    warn("netStats: distance: $dTot, angle: $cSum, mean:  $mean, slope: $slope, var: $var, sigma: $sigma\n");
+    return { "distance"=> $dTot, "angle" => $cSum, "mean" => $mean, "slope"=> $slope, "var" => $var, "sigma"=> $sigma };
+  }
+
+  # find regions of continuous, relatively constant radius
+  my $cMin = 0.5 / $maxRadius;  # threshold for curvature to consider points
+  my $j = 0;
+ iLoop: for (my $i = 0; $i <= $#$points; $i = $j) {
+    # first point in possible arc
+    $i ++ while ((abs($points->[$i]->{curvature}) < $cMin) && ($i < $#$points));
+    # last point in possible arc
+    $j = $i + 1;
+    # increment j to the first failed point
+    warn("i = $i, j = $j : " . distanceDifference($points->[($j - 1) % @$points], $points->[$j], $isLoop, $courseDistance) . "\n"), $j ++
+      while (
+	     (abs($points->[$j]->{curvature}) > $cMin) &&
+	     (($points->[$i]->{curvature} <=> 0) == ($points->[$j]->{curvature} <=> 0)) &&
+	     ($j <= $#$points) &&
+	     (distanceDifference($points->[($j - 1) % @$points], $points->[$j], $isLoop, $courseDistance) < $dMax)
+	    );
+    $j --;
+    # if i = j, then we want to jump two points ahead
+    if ($i == $j) {
+      $i += 2;
+      next iLoop;
+    }
+    my $stats = netStats($points, $i, $j, $courseDistance, $isLoop);
+    # prune points at beginning and end at sufficiently less than mean
+    $i = ($i + 1) % @$points while ((abs($points->[$i]->{curvature}) < 0.75 * $stats->{mean}) && ($i != $j));
+    $j = ($j - 1) % @$points while ((abs($points->[$j]->{curvature}) < 0.75 * $stats->{mean}) && ($i != $j));
+    if ($j == $i) {
+      $j = $i + 1;
+      next iLoop;
+    }
+    # update stats
+    warn("i = $i, j = $j\n");
+    $stats = netStats($points, $i, $j, $courseDistance, $isLoop);
+
+    # check if angle is sufficient
+    my $angle = $stats->{"angle"};
+    next iLoop if (abs($angle) < $minAngle);
+    # check if curvature is sufficiently uniform
+    my $sigma = $stats->{"sigma"};
+    my $mean  = $stats->{"mean"};
+    my $slope = $stats->{"slope"};
+    my $distance = $stats->{"distance"};
+    # look for slope difference
+    # update i
+    next iLoop
+      if (
+	  (abs($slope * $distance) > abs($mean) / 3) ||
+	  ($sigma > abs($mean) / 2)
+	 );
+  }
+}
+
+#
 # circuitFromPosition:
 # from the given point (distance from start)
 #
@@ -4529,7 +4334,7 @@ sub addCurvatureField {
     $points->[$vMax --]->{curvature} = 0;
   }
   my $v = $vMin;
-  my $dPrev;
+  my $dirPrev;
   while ($v <= $vMax) {
     my $u = ($v - 1) % @$points;
     my $w = ($v + 1) % @$points;
@@ -4553,10 +4358,14 @@ sub addCurvatureField {
       $points->[$v]->{curvature} = 0;
       next;
     }
-    $dPrev //= latlngDirection($points->[$u], $points->[$v]);
-    my $d = latlngDirection($points->[$v], $points->[$w]);
-    $points->[$v]->{curvature} = 2 * deltaAngle($dPrev, $d) / (latlngDistance($points->[$u], $points->[$v]) + latlngDistance($points->[$v], $points->[$w]));
-    $dPrev = $d;
+    $dirPrev //= latlngDirection($points->[$u], $points->[$v]);
+    my $dir = latlngDirection($points->[$v], $points->[$w]);
+    my $d1 = latlngDistance($points->[$u], $points->[$v]);
+    my $d2 = latlngDistance($points->[$v], $points->[$w]);
+    $d1 = 10 if ($d1 > 10);
+    $d2 = 10 if ($d2 > 10);
+    $points->[$v]->{curvature} = 2 * deltaAngle($dirPrev, $dir) / ($d1 + $d2);
+    $dirPrev = $dir;
     $v ++;
   }
 }
@@ -5067,7 +4876,7 @@ sub splitPoints {
 
   # distance field is invalid now: curvature, etc, are still fine
   for my $s ( @splits ) {
-    deleteField2(field=> "distance", points=> $s);
+    deleteField2(field=> "distance", points0=> $s);
   }
 
   return \@splits;
@@ -5157,7 +4966,6 @@ sub simplifyMonotonicProfile {
   my $ds = $distance[-1] - $distance[0];
 
   return [$indices->[-1]] if ( (@$indices <= 2) || (abs($dz) < 1) || ($ds < 50) );
-
 
   # find maximum grade
   my $gAvg = $dz / $ds;
@@ -5296,9 +5104,10 @@ sub addPointExtensions {
   my $points = $var{points} // [];
 
   for my $p ( @$points ) {
+    $p->{extensions} = {} unless (exists $p->{extensions});
     for my $e ( @extensionFields ) {
       if (exists $p->{$e}) {
-        $p->{extensions}->{$e} = $p->{$e};
+        $p->{extensions}->{$e} = $p->{$e} if (ref $p->{extensions} eq "HASH");
         delete $p->{$e};
       }
     }
@@ -5414,11 +5223,13 @@ sub addExtensions {
 }
 
 
+my $addCornerWaypoints = 0; # whether to create list of gradient signs
 my $addCurvature = 0;  # whether to not add a curvature field
 my $addDirection = 0;  # whether to not add a direction field
 my $addDistance = 0;   # whether to not add a distance field
 my $addGradient = 0;   # whether to not add a gradient field
-my $addGradientSigns = 0; # whether to create list of gradient signs
+my $addGradientSigns = 0; # whether to create list of gradient signs (presently waypoints)
+my $addGradientWaypoints = 0; # whether to create list of gradient waypoints 
 my $addSigma = 0;      # whether to create a sigma field when autosmoothing
 my $anchorSF = 0;      # whether to anchor the S/F
 my $append = 0;        # distance to append on finish (allows for a finish zone)
@@ -5452,6 +5263,8 @@ my $crossingAngle;     # crossings need to cross by at least this angle
 my $crossingHeight = 2; # crossing should have same altitude, or at least this height
 my $crossingTransition; # transition length for crossings
 my $csv = 0;           # whether to use CSV instead of GPX
+my $curvatureSmoothing = 10; # smoothing for curvature in corner identification
+my $curvatureThreshold = 0.05; # threshold for corner signs, if generated
 my $description;       # description, for GPX metadata
 my $extend = 0;        # apply to both append and prepend
 my $extendBack;        # amount to extend the route with a loop.
@@ -5489,6 +5302,7 @@ my $prunedg = 0.0005;  # maximum difference in grade for point pruning
 my $quiet = 0;         # suppressed notes to standard error
 my $rCrossings = 6;    # how much lenth to flatten crossings, each side
 my $repeat = 0;        # number of copies of the course to add to the course
+my $repeatedLaps = 0;  # number of total laps (equivalent to -repeat N-1)
 my $reverse = 0;       # whether to reverse the course
 my $rLap;              # if the route is turned into an out-and-back, the radius of the return loop
 my $rTurnaround;       # if the route is turned into an out-and-back, the radius of the outer loop
@@ -5562,12 +5376,14 @@ my @uniformGradient;      # points come in sets of 2: start point, finish point
 my $auto = 0; # automatically set options based on the course (doesn't turn options off)
 
 GetOptions (
+            "addCornerWaypoints!" => \$addCornerWaypoints,
             "addCurvature!" => \$addCurvature,
             "addDirection!" => \$addDirection,
             "addDistance!"  => \$addDistance,
             "addGradient!"  => \$addGradient,
             "addHeading!"   => \$addDirection,
             "addGradientSigns!" => \$addGradientSigns,
+	    "addGradientWaypoints!" => \$addGradientWaypoints,
             "addSigma!"     => \$addSigma,
             "align=i"        => \$snap,
             "alignAltitude=f" => \$snapAltitude,
@@ -5633,6 +5449,8 @@ GetOptions (
             "crossingHeight=f" => \$crossingHeight,
             "crossingTransition=f" => \$crossingTransition,
             "csv!"          => \$csv,
+	    "curvatureSmoothing=f" => \$curvatureSmoothing,
+	    "curvatureThreshold=f" => \$curvatureThreshold,
             "deleteRange=f{1,100}" => \@deleteRange,
             "description=s" => \$description,
             "extend=f"      => \$extend,
@@ -5691,6 +5509,7 @@ GetOptions (
             "quiet!"        => \$quiet,
             "rCrossings=f"  => \$rCrossings,
             "repeat=i"      => \$repeat,
+	    "repeatedLaps=i"  => \$repeatedLaps,
             "reverse!"      => \$reverse,
             "rLap=f"        => \$rLap,
             "rTurnaround=f" => \$rTurnaround,
@@ -5798,6 +5617,9 @@ if ( defined $closeLoop ) {
 die("-repeat limited to range 0 to 99\n")
   if ($repeat > 99);
 
+die("-repeatedLaps limited to range 0 to 100\n")
+  if ($repeatedLaps > 100);
+
 # check loopLeft and loopRight
 if ($loopLeft && $loopRight) {
   die("ERROR: you cannot specify both -loopLeft and -loopRight\n");
@@ -5839,6 +5661,559 @@ $maxSlope *= 100 if ($maxSlope < 1);
 
 for my $s ( @autoSegmentNames ) {
   $s =~ s/^\s*(.*?)\s*$/$1/;
+}
+
+#
+# Fiets climb rating, modified
+# Fiets is gradient times altitude
+# this uses gradient to gradientPower times altitude (> 1 => more focus on gradient)
+# gradient is normalized to 10%, so if the gradient averages 10%, the rating
+# equals the altitude gain
+#
+sub climbRating {
+  my %var = @_;
+  my ($p1, $p2) = @{$var{points}};
+  my $gradientPower = $var{gradientPower} // 2;
+  my $courseDistance = $var{courseDistance};
+  my $isLoop = $var{isLoop} // 0;
+  my $dz = $p2->{ele} - $p1->{ele};
+  my $ds = distanceDifference($p1, $p2, $courseDistance, $isLoop);
+  return (($ds == 0) ? 0 : $dz * abs((10 * $dz / $ds)) ** $gradientPower);
+}
+
+
+#
+# add automatic segments
+#
+sub addAutoSegments {
+  my %var = @_;
+  my $courseDistance = $var{courseDistance};
+  my $gradientPower = ($var{gradientPower} // 2);
+  my $isLoop = $var{isLoop};
+  my $margin = $var{margin} // 400;
+  my $finishMargin = $var{finishMargin} // 0;
+  my $startMargin = $var{startMargin} // 0;
+  my $names = $var{names};
+  my $points = $var{points};
+  my $segmentDefined = $var{segmentDefined} // {};
+  my $segmentName = $var{segmentNames} // {};
+  my $simplifyPoints = $var{simplifyPoints} // 1;
+  my $stretch = $var{stretch};
+  my $threshold = $var{threshold} // 100;
+  note("creating auto-segments...\n");
+
+  addDistanceField(points=> $points);
+  $courseDistance //= calcCourseDistance(isLoop=> $isLoop, points=> $points);
+  # these terms were important in RGT
+  my $dMin = $startMargin;
+  my $dMax = $courseDistance - $finishMargin;
+
+  my @c =
+    findClimbs(
+               points => $points,
+               courseDistance=> $courseDistance,
+               simplifyPoints=> $simplifyPoints,
+               shiftCircuit=> 0,
+               gradientPower=> $gradientPower,
+               threshold=> $threshold,
+               isLoop=> $isLoop,
+               sign=> 1,
+              );
+
+  # adjust margin for rounding error
+  my $m = 0.999 * $margin;
+
+  my @climbs = ();
+  for my $c ( sort {$a->[0] <=> $b->[0]} @c ) {
+    # if we are too close to the S or finish line, consider nudging the climb endpoints, if that
+    # doesn't reduce the climb length too much
+    my $d1 = $points->[$c->[0]]->{distance};
+    my $d2 = $points->[$c->[1]]->{distance};
+    my $L  = $d2 - $d1;
+
+    if (($d1 < $dMin) && (($dMin - $d1) < 0.02 * $L)) {
+      $c->[0] ++
+        while (
+               ($c->[0] < $c->[1] - 1) &&
+               ($points->[$c->[0]]->{distance} < $dMin) &&
+               ($points->[$c->[0] + 1]->{distance} - $d1 < 0.02 * $L)
+              );
+      note(sprintf("shifted start of climb from %.3f meters to %.3f meters to accomodate start margin\n", $d1, $points->[$c->[0]]->{distance}))
+        if ($points->[$c->[0]]->{distance} > $d1);
+      # add interpolation code here
+    }
+
+    if (($d2 > $dMax) && (($d2 - $dMax) < 0.02 * $L)) {
+      $c->[1] --
+        while (
+               ($c->[1] > $c->[0] + 1) &&
+               ($points->[$c->[1]]->{distance} > $dMax) &&
+               ($d2 - $points->[$c->[1] - 1]->{distance} < 0.02 * $L)
+              );
+      note(sprintf("shifted end of climb from %.3f meters to %.3f meters to accomodate finish margin\n", $d2, $points->[$c->[1]]->{distance}))
+        if ($points->[$c->[1]]->{distance} < $d2);
+      # add interpolation code here
+    }
+
+    if (
+        ( $points->[$c->[0]]->{distance} >= $dMin ) &&
+        ( $points->[$c->[1]]->{distance} <= $dMax )
+       ) {
+      if ( (@climbs == 0) || ($points->[$c->[0]]->{distance} > $points->[$climbs[-1]->[1]]->{distance} + $m) ) {
+        note(sprintf("autoSegments: identified climb from %.3f to %.3f km\n", $points->[$c->[0]]->{distance} / 1000, $points->[$c->[1]]->{distance} / 1000));
+        push @climbs, $c;
+      } else {
+        warn("autoSegments: removing detected lower-rated climb due to inadequate margin to higher-rated adjacent climb.\n");
+        # climb is too close to preceding climb: take the one with the higher rating
+        my $r1 = climbRating(
+                             points=> [$points->[$climbs[-1]->[0]], $points->[$climbs[-1]->[1]]],
+                             gradientPower=> $gradientPower,
+                             courseDistance=> $courseDistance,
+                             isLoop => $isLoop,
+                            );
+        my $r2 = climbRating(
+                             points=> [$points->[$c->[0]], $points->[$c->[1]]],
+                             gradientPower=> $gradientPower,
+                             courseDistance=> $courseDistance,
+                             isLoop => $isLoop,
+                            );
+        if ($r2 < $r1) {
+          pop @climbs;
+          push @climbs, $c;
+        }
+      }
+    }
+  }
+
+  #
+  # insert climbs into points -- need to be a bit careful to not
+  # create point triplets is fhte climb happens to begin/end on point pairs,
+  # for example existing segment boundaries
+  #
+  my @newPoints = ();
+  my $nS = 1;
+  my $i0 = 0;
+  my $i1 = 0;
+
+  for my $nc ( 0 .. $#climbs ) {
+    my $climb = $climbs[$nc];
+
+    # maximum distance to shift points to find peak or valley
+    my $d = $stretch * ($points->[$climb->[1]]->{distance} - $points->[$climb->[0]]->{distance});
+
+    # see if we can find a point within the search distance which is an altitude minimum
+    my $j0 = $climb->[0];
+    my $j = $j0 - 1;
+    while (
+           ($j > 0) &&
+           ($points->[$j]->{distance} > $points->[$j0]->{distance} - $d) &&
+           (($points->[$j]->{distance} >= $dMin)) &&
+           (($nc == 0) || ($points->[$j]->{distance} >= $points->[$climbs[$nc - 1]->[1]]->{distance} + $m))
+          ) {
+      if (($points->[$j + 1]->{ele} >  $points->[$j]->{ele}) &&
+          ($points->[$j - 1]->{ele} >= $points->[$j]->{ele})
+         ) {
+        note(sprintf("autoSegments: extending climb start from %.3f to %.3f km\n", $points->[$climb->[0]]->{distance} / 1000, $points->[$j]->{distance} / 1000));
+        $climb->[0] = $j;
+        last;
+      }
+      $j --;
+    }
+
+    my $j1 = $climb->[1];
+    $j = $j1 + 1;
+    while (
+           ($j < $#$points) &&
+           ($points->[$j]->{distance} < $points->[$j1]->{distance} + $d) &&
+           ($points->[$j]->{distance} <= $dMax) &&
+           (($nc == $#climbs) || ($points->[$j]->{distance} <= $points->[$climbs[$nc + 1]->[0]]->{distance} - $m))
+          ) {
+      if (($points->[$j + 1]->{ele} <= $points->[$j]->{ele}) &&
+          ($points->[$j - 1]->{ele} <  $points->[$j]->{ele})
+         ) {
+        note(sprintf("autoSegments: extending climb finish from %.3f to %.3f km\n", $points->[$climb->[1]]->{distance} / 1000, $points->[$j]->{distance} / 1000));
+        $climb->[1] = $j;
+        last;
+      }
+      $j ++;
+    }
+
+    $nS ++ while ($segmentDefined->{$nS});
+    $segmentDefined->{$nS} ++;
+    $segmentName->{$nS} = (defined $names->[$nc]) ? $names->[$nc] : ( (@climbs > 1) ? ("GPM " . ($nc + 1)) : "GPM" );
+
+    # if the climb limits are at point pairs, move each to the appropriate point
+    $climb->[0] ++ while ( ($climb->[0] < $climb->[1]) && ($points->[$climb->[0] + 1]->{distance} < $points->[$climb->[0]]->{distance} + 0.05) );
+    $climb->[1] -- while ( ($climb->[1] > $climb->[0]) && ($points->[$climb->[1]]->{distance} < $points->[$climb->[1] - 1]->{distance} + 0.05) );
+
+    # points up to the climb
+    $i1 = $climb->[0] - 1;
+    push @newPoints, @$points[$i0 .. $i1];
+
+    # shift to the climb
+    $i0 = $climb->[0];
+    $i1 = $climb->[1];
+
+    # we may need to create a copy of the first point of the climb
+    if (($i0 > 0) && ($points->[$i0]->{distance} > $points->[$i0 - 1]->{distance} + 0.05)) {
+      my %p = %{$points->[$i0]};
+      push @newPoints, \%p;
+    }
+
+    # copy all of the points up to the final point in the climb
+    my $s = $points->[$i1]->{segment};
+    for my $i ( $i0 .. $i1 ) {
+      if ( ( $i == $i0 ) || ($points->[$i]->{distance} > $points->[$i - 1]->{distance} + 0.05) ) {
+        push @newPoints, $points->[$i];
+        $points->[$i]->{segment} = $nS;
+      }
+    }
+
+    # if the next point is not a pair with the last copied point, then duplicate the last point of the climb
+    if ( ($i1 < $#$points) && ($points->[$i1 + 1]->{distance} > $points->[$i1]->{distance} + 0.05) ) {
+      my %p = %{$points->[$i1]};
+      $p{segment} = $s;
+      push @newPoints, \%p;
+    }
+
+    # starting point for the next insertion
+    $i0 = $i1 + 1;
+  }
+
+  # points following the last climb
+  push @newPoints, @$points[$i0 .. $#$points];
+
+  return \@newPoints;
+}
+
+#
+# findClimbs
+# a proc to return route portions which are climbs according to the algorithm
+#
+sub findClimbs {
+  my %var = @_;
+  my $points = $var{points};
+  my $indices = $var{indices};
+  my $simplifyPoints = $var{simplifyPoints} // 1;
+  my $shiftCircuit = $var{shiftCircuit} // 1;
+  my $courseDistance = $var{courseDistance};
+  my $gradientPower = ($var{gradientPower} // 2);
+  my $threshold = ($var{threshold} // 100);
+  my $isLoop = $var{isLoop};
+  my $sign = $var{sign} // 1; # sign: 1 for climbs, -1 for descents, 0 for both
+
+  # minimum rating... units are meters ( @ 10% gradient)
+  # this is normalized to 10% gradient,
+  my $rating0 = $threshold;
+
+  unless (defined $indices) {
+    if ($simplifyPoints) {
+      $indices = simplifyProfile($points, $gradientPower, $courseDistance, $isLoop);
+    } else {
+      $indices = [0 .. $#$points];
+    }
+  }
+
+  # for circuits, we want to shift the points to the altitude minimum
+  # no gradient signs will cross the altitude minimum on a loop
+  if ($shiftCircuit) {
+    # shift the points to the altitude minimum
+    my $zMin = $points->[0]->{ele};
+    my $izMin = 0;
+    for my $i ( 1 .. $#$indices ) {
+      if ($points->[$indices->[$i]]->{ele} < $zMin) {
+        $zMin = $points->[$indices->[$i]]->{ele};
+        $izMin = $i;
+      }
+    }
+    if ($izMin > 0) {
+      my @indices = @$indices[$izMin .. $#$indices];
+      push @indices, @$indices[0 .. $izMin]; # repeat the first point
+      $indices = \@indices;
+    }
+  }
+
+  # find the segment of maximum Fiets
+  my $rating = $rating0;
+  my @range = ();
+  for my $j ( 1 .. $#$indices ) {
+    for my $i ( 0 .. $j - 1 ) {
+      my $r = climbRating(
+                          points=> [$points->[$indices->[$i]], $points->[$indices->[$j]]],
+                          gradientPower=> $gradientPower,
+                          courseDistance=> $courseDistance,
+                          isLoop=> $isLoop
+                         );
+      if ($sign == 0) {
+        $r = abs($r);
+      } else {
+        $r *= $sign;
+      }
+      if ($r > $rating) {
+        @range = ($i, $j);
+        $rating = $r;
+      }
+    }
+  }
+
+  my @climbs = ();
+  if (@range) {
+    push @climbs,
+      findClimbs(
+                 points => $points,
+                 simplifyPoints=> 0,
+                 courseDistance=> $courseDistance,
+                 shiftCircuit=> 0,
+                 gradientPower=> $gradientPower,
+                 threshold=> $threshold,
+                 isLoop=> $isLoop,
+                 sign=> $sign,
+                 indices=>  [ @$indices[0 .. $range[0]] ],
+                )
+      if ($range[0] > 0);
+
+    my @climb = map { $indices->[$_] } @range;
+    push @climbs, \@climb;
+
+    push @climbs,
+      findClimbs(
+                 points => $points,
+                 courseDistance=> $courseDistance,
+                 simplifyPoints=> 0,
+                 shiftCircuit=> 0,
+                 gradientPower=> $gradientPower,
+                 threshold=> $threshold,
+                 isLoop=> $isLoop,
+                 sign=> $sign,
+                 indices=>  [ @$indices[$range[1] .. $#$indices] ],
+                )
+      if ($range[1] < $#$indices);
+  }
+
+  return @climbs;
+}
+
+#
+# findCorners
+# find corners in a set of points
+# corners are points meeting a threshold curvature
+# where the curvature drops to each side
+#
+sub findCorners {
+  my %var = @_;
+  my $points = $var{points};
+  my $points0 = $points;  # save for cleanup at end
+  my $isLoop = $var{isLoop};
+  my $curvatureThreshold = $var{curvatureThreshold} // 0.05;
+  my $sigma = $var{sigma} // 10;
+  my $courseDistance = $var{courseDistance};
+  my $d0 = 20 + 3 * $sigma;  # threshold for points to be separated to be considered distinct
+
+  addDistanceFieldIfNeeded(points=> $points);
+  $courseDistance //= calcCourseDistance(points=> $points, isLoop=> $isLoop) if ($isLoop);
+
+  # if it's a loop and last point matches first point, then remove it for now
+  my $pLast = pop(@$points) if ($isLoop and pointsAreClose($points->[0], $points->[-1]));
+
+  # check that smoothedCurvature is available
+  unless (defined $points->[0]->{smoothedCurvature}) {
+    unless (defined $points->[0]->{curvature}) {
+      addCurvatureField(points=> $points, isLoop=> $isLoop);
+    }
+    copyField(points=> $points, field=> "curvature", newField=> "smoothedCurvature");
+    $points = smoothing(points=> $points, sigma=> $sigma, isLoop=> $isLoop, fields=> ["smoothedCurvature"]);
+  }
+
+  my @corners = ();
+
+  my $i = 0;
+  my $iCorner;
+  my $cCorner;
+  my $startOnCorner;
+  my $endOnCorner;
+  my $iStart = $isLoop ? 0 : 1;
+  my $iEnd = $isLoop ? $#$points : $#$points - 1;
+  for my $i ( $iStart .. $iEnd ) {
+    # skip first and last point except on loop
+    my $c = $points->[$i]->{"smoothedCurvature"};
+    my $onCorner = (abs($c) > $curvatureThreshold);
+    # warn("$i (" . sprintf("%.4f", $points->[$i]->{distance} / 1000) . " : " . sprintf("%.5f", $points->[$i]->{curvature}) . ", ". sprintf("%.5f", $c) . " => " . ($onCorner ? "corner" : "") . " (threshold = $curvatureThreshold)\n");
+    my $d = pointSeparation($points->[$i - 1], $points->[$i], $courseDistance, $isLoop) if ($i > 0);
+    $startOnCorner = $onCorner if ($i == 0);
+    $endOnCorner = $onCorner if ($i == $#$points);
+    if ($onCorner) {
+      # if the curvature changed sign, or there's a gap, start a new curve
+      if (defined $iCorner) {
+	if ((($c <=> 0) != ($cCorner <=> 0)) || ($d > $d0)) {
+	  push @corners, $iCorner;
+	  $iCorner = $i;
+	  $cCorner = $c;
+	} elsif (abs($c) > abs($cCorner)) {
+	  $iCorner = $i;
+	  $cCorner = $c;
+	}
+      } else {
+	$iCorner = $i;
+	$cCorner = $c;
+      }
+    } elsif (defined $iCorner) {
+      push @corners, $iCorner;
+      $iCorner = undef;
+      $cCorner = undef;
+    }
+  }
+  push @corners, $iCorner if (defined $iCorner);
+  if (@corners && $isLoop && $startOnCorner && $endOnCorner) {
+    # merge first and last corner
+    my $c1 = $points->[0]->{smoothedCurvature};
+    my $c2 = $points->[-1]->{smoothedCurvature};
+    if ($c1 > $c2) {
+      pop @corners;
+    } else {
+      shift @corners;
+    }
+  }
+
+  # restore duplicate point if needed
+  push @$points, $pLast if (defined $pLast);
+
+  deleteField(points=> $points0, field=> "smoothedCurvature");
+
+  return @corners;
+}
+
+#
+# place gradient signs
+# simplify profile, then find max Fiets segment, then recurse
+#
+sub placeGradientSigns {
+  my %var = @_;
+  my $points = $var{points};
+  my $simplifyPoints = $var{simplifyPoints} // 1;
+  my $courseDistance = $var{courseDistance};
+  my $gradientPower = $var{gradientPower} // 2;
+  my $threshold = ($var{threshold} // 100);
+  my $isLoop = $var{isLoop};
+  my $shiftCircuit = $var{shiftCircuit} // $isLoop;
+
+  $courseDistance //= calcCourseDistance(isLoop=> $isLoop, points=> $points);
+
+  note("placing gradient signs...\n");
+
+  my @waypoints = ();
+
+  my @climbs =
+    findClimbs(
+               points => $points,
+               courseDistance=> $courseDistance,
+               shiftCircuit=> $shiftCircuit,
+               gradientPower=> $gradientPower,
+               threshold=> $threshold,
+               isLoop=> $isLoop,
+               sign=> 0,
+              );
+
+  note("placeGradientSigns: number of climbs = ", scalar @climbs, "\n");
+
+  my $nClimb = 0;
+  my @forwardSigns = ();
+  my @reverseSigns = ();
+  for my $climb ( @climbs ) {
+    $nClimb ++;
+    my $ds = distanceDifference($points->[$climb->[0]], $points->[$climb->[1]], $courseDistance, $isLoop);
+    my $dz = $points->[$climb->[1]]->{ele} - $points->[$climb->[0]]->{ele};
+    my $g = $dz / $ds;
+    my $text = sprintf("%.2f", 100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", $dz) . " m)";
+
+    my $waypoint =
+      {
+       lat   => $points->[$climb->[0]]->{lat},
+       lon   => $points->[$climb->[0]]->{lon},
+       ele   => $points->[$climb->[0]]->{ele},
+       cmt   => "$text",
+       desc  => "$text",
+       src   => "processGPX",
+       sym   => "sign",
+       type  => "signforward",
+       fix   => 'dgps',
+      };
+
+    # check that sign isn't too close to other waypoints
+    my $reject = 0;
+    for my $wp ( @forwardSigns ) {
+      if (pointsAreClose($waypoint, $wp, 1)) {
+        $reject = 1;
+        note("rejecting duplicate forward sign at $points->[$climb->[0]]->{distance} meters\n");
+        last;
+      }
+    }
+    unless ($reject) {
+      note("forward gradient sign @ ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), "km to ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), " km: $text\n");
+      # forward direction sign:
+      push @forwardSigns, $waypoint;
+    }
+
+    # reverse direction sign:
+    $text = sprintf("%.2f", -100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", -$dz) . " m)";
+    $waypoint =
+      {
+       lat   => $points->[$climb->[1]]->{lat},
+       lon   => $points->[$climb->[1]]->{lon},
+       ele   => $points->[$climb->[1]]->{ele},
+       cmt   => "$text",
+       desc  => "$text",
+       src   => "processGPX",
+       sym   => "sign",
+       type  => "signreverse",
+       fix   => 'dgps',
+      };
+
+    # check that sign isn't too close to other waypoints
+    $reject = 0;
+    for my $wp ( @reverseSigns ) {
+      if (pointsAreClose($waypoint, $wp, 1)) {
+        $reject = 1;
+        note("rejecting duplicate reverse sign at $points->[$climb->[1]]->{distance} meters\n");
+        last;
+      }
+    }
+    unless ($reject) {
+      note("reverse gradient sign @ ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), "km to ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), " km: $text\n");
+      # reverse direction sign:
+      push @reverseSigns, $waypoint;
+    }
+  }
+  push @waypoints, @forwardSigns, @reverseSigns;
+  return \@waypoints;
+}
+
+sub addCornerWaypoints {
+  my %var = @_;
+  my $points = $var{points};
+  my $isLoop = $var{isLoop};
+  my $curvatureThreshold = $var{curvatureThreshold};
+  my $sigma = $var{sigma};
+  my $courseDistance = $var{courseDistance};
+
+  my @waypoints = ();
+
+  for my $corner ( findCorners(points=> $points, courseDistance=> $courseDistance, curvatureThreshold=> $curvatureThreshold, sigma=> $sigma, isLoop=> $isLoop) ) {
+    my $p = $points->[$corner];
+    my $waypoint =
+      {
+       lat   => $p->{lat},
+       lon   => $p->{lon},
+       ele   => $p->{ele},
+       cmt   => "corner",
+       desc  => "corner",
+       src   => "processGPX",
+       sym   => "corner",
+       type  => "corner",
+       fix   => 'dgps',
+      };
+    push @waypoints, $waypoint;
+  }
+  return \@waypoints;
 }
 
 # proc to print user messages
@@ -5902,16 +6277,19 @@ for my $file ( @files ) {
   $points = removeDuplicatePoints(points=> $points, isLoop=> $isLoop);
 
   # if repeat is specified, then create replicates
-  if ( $repeat > 0 ) {
-    deleteField2(points=> $points, field=> "distance");
-    my @pNew = @$points;
-    for my $i ( 1 .. $repeat ) {
-      for my $p ( @$points ) {
-        my %p2 = %$p;
-        push @pNew, \%p2;
+  {
+    my $r = (($repeat > 0) ? $repeat : 0) + (($repeatedLaps > 1) ? $repeatedLaps - 1 : 0);
+    if ( $r > 0 ) {
+      deleteField2(points=> $points, field=> "distance");
+      my @pNew = @$points;
+      for my $i ( 1 .. $r ) {
+	for my $p ( @$points ) {
+	  my %p2 = %$p;
+	  push @pNew, \%p2;
+	}
       }
+      $points = \@pNew;
     }
-    $points = \@pNew;
   }
 
   # if join was specified, join points from a second file
@@ -6045,7 +6423,6 @@ for my $file ( @files ) {
     $isLoop = 0;
   }
 
-
   # splice in files
   for my $splice ( @splice ) {
     my $GPXResult = loadGPX(GPXFile=> $splice, nSegment=> $nSegment, stripSegments=> $stripSegments);
@@ -6060,8 +6437,12 @@ for my $file ( @files ) {
 
   # unnamed segments get converted to 0 so they can be merged if contiguous
   for my $p ( @$points ) {
-    unless (defined $segmentName{$p->{segment}}) {
-      $segmentDefined{$p->{segment}} = 0;
+    if (defined($p->{segment})) {
+      unless (defined $segmentName{$p->{segment}}) {
+	$segmentDefined{$p->{segment}} = 0;
+	$p->{segment} = 0;
+      }
+    } else {
       $p->{segment} = 0;
     }
   }
@@ -6164,6 +6545,11 @@ for my $file ( @files ) {
     }
     reversePoints($points);
   }
+
+# DEBUG: test code for findArcs
+#  warn("calling findArcs...\n");
+#  findArcs(points=> $points, isLoop=> $isLoop);
+#  exit();
 
   #
   # flatten selected sections
@@ -6477,13 +6863,13 @@ for my $file ( @files ) {
     next unless ( ($smooth > 0) || @$sSmooth );
 
     my $sigma0;
-    if ($smoothLoop == 3) {
+    if ($smoothLoop >= 3) {
       # smooth field is generated from data
       note("calculating auto sigma\n");
       calcSmoothingSigma( points=> $points, sigmaFactor=> $smooth );
       $sigma0 = 0;
     } else {
-    # parse and check the selective smoothing parameters
+      # parse and check the selective smoothing parameters
       my $i = 0;
       my $sPrev;
       my @smoothSigmas;
@@ -7607,33 +7993,52 @@ for my $file ( @files ) {
     note("altitude score of final course = ", sprintf("%.4f", $scoreZ), "\n");
     note("distance from last point to first point = ", sprintf("%.3f", latlngDistance($points->[-1], $points->[0])), " meters\n");
 
-
     #
-    # curvature
-    #
-    if ($addCurvature) {
-      note("checking curvature\n");
-      addCurvatureField(points=> $points, isLoop=> $isLoop);
-    } else {
-      deleteField2(points=> $points, field=> "curvature");
-    }
-
     #
     # generate gradient signs
     #
-    if ( $addGradientSigns ) {
+    if ( $addGradientSigns || $addGradientWaypoints ) {
       # calculate course distance
       $waypoints //= [];
-      push @$waypoints,
-        @{placeGradientSigns(
-                             points => $points,
-                             shiftCircuit=> $isLoop,
-                             courseDistance=> $courseDistance,
-                             gradientPower=> $gradientPower,
-                             threshold=> $gradientThreshold,
-                             isLoop=> $isLoop
-                            )
-        };
+      my $gradientWaypoints =
+	placeGradientSigns(
+			   points => $points,
+			   shiftCircuit=> $isLoop,
+			   courseDistance=> $courseDistance,
+			   gradientPower=> $gradientPower,
+			   threshold=> $gradientThreshold,
+			   isLoop=> $isLoop
+			  );
+      note(scalar(@$gradientWaypoints) . " gradients identified\n.");
+      push @$waypoints, @$gradientWaypoints;
+    }
+
+
+    #
+    # generate corner waypoints
+    #
+    if ( $addCornerWaypoints ) {
+      # calculate course distance
+      $waypoints //= [];
+      my $cornerWaypoints =
+	addCornerWaypoints(
+			   points => $points,
+			   courseDistance=> $courseDistance,
+			   curvatureThreshold=> $curvatureThreshold,
+			   sigma=> $curvatureSmoothing,
+			   isLoop=> $isLoop,
+			  );
+      note(scalar(@$cornerWaypoints) . " corners identified.\n");
+      push @$waypoints, @$cornerWaypoints;
+    }
+
+    # curvature
+    #
+    if ($addCurvature) {
+      note("adding curvature\n");
+      addCurvatureField(points=> $points, isLoop=> $isLoop);
+    } else {
+      deleteField2(points=> $points, field=> "curvature");
     }
 
 
@@ -7749,7 +8154,6 @@ for my $file ( @files ) {
     # replace original segments with smoothed segments
     $track->{segments} = \@segments;
 
-
     unless ( $noSave ) {
       my $nTrack = 0;
       if ($csv) {
@@ -7790,6 +8194,10 @@ for my $file ( @files ) {
         $gpx->desc($description)    if (defined $description);
         $gpx->time(time());
 
+	for my $t ( @{$gpx->tracks()} ) {
+	  for my $s ( @{$t->{segments}}) {
+	  }
+	}
         # create point extension fields
         for my $segment ( @{$track->{segments}} ) {
           addPointExtensions(points => $segment->{points});
@@ -7827,7 +8235,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.59
+0.60
 
 =head1 DESCRIPTION
 
@@ -7946,6 +8354,53 @@ for example with the "cpan" command-line tool:
  Date::Parse  : for parsing time, with the -startTime option
  Pod::Usage   : for the -help option
 
+For processing BikeTerra routes or GPX files directly you need:
+ HTTP::Tiny : used for downloading data from the web.
+
+and for BikeTerra route data (as opposed to GPX files) you need:
+ JSON : used for parsing JSON-formatted files.
+
+=head1 SPECIFYING INPUT SOURCES
+
+There are a number of ways to specify input sources.
+
+The most common way is to provide an input filename for a GPX file.
+So, for example, if you have a file C<myFavoriteRoute.gpx>, you'd list
+that as a commane-line element.
+
+Optionally a track number can be specified, if the default of using
+the first (or only) track isn't wanted.  So C<myFavoriteRoute.gpx:2>
+would use the second track in the file.
+
+For BikeTerra users, routes can be downloaded from BikeTerra directly
+and used as input.  There's two sources.  One is to use the GPX file
+which was sent to Biketerra.  BikeTerra takes other data formats, like
+FIT, but this only works here with GPX files.  This is specified with
+C<BikeTerraRoute:> followed by the route number.  So for example,
+C<BikeTerraRoute:10605> would use the route associated with BikeTerra
+route 10605.  Again, the track number can be appended, so if
+C<BikeTerraRoute:10605:1> specified the first track in the GPX file
+associated with route 10605.  Typically these files will have only a
+single track, so this is not an issue.
+
+An alternate approach with BikeTerra routes is do download a GPX file
+associated with the present course.  BikeTerra simplifies route data
+on upload, and the points may be modified via the route editor.  This
+option will include any such simplifications and edits.  It is
+specified with C<BikeTerraRoute:> followed by the route number.  You
+can additionally specify a track number but there will only be one
+track (as of this writing: maybe that will change at some point).
+
+You can shortcut these as C<BTGPX:> and C<BTRoute:>, for example.
+Generally the "Bike" can be shortened to B, and/or the "Terra" to T.
+Case does not matter.
+
+Another option is to omit a filename, or to specify an empty dash
+C<->.  This indicates that the standard input is to be used, for
+example with a pipe. As with filenames, a track number can be appended
+to the dash, for example C<-:2> would pick the second track from the
+GPX provided as standard input.
+
 =head1 OPTIONS
 
 The program is generally invoked:
@@ -8019,14 +8474,16 @@ For example, if a route started east (0) then lapped around
 counterclockwise 10 times, the final direction would be approximately
 3600 degrees.
 
-=item B<C<-addDistance>>
+=item B<C<-addCornerWaypoints>>
 
-This option adds a "distance" extensions field (in meters) to the GPX
-file.  Distance is calculated after all other operations, for example
-cropping, extending, and shifting.  At present it's the horizontal
-distance, so scaling a vertical cliff would count as zero.  Note
-different programs may have different algorithms for determining
-distance from coordinates: this program uses a very simple one.
+This option places waypoints at positions of relatively high
+curvature, marking them as corners.  They can be viewed, for example.
+in I<GPXStudio>.  The future intent is for them to be useful in a game
+such as BikeTerra for generating roadside signs.
+
+It is likely this option will need to be tuned with
+C<-curvatureThreshold>, and possibly C<-curvatureSmoothing>, depending
+on the route.
 
 =item B<C<-addGradient>>
 
@@ -8036,10 +8493,17 @@ horizontal distance to the next point.
 
 =item B<C<-addGradientSigns>>
 
-This flag is an I<experimental> option to calculate regions of
-exceptional gradient and place "gradient signs" in the GPX as
-waypoints.  There are no present plans for any program to support
-this, so it is at present just a curiosity.
+This flag is an option to calculate regions of exceptional gradient
+and place "gradient signs".  At present this is equivalent to
+C<-addGradientWaypoints>, although in future versions it may be
+changed to support a feature on a virtual game such as I<BikeTerra>.
+
+=item B<C<-addGradientWaypoints>>
+
+This flag is an option to calculate regions of exceptional gradient
+and place GPX waypoints.  These are visible, for example, with
+I<GPXStudio>.  Waypoints are tagged depending on if they are associated
+with the forward or reverse direction of travel.
 
 =item B<C<-addHeading>>
 
@@ -8563,6 +9027,23 @@ an output file is specified with either a "csv" or "gpx" suffix (case
 insensitive), in which case the suffix is used to determine the
 format.  Other suffixes are ignored.
 
+=item B<C<-curvatureSmoothing>>
+
+This controls how much curvature is smoothed before being applied
+to corner identification.  The default is 10 meters.  Increasing
+the number puts the emphasis on identifying larger-angle corners,
+and filtering out S-curves, for example.
+
+=item B<C<-curvatureThreshold>>
+
+This is the threshold of smoothed corners for the marking of corners,
+for example via the C<-addCornerWaypoints> option.  Units are inverse
+meters. The reciprical of this number is the maximum effective
+centerline turning radius of the corners to be marked.  The default is
+0.05, avoiding gradual corners.  Note if C<-minRadius> or C<-smooth>
+are set too high, no corners will be identified unless this value is
+decreased.
+
 =item B<C<-deleteRange>> <meters> <meters> ...>
 
 This allows the specification of position pairs marking ranges over
@@ -9061,11 +9542,17 @@ single lap, but there are several reasons one might want to
 artificially create multiple laps by repeating the lap.  One might be
 if one is going to add a lead-in or finishing leg to the course, for
 example with the C<-join> option, which would be applied after this
-command is executed.  Another might be if you wanted timed segments only
-on selective laps, or overlapping the boundary between laps. But in most
-cases multi-lap races are better modeled by specifying the number of laps
-at event creation and using a magic road which covers only one of the
-laps.
+command is executed.  Another might be if you wanted timed segments
+only on selective laps, or overlapping the boundary between laps. But
+in most cases multi-lap races are better modeled by specifying the
+number of laps at event creation and using a magic road which covers
+only one of the laps.
+
+=item B<C<-repeatedLaps>> <count>
+
+This is equivalent to C<-repeat> except with a number one less.
+For example, C<-repeatedLaps 10> and C<-repeat 9> are the same.
+Each results in 10 copies of the original GPX file.
 
 =item B<C<-reverse>>
 
@@ -10015,7 +10502,7 @@ then return, then loop again, with a default lane shift.
 
 =head2 road course w/ out-and-back
 
-This is from a road course with an out-and-back section.  Note C<-RUTurn>
+This is from a road course with an out-and-back section.  Note C<-rUTurn>
 is not used here, since in this example, the loop at the end of the
 out-and-back is part of the original route.
 
@@ -10432,6 +10919,44 @@ greater the priority placed on steepness.  The default of "2" seems to
 work well.
 
 =back
+
+=head2 processing a BikeTerra route from the original GPX
+
+Suppose you have a BikeTerra route but don't have access to the
+original GPX, and you want to refine that GPX file to improve corners.
+You might have made some edits on the route editor, but you don't care
+about these.
+
+Here is how you might do that:
+
+C<processGPX -auto BikeTerraGPX:12426 -out route.gpx>
+
+Or, if the data were from Strava, you might want to add C<-fixSteps>:
+
+C<processGPX -auto BikeTerraGPX:12426 -fixSteps -out route.gpx>
+
+This will download the original GPX file from route 12426 and create a
+GPX with the C<-auto> option applied.
+
+Alternately, maybe you just want to download that file with minimal
+change.  Then you would leave out the C<-auto> option in this example.
+It will check for zig-zags, for example, and little more.
+
+C<processGPX BikeTerraGPX:12426 -out route.gpx>
+
+=head2 processing a BikeTerra route from route data
+
+Suppose you have a BikeTerra route and maybe you've done some edits
+with the route editor, but since it's hard to create smooth corners
+with the GUI, you want to do some final smoothing before uploading a
+revised GPX file.  You could do that as follows:
+
+C<processGPX -auto BikeTerraRoute:12426 -out route.gpx>
+
+If you simply want to download a GPX representation of the route,
+you can leave out the C<-auto>:
+
+C<processGPX BikeTerraRoute:12426 -out route.gpx>
 
 =head2 specifying metadata
 

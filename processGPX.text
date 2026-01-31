@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.59
+    0.60
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -118,6 +118,52 @@ DEPENDENCIES
      Date::Parse  : for parsing time, with the -startTime option
      Pod::Usage   : for the -help option
 
+    For processing BikeTerra routes or GPX files directly you need:
+    HTTP::Tiny : used for downloading data from the web.
+
+    and for BikeTerra route data (as opposed to GPX files) you need: JSON :
+    used for parsing JSON-formatted files.
+
+SPECIFYING INPUT SOURCES
+    There are a number of ways to specify input sources.
+
+    The most common way is to provide an input filename for a GPX file. So,
+    for example, if you have a file "myFavoriteRoute.gpx", you'd list that
+    as a commane-line element.
+
+    Optionally a track number can be specified, if the default of using the
+    first (or only) track isn't wanted. So "myFavoriteRoute.gpx:2" would use
+    the second track in the file.
+
+    For BikeTerra users, routes can be downloaded from BikeTerra directly
+    and used as input. There's two sources. One is to use the GPX file which
+    was sent to Biketerra. BikeTerra takes other data formats, like FIT, but
+    this only works here with GPX files. This is specified with
+    "BikeTerraRoute:" followed by the route number. So for example,
+    "BikeTerraRoute:10605" would use the route associated with BikeTerra
+    route 10605. Again, the track number can be appended, so if
+    "BikeTerraRoute:10605:1" specified the first track in the GPX file
+    associated with route 10605. Typically these files will have only a
+    single track, so this is not an issue.
+
+    An alternate approach with BikeTerra routes is do download a GPX file
+    associated with the present course. BikeTerra simplifies route data on
+    upload, and the points may be modified via the route editor. This option
+    will include any such simplifications and edits. It is specified with
+    "BikeTerraRoute:" followed by the route number. You can additionally
+    specify a track number but there will only be one track (as of this
+    writing: maybe that will change at some point).
+
+    You can shortcut these as "BTGPX:" and "BTRoute:", for example.
+    Generally the "Bike" can be shortened to B, and/or the "Terra" to T.
+    Case does not matter.
+
+    Another option is to omit a filename, or to specify an empty dash "-".
+    This indicates that the standard input is to be used, for example with a
+    pipe. As with filenames, a track number can be appended to the dash, for
+    example "-:2" would pick the second track from the GPX provided as
+    standard input.
+
 OPTIONS
     The program is generally invoked:
 
@@ -175,14 +221,15 @@ OPTIONS
         counterclockwise 10 times, the final direction would be
         approximately 3600 degrees.
 
-    "-addDistance"
-        This option adds a "distance" extensions field (in meters) to the
-        GPX file. Distance is calculated after all other operations, for
-        example cropping, extending, and shifting. At present it's the
-        horizontal distance, so scaling a vertical cliff would count as
-        zero. Note different programs may have different algorithms for
-        determining distance from coordinates: this program uses a very
-        simple one.
+    "-addCornerWaypoints"
+        This option places waypoints at positions of relatively high
+        curvature, marking them as corners. They can be viewed, for example.
+        in *GPXStudio*. The future intent is for them to be useful in a game
+        such as BikeTerra for generating roadside signs.
+
+        It is likely this option will need to be tuned with
+        "-curvatureThreshold", and possibly "-curvatureSmoothing", depending
+        on the route.
 
     "-addGradient"
         This option adds a forward "gradient" extensions field, which is
@@ -190,10 +237,16 @@ OPTIONS
         horizontal distance to the next point.
 
     "-addGradientSigns"
-        This flag is an *experimental* option to calculate regions of
-        exceptional gradient and place "gradient signs" in the GPX as
-        waypoints. There are no present plans for any program to support
-        this, so it is at present just a curiosity.
+        This flag is an option to calculate regions of exceptional gradient
+        and place "gradient signs". At present this is equivalent to
+        "-addGradientWaypoints", although in future versions it may be
+        changed to support a feature on a virtual game such as *BikeTerra*.
+
+    "-addGradientWaypoints"
+        This flag is an option to calculate regions of exceptional gradient
+        and place GPX waypoints. These are visible, for example, with
+        *GPXStudio*. Waypoints are tagged depending on if they are
+        associated with the forward or reverse direction of travel.
 
     "-addHeading"
         Alias for "-addDirection">.
@@ -670,6 +723,21 @@ OPTIONS
         (case insensitive), in which case the suffix is used to determine
         the format. Other suffixes are ignored.
 
+    "-curvatureSmoothing"
+        This controls how much curvature is smoothed before being applied to
+        corner identification. The default is 10 meters. Increasing the
+        number puts the emphasis on identifying larger-angle corners, and
+        filtering out S-curves, for example.
+
+    "-curvatureThreshold"
+        This is the threshold of smoothed corners for the marking of
+        corners, for example via the "-addCornerWaypoints" option. Units are
+        inverse meters. The reciprical of this number is the maximum
+        effective centerline turning radius of the corners to be marked. The
+        default is 0.05, avoiding gradual corners. Note if "-minRadius" or
+        "-smooth" are set too high, no corners will be identified unless
+        this value is decreased.
+
     "-deleteRange" <meters> <meters> ...>
         This allows the specification of position pairs marking ranges over
         which points should be deleted. If two points are provided, then the
@@ -1123,6 +1191,11 @@ OPTIONS
         But in most cases multi-lap races are better modeled by specifying
         the number of laps at event creation and using a magic road which
         covers only one of the laps.
+
+    "-repeatedLaps" <count>
+        This is equivalent to "-repeat" except with a number one less. For
+        example, "-repeatedLaps 10" and "-repeat 9" are the same. Each
+        results in 10 copies of the original GPX file.
 
     "-reverse"
         This reverses a course immediately after loading the file. So all
@@ -1980,7 +2053,7 @@ EXAMPLES
         then return, then loop again, with a default lane shift.
 
   road course w/ out-and-back
-    This is from a road course with an out-and-back section. Note "-RUTurn"
+    This is from a road course with an out-and-back section. Note "-rUTurn"
     is not used here, since in this example, the loop at the end of the
     out-and-back is part of the original route.
 
@@ -2328,6 +2401,42 @@ EXAMPLES
         to the gradual portions if they meet the threshold? The higher
         gradient power, the greater the priority placed on steepness. The
         default of "2" seems to work well.
+
+  processing a BikeTerra route from the original GPX
+    Suppose you have a BikeTerra route but don't have access to the original
+    GPX, and you want to refine that GPX file to improve corners. You might
+    have made some edits on the route editor, but you don't care about
+    these.
+
+    Here is how you might do that:
+
+    "processGPX -auto BikeTerraGPX:12426 -out route.gpx"
+
+    Or, if the data were from Strava, you might want to add "-fixSteps":
+
+    "processGPX -auto BikeTerraGPX:12426 -fixSteps -out route.gpx"
+
+    This will download the original GPX file from route 12426 and create a
+    GPX with the "-auto" option applied.
+
+    Alternately, maybe you just want to download that file with minimal
+    change. Then you would leave out the "-auto" option in this example. It
+    will check for zig-zags, for example, and little more.
+
+    "processGPX BikeTerraGPX:12426 -out route.gpx"
+
+  processing a BikeTerra route from route data
+    Suppose you have a BikeTerra route and maybe you've done some edits with
+    the route editor, but since it's hard to create smooth corners with the
+    GUI, you want to do some final smoothing before uploading a revised GPX
+    file. You could do that as follows:
+
+    "processGPX -auto BikeTerraRoute:12426 -out route.gpx"
+
+    If you simply want to download a GPX representation of the route, you
+    can leave out the "-auto":
+
+    "processGPX BikeTerraRoute:12426 -out route.gpx"
 
   specifying metadata
     GPX files have "metadata" which is various tags. You can change values

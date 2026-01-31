@@ -4,7 +4,7 @@
 <head>
 <title>processGPX</title>
 <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<link rev="made" href="mailto:root@venturaa.local" />
+<link rev="made" href="mailto:root@sequoiaa.local" />
 </head>
 
 <body>
@@ -17,6 +17,7 @@
   <li><a href="#VERSION">VERSION</a></li>
   <li><a href="#DESCRIPTION">DESCRIPTION</a></li>
   <li><a href="#DEPENDENCIES">DEPENDENCIES</a></li>
+  <li><a href="#SPECIFYING-INPUT-SOURCES">SPECIFYING INPUT SOURCES</a></li>
   <li><a href="#OPTIONS">OPTIONS</a></li>
   <li><a href="#EXAMPLES">EXAMPLES</a>
     <ul>
@@ -32,6 +33,8 @@
       <li><a href="#segment-generation">segment generation</a></li>
       <li><a href="#adding-time-to-an-activity">adding time to an activity</a></li>
       <li><a href="#adding-gradient-signs">adding gradient signs</a></li>
+      <li><a href="#processing-a-BikeTerra-route-from-the-original-GPX">processing a BikeTerra route from the original GPX</a></li>
+      <li><a href="#processing-a-BikeTerra-route-from-route-data">processing a BikeTerra route from route data</a></li>
       <li><a href="#specifying-metadata">specifying metadata</a></li>
       <li><a href="#converting-an-RGT-route-to-BikeTerra">converting an RGT route to BikeTerra</a></li>
     </ul>
@@ -52,7 +55,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.59</p>
+<p>0.60</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -102,6 +105,26 @@ XML::Descent : processing XML (required by Geo::Gpx, as well)
 POSIX        : floor function
 Date::Parse  : for parsing time, with the -startTime option
 Pod::Usage   : for the -help option</code></pre>
+
+<p>For processing BikeTerra routes or GPX files directly you need: HTTP::Tiny : used for downloading data from the web.</p>
+
+<p>and for BikeTerra route data (as opposed to GPX files) you need: JSON : used for parsing JSON-formatted files.</p>
+
+<h1 id="SPECIFYING-INPUT-SOURCES">SPECIFYING INPUT SOURCES</h1>
+
+<p>There are a number of ways to specify input sources.</p>
+
+<p>The most common way is to provide an input filename for a GPX file. So, for example, if you have a file <code>myFavoriteRoute.gpx</code>, you&#39;d list that as a commane-line element.</p>
+
+<p>Optionally a track number can be specified, if the default of using the first (or only) track isn&#39;t wanted. So <code>myFavoriteRoute.gpx:2</code> would use the second track in the file.</p>
+
+<p>For BikeTerra users, routes can be downloaded from BikeTerra directly and used as input. There&#39;s two sources. One is to use the GPX file which was sent to Biketerra. BikeTerra takes other data formats, like FIT, but this only works here with GPX files. This is specified with <code>BikeTerraRoute:</code> followed by the route number. So for example, <code>BikeTerraRoute:10605</code> would use the route associated with BikeTerra route 10605. Again, the track number can be appended, so if <code>BikeTerraRoute:10605:1</code> specified the first track in the GPX file associated with route 10605. Typically these files will have only a single track, so this is not an issue.</p>
+
+<p>An alternate approach with BikeTerra routes is do download a GPX file associated with the present course. BikeTerra simplifies route data on upload, and the points may be modified via the route editor. This option will include any such simplifications and edits. It is specified with <code>BikeTerraRoute:</code> followed by the route number. You can additionally specify a track number but there will only be one track (as of this writing: maybe that will change at some point).</p>
+
+<p>You can shortcut these as <code>BTGPX:</code> and <code>BTRoute:</code>, for example. Generally the &quot;Bike&quot; can be shortened to B, and/or the &quot;Terra&quot; to T. Case does not matter.</p>
+
+<p>Another option is to omit a filename, or to specify an empty dash <code>-</code>. This indicates that the standard input is to be used, for example with a pipe. As with filenames, a track number can be appended to the dash, for example <code>-:2</code> would pick the second track from the GPX provided as standard input.</p>
 
 <h1 id="OPTIONS">OPTIONS</h1>
 
@@ -171,10 +194,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Direction is calculated for each point as the average of the directions ahead and behind. The direction of the first or last points in a point-to-point course are calculated in only one direction. Directions for loop courses are calculated assuming the loop. The direction never changes by more than +/- 180 degrees from one point to the next, so the direction has no limits: it can be positive, negative, and outside the range from -360 to +360 degrees. For example, if a route started east (0) then lapped around counterclockwise 10 times, the final direction would be approximately 3600 degrees.</p>
 
 </dd>
-<dt id="addDistance"><b><code>-addDistance</code></b></dt>
+<dt id="addCornerWaypoints"><b><code>-addCornerWaypoints</code></b></dt>
 <dd>
 
-<p>This option adds a &quot;distance&quot; extensions field (in meters) to the GPX file. Distance is calculated after all other operations, for example cropping, extending, and shifting. At present it&#39;s the horizontal distance, so scaling a vertical cliff would count as zero. Note different programs may have different algorithms for determining distance from coordinates: this program uses a very simple one.</p>
+<p>This option places waypoints at positions of relatively high curvature, marking them as corners. They can be viewed, for example. in <i>GPXStudio</i>. The future intent is for them to be useful in a game such as BikeTerra for generating roadside signs.</p>
+
+<p>It is likely this option will need to be tuned with <code>-curvatureThreshold</code>, and possibly <code>-curvatureSmoothing</code>, depending on the route.</p>
 
 </dd>
 <dt id="addGradient"><b><code>-addGradient</code></b></dt>
@@ -186,7 +211,13 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="addGradientSigns"><b><code>-addGradientSigns</code></b></dt>
 <dd>
 
-<p>This flag is an <i>experimental</i> option to calculate regions of exceptional gradient and place &quot;gradient signs&quot; in the GPX as waypoints. There are no present plans for any program to support this, so it is at present just a curiosity.</p>
+<p>This flag is an option to calculate regions of exceptional gradient and place &quot;gradient signs&quot;. At present this is equivalent to <code>-addGradientWaypoints</code>, although in future versions it may be changed to support a feature on a virtual game such as <i>BikeTerra</i>.</p>
+
+</dd>
+<dt id="addGradientWaypoints"><b><code>-addGradientWaypoints</code></b></dt>
+<dd>
+
+<p>This flag is an option to calculate regions of exceptional gradient and place GPX waypoints. These are visible, for example, with <i>GPXStudio</i>. Waypoints are tagged depending on if they are associated with the forward or reverse direction of travel.</p>
 
 </dd>
 <dt id="addHeading"><b><code>-addHeading</code></b></dt>
@@ -611,6 +642,18 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Specifies the output will be CSV rather than GPX. This is ignored if an output file is specified with either a &quot;csv&quot; or &quot;gpx&quot; suffix (case insensitive), in which case the suffix is used to determine the format. Other suffixes are ignored.</p>
 
 </dd>
+<dt id="curvatureSmoothing"><b><code>-curvatureSmoothing</code></b></dt>
+<dd>
+
+<p>This controls how much curvature is smoothed before being applied to corner identification. The default is 10 meters. Increasing the number puts the emphasis on identifying larger-angle corners, and filtering out S-curves, for example.</p>
+
+</dd>
+<dt id="curvatureThreshold"><b><code>-curvatureThreshold</code></b></dt>
+<dd>
+
+<p>This is the threshold of smoothed corners for the marking of corners, for example via the <code>-addCornerWaypoints</code> option. Units are inverse meters. The reciprical of this number is the maximum effective centerline turning radius of the corners to be marked. The default is 0.05, avoiding gradual corners. Note if <code>-minRadius</code> or <code>-smooth</code> are set too high, no corners will be identified unless this value is decreased.</p>
+
+</dd>
 <dt id="deleteRange-meters-meters"><b><code>-deleteRange</code></b> &lt;meters&gt; &lt;meters&gt; ...&gt;</dt>
 <dd>
 
@@ -991,6 +1034,12 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>Number of copies of the route to append to the end of the course. This should naturally be applied to a route which is a lappable course. Normally lappable courses in RGT are modeled with only a single lap, but there are several reasons one might want to artificially create multiple laps by repeating the lap. One might be if one is going to add a lead-in or finishing leg to the course, for example with the <code>-join</code> option, which would be applied after this command is executed. Another might be if you wanted timed segments only on selective laps, or overlapping the boundary between laps. But in most cases multi-lap races are better modeled by specifying the number of laps at event creation and using a magic road which covers only one of the laps.</p>
+
+</dd>
+<dt id="repeatedLaps-count"><b><code>-repeatedLaps</code></b> &lt;count&gt;</dt>
+<dd>
+
+<p>This is equivalent to <code>-repeat</code> except with a number one less. For example, <code>-repeatedLaps 10</code> and <code>-repeat 9</code> are the same. Each results in 10 copies of the original GPX file.</p>
 
 </dd>
 <dt id="reverse"><b><code>-reverse</code></b></dt>
@@ -1703,7 +1752,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <h2 id="road-course-w-out-and-back">road course w/ out-and-back</h2>
 
-<p>This is from a road course with an out-and-back section. Note <code>-RUTurn</code> is not used here, since in this example, the loop at the end of the out-and-back is part of the original route.</p>
+<p>This is from a road course with an out-and-back section. Note <code>-rUTurn</code> is not used here, since in this example, the loop at the end of the out-and-back is part of the original route.</p>
 
 <p>BikeTerra automatically adds turnarounds to the end of point-to-point routes. so this is not typically necessary.</p>
 
@@ -2066,6 +2115,34 @@ Pod::Usage   : for the -help option</code></pre>
 
 </dd>
 </dl>
+
+<h2 id="processing-a-BikeTerra-route-from-the-original-GPX">processing a BikeTerra route from the original GPX</h2>
+
+<p>Suppose you have a BikeTerra route but don&#39;t have access to the original GPX, and you want to refine that GPX file to improve corners. You might have made some edits on the route editor, but you don&#39;t care about these.</p>
+
+<p>Here is how you might do that:</p>
+
+<p><code>processGPX -auto BikeTerraGPX:12426 -out route.gpx</code></p>
+
+<p>Or, if the data were from Strava, you might want to add <code>-fixSteps</code>:</p>
+
+<p><code>processGPX -auto BikeTerraGPX:12426 -fixSteps -out route.gpx</code></p>
+
+<p>This will download the original GPX file from route 12426 and create a GPX with the <code>-auto</code> option applied.</p>
+
+<p>Alternately, maybe you just want to download that file with minimal change. Then you would leave out the <code>-auto</code> option in this example. It will check for zig-zags, for example, and little more.</p>
+
+<p><code>processGPX BikeTerraGPX:12426 -out route.gpx</code></p>
+
+<h2 id="processing-a-BikeTerra-route-from-route-data">processing a BikeTerra route from route data</h2>
+
+<p>Suppose you have a BikeTerra route and maybe you&#39;ve done some edits with the route editor, but since it&#39;s hard to create smooth corners with the GUI, you want to do some final smoothing before uploading a revised GPX file. You could do that as follows:</p>
+
+<p><code>processGPX -auto BikeTerraRoute:12426 -out route.gpx</code></p>
+
+<p>If you simply want to download a GPX representation of the route, you can leave out the <code>-auto</code>:</p>
+
+<p><code>processGPX BikeTerraRoute:12426 -out route.gpx</code></p>
 
 <h2 id="specifying-metadata">specifying metadata</h2>
 
