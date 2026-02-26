@@ -243,7 +243,6 @@ sub loadBTRoute {
       my %p;
       @p{"lat", "lon", "ele"} = @$point;
       push @points, \%p;
-      warn("point fouind: $p{lat}, $p{lon}, $p{ele}\n");
     }
   }
 
