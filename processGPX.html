@@ -55,7 +55,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.62</p>
+<p>0.63</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -1128,6 +1128,16 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>This reverses a course immediately after loading the file. So all subsequent operations will be done on the reversed course rather than the original course. So for example, if I have an initial course which goes from point A to point B, and I specify a turnaround with -rTurnaround 5, instead of a route from A to B and back, it will instead be from B to A and back. If you want to reverse the final product, then do a second run with just the <code>-reverse</code> option after an initial run on other options.</p>
+
+</dd>
+<dt id="RGT2BT"><b><code>-RGT2BT</code></b></dt>
+<dd>
+
+<p>Convert RGT routes to BikeTerra by shifting the S/F line 60 meters in the case of a loop course, or in the case of a point to point, cropping 60 meters off the start and 140 meters off the finish. These will be done in addition to any values specified with other options.</p>
+
+<p>The default is false.</p>
+
+<p>Alternate specifications of this option are <code>-RGTtoBT</code>, <code>-RGT2BikeTerra</code>, and <code>-RGTtoBikeTerra</code>.</p>
 
 </dd>
 <dt id="rLap-meters"><b><code>-rLap</code></b> &lt;meters&gt;</dt>
@@ -2290,13 +2300,11 @@ Pod::Usage   : for the -help option</code></pre>
 
 <h2 id="converting-an-RGT-route-to-BikeTerra">converting an RGT route to BikeTerra</h2>
 
-<p>RGT routes had 60 meters at the start and 140 meters at the end for riders to group. Biketerra does not use these buffer regions. So to get the same course distance in BikeTerra as was used in RGT, 60 meters from the start and 140 meters from the end should be cropped. For example:</p>
+<p>RGT routes had 60 meters at the start and 140 meters at the end for riders to group. Biketerra does not use these buffer regions. So to get the same course distance in BikeTerra as was used in RGT, 60 meters from the start and 140 meters from the end should be cropped.</p>
 
-<p><code>processGPX -cropMin 60 -cropMax -140 RGTRoute.gpx -out BikeTerraRoute.gpx</code></p>
+<p>This can be done explicity. But there is a short-cut provided here, <code>-RGT2BT</code>:</p>
 
-<p>For circuits, you don&#39;t need to crop the end of the route, but the S/F point should be shifted:</p>
-
-<p><code>processGPX -cropMin 60 RGTCircuit.gpx -out BikeTerraCircuit.gpx</code></p>
+<p><code>processGPX -RGT2BT RGTRoute.gpx -out BikeTerraRoute.gpx</code></p>
 
 <h1 id="NAMED-SEGMENTS">NAMED SEGMENTS</h1>
 

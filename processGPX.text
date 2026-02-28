@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.62
+    0.63
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -1297,6 +1297,18 @@ OPTIONS
         back, it will instead be from B to A and back. If you want to
         reverse the final product, then do a second run with just the
         "-reverse" option after an initial run on other options.
+
+    "-RGT2BT"
+        Convert RGT routes to BikeTerra by shifting the S/F line 60 meters
+        in the case of a loop course, or in the case of a point to point,
+        cropping 60 meters off the start and 140 meters off the finish.
+        These will be done in addition to any values specified with other
+        options.
+
+        The default is false.
+
+        Alternate specifications of this option are "-RGTtoBT",
+        "-RGT2BikeTerra", and "-RGTtoBikeTerra".
 
     "-rLap" <meters>
         For an out-and-back course, create a second loop at the finish,
@@ -2603,15 +2615,12 @@ EXAMPLES
     RGT routes had 60 meters at the start and 140 meters at the end for
     riders to group. Biketerra does not use these buffer regions. So to get
     the same course distance in BikeTerra as was used in RGT, 60 meters from
-    the start and 140 meters from the end should be cropped. For example:
+    the start and 140 meters from the end should be cropped.
 
-    "processGPX -cropMin 60 -cropMax -140 RGTRoute.gpx -out
-    BikeTerraRoute.gpx"
+    This can be done explicity. But there is a short-cut provided here,
+    "-RGT2BT":
 
-    For circuits, you don't need to crop the end of the route, but the S/F
-    point should be shifted:
-
-    "processGPX -cropMin 60 RGTCircuit.gpx -out BikeTerraCircuit.gpx"
+    "processGPX -RGT2BT RGTRoute.gpx -out BikeTerraRoute.gpx"
 
 NAMED SEGMENTS
     The code has been enhanced to handle "named segments" as was interpreted

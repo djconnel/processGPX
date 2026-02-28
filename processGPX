@@ -56,8 +56,9 @@ use Pod::Usage;
 #               added -arcInterpolationMaxRatio, -splineMaxRatio, -splineInterpolation, and -arcInterpolation, updated parsing
 #               of BikeTerra routes due to API change, fixed selectiveSpacing bug, fixed antimeridian issue with smoothing, delete
 #               empty waypoint names.  Split heading and direction.  Documentation fixes.  Added elevation interpolation for missing data.
+# version 0.63: beginning minSeparation, added -RGT2BT.  Restored closed loop if shiftSF, fixed bug with negative crops on point-to-point
 
-my $version = "0.62"; # make sure this matches pod value
+my $version = "0.63"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -4665,6 +4666,18 @@ sub shiftCircuit {
   return \@pNew;
 }
 
+# calculate separation of nearest road section to left and right
+# use maximum value for efficiency
+# road must get further, then closer
+# break the route up into overlapping segments using distance max
+sub calcSeparation {
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $max = $var{max} // [];
+  my $start = $var{start};
+  my $end = $var{end};
+}
+
 #
 # simplify profile for placing gradient signs
 # makes sure max, min points are included, as well as first, last points
@@ -5014,10 +5027,8 @@ sub cropPoints {
   my $courseDistance = calcCourseDistance(points=>$points, isLoop=> $isLoop);
 
   # reference negative numbers to end of course
-  if ( $isLoop ) {
-    $cropMin -= $courseDistance * floor($cropMin / $courseDistance) if (defined $cropMin);
-    $cropMax -= $courseDistance * floor($cropMax / $courseDistance) if (defined $cropMax);
-  }
+  $cropMin -= $courseDistance * floor($cropMin / $courseDistance) if (defined $cropMin);
+  $cropMax -= $courseDistance * floor($cropMax / $courseDistance) if (defined $cropMax);
 
   # if cropMin and cropMax are reversed, treat them as a delete range
   if ((defined $cropMin) && (defined $cropMax) && ($cropMax < $cropMin)) {
@@ -5856,6 +5867,7 @@ my $rCrossings = 6;    # how much lenth to flatten crossings, each side
 my $repeat = 0;        # number of copies of the course to add to the course
 my $repeatedLaps = 0;  # number of total laps (equivalent to -repeat N-1)
 my $reverse = 0;       # whether to reverse the course
+my $RGT2BT = 0;        # apply course adjustments to convert RGT to BikeTerra
 my $rLap;              # if the route is turned into an out-and-back, the radius of the return loop
 my $rTurnaround;       # if the route is turned into an out-and-back, the radius of the outer loop
 my $rUTurn;            # if the route is turned into an out-and-back, the radius of the two loops
@@ -6077,6 +6089,7 @@ GetOptions (
 	    "repeatedLaps=i"  => \$repeatedLaps,
             "reverse!"      => \$reverse,
             "rLap=f"        => \$rLap,
+	    "RGT2BT|RGTtoBT|EGT2BikeTerra|RGTtoBikeTerra" => \$RGT2BT,
             "rTurnaround=f" => \$rTurnaround,
             "rUTurn=f"      => \$rUTurn,
             "saveCrossingsCSV!" => \$saveCrossingsCSV,
@@ -7059,6 +7072,21 @@ for my $file ( @files ) {
   # if shiftSF is specified but not loop, that's an error
   die("ERROR: -shiftSF is only compatible with the -lap (or -loop) option.\n")
     unless ( ($shiftSF == $shiftSFDefault) || $isLoop );
+
+  # process RGT2BT options
+  if ($RGT2BT) {
+    if ($isLoop) {
+      $shiftSF //= 0;
+      $shiftSF += 60;
+      note("RGT to BikeTerra: shiftSF = $shiftSF\n");
+    } else {
+      $cropMin //= 0;
+      $cropMin += 60;
+      $cropMax //= 0;
+      $cropMax -= 140;
+      note("RGT to BikeTerra: shiftSF = cropMin = $cropMin, cropMax = $cropMax\n");
+    }
+  }
 
   # look for zig-zags
   $points = fixZigZags(points=> $points, isLoop=> $isLoop);
@@ -8339,8 +8367,9 @@ for my $file ( @files ) {
     my $direction = ($shiftSF <=> 0);
 
     # trim off the last point if it equals the first point
+    my $pointRemoved = pointsAreClose($points->[-1], $points->[0]);
     pop @$points
-      if ( pointsAreClose($points->[-1], $points->[0]) );
+      if ( $pointRemoved );
 
     my $s = 0;
     while (1) {
@@ -8367,6 +8396,8 @@ for my $file ( @files ) {
         unshift @$points, pop @$points;
       }
     }
+
+    copyPoint($points) if ( $pointRemoved );
   }
 
   #
@@ -8838,7 +8869,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.62
+0.63
 
 =head1 DESCRIPTION
 
@@ -10267,6 +10298,18 @@ which goes from point A to point B, and I specify a turnaround with
 instead be from B to A and back.  If you want to reverse the final
 product, then do a second run with just the C<-reverse> option after an
 initial run on other options.
+
+=item B<C<-RGT2BT>>
+
+Convert RGT routes to BikeTerra by shifting the S/F line 60 meters in the case
+of a loop course, or in the case of a point to point, cropping 60 meters off
+the start and 140 meters off the finish.  These will be done in addition
+to any values specified with other options.
+
+The default is false.
+
+Alternate specifications of this option are C<-RGTtoBT>,
+C<-RGT2BikeTerra>, and C<-RGTtoBikeTerra>.
 
 =item B<C<-rLap>> <meters>
 
@@ -11748,14 +11791,11 @@ RGT routes had 60 meters at the start and 140 meters at the end for
 riders to group.  Biketerra does not use these buffer regions.  So to
 get the same course distance in BikeTerra as was used in RGT, 60
 meters from the start and 140 meters from the end should be cropped.
-For example:
 
-C<processGPX -cropMin 60 -cropMax -140 RGTRoute.gpx -out BikeTerraRoute.gpx>
+This can be done explicity. But there is a short-cut provided here,
+C<-RGT2BT>:
 
-For circuits, you don't need to crop the end of the route, but the S/F
-point should be shifted:
-
-C<processGPX -cropMin 60 RGTCircuit.gpx -out BikeTerraCircuit.gpx>
+C<processGPX -RGT2BT RGTRoute.gpx -out BikeTerraRoute.gpx>
 
 =head1 NAMED SEGMENTS
 
