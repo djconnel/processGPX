@@ -30,6 +30,7 @@
       <li><a href="#selective-smoothing">selective smoothing</a></li>
       <li><a href="#multi-step-processing">multi-step processing</a></li>
       <li><a href="#adjusting-gradient-for-bridges-or-tunnels">adjusting gradient for bridges or tunnels</a></li>
+      <li><a href="#shifting-a-route">shifting a route</a></li>
       <li><a href="#segment-generation">segment generation</a></li>
       <li><a href="#adding-time-to-an-activity">adding time to an activity</a></li>
       <li><a href="#adding-gradient-signs">adding gradient signs</a></li>
@@ -55,7 +56,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.63</p>
+<p>0.64</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -122,13 +123,15 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>Optionally a track number can be specified, if the default of using the first (or only) track isn&#39;t wanted. So <code>myFavoriteRoute.gpx:2</code> would use the second track in the file.</p>
 
-<p>For BikeTerra users, routes can be downloaded from BikeTerra directly and used as input. There&#39;s two sources. One is to use the GPX file which was sent to Biketerra. BikeTerra takes other data formats, like FIT, but this only works here with GPX files. This is specified with <code>BikeTerraGPX:</code> followed by the route number. So for example, <code>BikeTerraGPX:10605</code> would use the GPX file ssociated with BikeTerra route 10605. Again, the track number can be appended, so if <code>BikeTerraRoute:10605:1</code> specified the first track in the GPX file associated with route 10605.</p>
+<p><b><code>BikeTerraGPX</code></b>: For BikeTerra users, routes can be downloaded from BikeTerra directly and used as input. There&#39;s two sources. One is to use the GPX file which was sent to Biketerra. BikeTerra takes other data formats, like FIT, but this only works here with GPX files. This is specified with <code>BikeTerraGPX:</code> followed by the route number. So for example, <code>BikeTerraGPX:10605</code> would use the GPX file ssociated with BikeTerra route 10605. Again, the track number can be appended, so if <code>BikeTerraRoute:10605:1</code> specified the first track in the GPX file associated with route 10605.</p>
 
-<p>An alternate, perhaps better approach with BikeTerra routes is to download data associated associated with the edited route. BikeTerra simplifies route data on upload, and the points may be modified via the route editor. This option will include any such simplifications and edits. It is specified with <code>BikeTerraRoute:</code> followed by the route number. You can additionally specify a track number but there will only be one track (as of this writing: maybe that will change at some point).</p>
+<p><b><code>BikeTerraRoute</code></b>: An alternate approach with BikeTerra routes is to download data for a simplified version of the BikeTerra route after edits. This is not the version used in the game, but further simplified for drawing maps, etc. It&#39;s useful as an input to processGPX, but may lack sufficient detail. It is specified with <code>BikeTerraRoute:</code> followed by the route number. You can additionally specify a track number but there will only be one track (as of this writing: maybe that will change at some point).</p>
 
-<p>You can shortcut these as <code>BTGPX:</code> and <code>BTRoute:</code>, for example. Generally the &quot;Bike&quot; can be shortened to B, and/or the &quot;Terra&quot; to T. Case does not matter.</p>
+<p><b><code>BikeTerraJSON</code></b>: A third option is the prefix to use a JSON file accessable for BikeTerra routes, for example the following for route 1: <code>https://biketerra.com/ride/__data.json?route=1</code> This file will include the full resolution BikeTerra route used in the game. This is not officially supported so may fail at some future point. It requires authentication with a BikeTerra account so you&#39;ll need to save it to a file then specify the filename with a <code>BikeTerraJSON:</code> prefix.</p>
 
-<p>Another option is to omit a filename, or to specify an empty dash <code>-</code>. This indicates that the standard input is to be used, for example with a pipe. As with filenames, a track number can be appended to the dash, for example <code>-:2</code> would pick the second track from the GPX provided as standard input.</p>
+<p>You can shortcut these as <code>BTGPX:</code> and <code>BTRoute:</code> and <code>BTJSON</code>, for example. Generally the &quot;Bike&quot; can be shortened to B, and/or the &quot;Terra&quot; to T. Case does not matter.</p>
+
+<p>Another option is to omit a filename, or to specify an empty dash <code>-</code>. This indicates that the standard input is to be used, for example with a pipe. As with filenames, a track number can be appended to the dash, for example <code>-:2</code> would pick the second track from the GPX provided as standard input. This is assumed to be a GPX file (not a BikeTerra JSON file).</p>
 
 <h1 id="OPTIONS">OPTIONS</h1>
 
@@ -142,7 +145,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <dl>
 
-<dt id="flags:-specifying-the-option-by-itself-invokes-the-option.-For-example--splineInterpolation-specifies-that-spline-fitting-is-enabled.-Flag-options-can-be-negated-with-the-same-option-but-with-no-preceding-for-example--nosplineInterpolation-disables-spline-fitting"><b>flags</b>: specifying the option by itself invokes the option. For example, <code>-splineInterpolation</code> specifies that spline fitting is enabled. Flag options can be negated with the same option but with &quot;no&quot; preceding, for example, <code>-nosplineInterpolation</code> disables spline fitting.</dt>
+<dt id="flags:-specifying-the-option-by-itself-invokes-the-option.-For-example--splineInterpolation-specifies-that-spline-fitting-is-enabled.-Flag-options-can-be-negated-with-the-same-option-but-with-no-preceding-for-example--nosplineInterpolation-disables-spline-fitting.-Flags-have-3-states:-true-false-and-undefined.-If-undefined-they-will-be-assigned-a-default-by-the-program.-If-set-true-or-false-that-value-will-be-used"><b>flags</b>: specifying the option by itself invokes the option. For example, <code>-splineInterpolation</code> specifies that spline fitting is enabled. Flag options can be negated with the same option but with &quot;no&quot; preceding, for example, <code>-nosplineInterpolation</code> disables spline fitting. Flags have 3 states: true, false, and undefined. If undefined they will be assigned a default by the program. If set true or false, that value will be used.</dt>
 <dd>
 
 </dd>
@@ -203,7 +206,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>This option places waypoints at positions of relatively high curvature, marking them as corners. They can be viewed, for example. in <i>GPXStudio</i>. The future intent is for them to be useful in a game such as BikeTerra for generating roadside signs.</p>
 
-<p>It is likely this option will need to be tuned with <code>-curvatureThreshold</code>, and possibly <code>-curvatureSmoothing</code>, depending on the route.</p>
+<p>It is likely this option will need to be tuned with <code>-cornerThreshold</code>, and possibly <code>-cornerSmoothing</code>, depending on the route.</p>
 
 </dd>
 <dt id="addGradient"><b><code>-addGradient</code></b></dt>
@@ -323,7 +326,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="arcInterpolationMaxDegs-degrees"><b><code>-arcInterpolationMaxDegs</code></b> &lt;degrees&gt;</dt>
 <dd>
 
-<p>If a <code>-arcInterpolationDegs</code> option is specified, specifying this limit the maximum angle corner for which arc fit interpolation will be applied. Arc interpolation is good for gradual, rounded corners but is not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Arc interpolation has the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using arc fit interpolation: strange results can occur if the corner is too sharp.</p>
+<p>If a <code>-arcInterpolationDegs</code> option is specified, specifying this limit the maximum angle corner for which arc fit interpolation will be applied. Arc interpolation is good for gradual, rounded corners but is not good for sharp corners, so an upper bound in the 60 degree range (which is the default) works generally well. Arc interpolation has the advantage of rounding corners without &quot;blunting&quot; them, but sometimes they create &quot;S&quot; shapes where they are not wanted. Make sure to check the results if using arc fit interpolation: strange results can occur if the corner is too sharp and not using <code>-cornerCrop</code>.</p>
 
 <p>Arc interpolation is a variation on spline interpolation where corners are fit to circles rather than splines. If this option is set too large then there&#39;s a risk of getting dramatically incorrect trajectories for sharp corners. See also the notes in <code>-arcInterpolationDegs</code>.</p>
 
@@ -458,6 +461,8 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If you specify an output file and do not specify a specific split number with the <code>-splitNumber</code> option, then the output files will have a suffix of _split followed by a split number (1, 2, 3 ...).</p>
 
 <p>If you want to base splits on modeled ride time instead of distance, use <code>-timeSplits</code>.</p>
+
+<p>An alternate specification is <code>-distanceSplits</code>.</p>
 
 </dd>
 <dt id="autoStraighten-max-deviation-min-length"><b><code>-autoStraighten</code></b> &lt;max deviation&gt; &lt;min length&gt;</dt>
@@ -602,6 +607,18 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This is not used in altitude or position smoothing.</p>
 
 </dd>
+<dt id="cornerSmoothing"><b><code>-cornerSmoothing</code></b></dt>
+<dd>
+
+<p>This controls how much curvature is smoothed before being applied to corner identification. The default is 10 meters. Increasing the number puts the emphasis on identifying larger-angle corners, and filtering out S-curves, for example.</p>
+
+</dd>
+<dt id="cornerThreshold"><b><code>-cornerThreshold</code></b></dt>
+<dd>
+
+<p>This is the threshold of smoothed corners for the marking of corners, for example via the <code>-addCornerWaypoints</code> option. Units are inverse meters. The reciprical of this number is the maximum effective centerline turning radius of the corners to be marked. The default is 0.05, avoiding gradual corners. Note if <code>-minRadius</code> or <code>-smooth</code> are set too high, no corners will be identified unless this value is decreased.</p>
+
+</dd>
 <dt id="crop-meters"><b><code>-crop</code></b> &lt;meters&gt;</dt>
 <dd>
 
@@ -673,13 +690,9 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="curvatureSmoothing"><b><code>-curvatureSmoothing</code></b></dt>
 <dd>
 
-<p>This controls how much curvature is smoothed before being applied to corner identification. The default is 10 meters. Increasing the number puts the emphasis on identifying larger-angle corners, and filtering out S-curves, for example.</p>
+<p>Curvature is calculated for each point by calculating the angle change at the center point, divided by half the length of the path from the previous to the next point, ignoring interpolated points. If the spacing of points is close, this can cause an overestimation of effective cornering curvature (an underestimation of the cornering radius). In these cases, it may be helpful to smooth out the curvature with a Gaussian with sigma specified by this option. A good value is <code>-curvatureSmoothing 4</code>.</p>
 
-</dd>
-<dt id="curvatureThreshold"><b><code>-curvatureThreshold</code></b></dt>
-<dd>
-
-<p>This is the threshold of smoothed corners for the marking of corners, for example via the <code>-addCornerWaypoints</code> option. Units are inverse meters. The reciprical of this number is the maximum effective centerline turning radius of the corners to be marked. The default is 0.05, avoiding gradual corners. Note if <code>-minRadius</code> or <code>-smooth</code> are set too high, no corners will be identified unless this value is decreased.</p>
+<p>The downside is the <code>-minRadius</code> option may need to be boosted to deal with curves which are sharply pointed at their apex. So for example, instead of <code>-minRadius 6</code>, you might specify <code>-curvatureSmoothing 4 -minRadius 8</code>.</p>
 
 </dd>
 <dt id="deleteRange-meters-meters"><b><code>-deleteRange</code></b> &lt;meters&gt; &lt;meters&gt; ...&gt;</dt>
@@ -702,6 +715,12 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>List a description for the GPX metadata. Since the description will likely contain spaces, remember to enclose the string in &quot;quotes&quot;, or however else your command-line shell delimits spaces.</p>
+
+</dd>
+<dt id="distanceSplits-number"><b><code>-distanceSplits</code></b> &lt;number&gt;</dt>
+<dd>
+
+<p>Alias for <code>-autoSplits</code>.</p>
 
 </dd>
 <dt id="extend-meters"><b><code>-extend</code></b> &lt;meters&gt;</dt>
@@ -926,6 +945,18 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Synonym for <code>-loop</code></p>
 
 </dd>
+<dt id="lat"><b><code>-lat</code></b></dt>
+<dd>
+
+<p>Alias for <code>-newLat</code></p>
+
+</dd>
+<dt id="lon"><b><code>-lon</code></b></dt>
+<dd>
+
+<p>Alias for <code>-newLon</code></p>
+
+</dd>
 <dt id="loop"><b><code>-loop</code></b></dt>
 <dd>
 
@@ -996,6 +1027,30 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>Specify the name of the GPX route. The default is the name listed in the source GPX. This is synonymous with <code>-title</code>.</p>
+
+</dd>
+<dt id="newEle"><b><code>-newEle</code></b></dt>
+<dd>
+
+<p>alias for <code>-newZ</code>.</p>
+
+</dd>
+<dt id="newLat"><b><code>-newLat</code></b></dt>
+<dd>
+
+<p>Specify a new latitude for the first point fo the course.</p>
+
+</dd>
+<dt id="newLon"><b><code>-newLon</code></b></dt>
+<dd>
+
+<p>Specify a new longitude for the first point fo the course.</p>
+
+</dd>
+<dt id="newZ"><b><code>-newZ</code></b></dt>
+<dd>
+
+<p>Specify a new altitude for the first point. The altitudes of all additional points are adjusted to maintain the same shape of the route profile.</p>
 
 </dd>
 <dt id="noSave"><b><code>-noSave</code></b></dt>
@@ -1338,6 +1393,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This is an alias for <code>-zShiftEnd</code>.</p>
 
 </dd>
+<dt id="shiftZTransition-meters"><b><code>-shiftZTransition</code> &lt;meters</b></dt>
+<dd>
+
+<p>This is an alias for <code>-zShiftTransition</code>.</p>
+
+</dd>
 <dt id="sigma-meters"><b><code>-sigma</code></b> &lt;meters&gt;</dt>
 <dd>
 
@@ -1378,6 +1439,18 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>Synopnym for <b><code>-simplifyD</code></b></p>
+
+</dd>
+<dt id="simplifyMinD-meters"><b><code>-simplifyMinD</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is if you want to use a modification to the simplification algorithm where the maximum deviation allowed as a value for segments in the zero-length limit of this value. It should be less than <code>-simplifyD</code> or else it is ignored. It is combined with the <code>-simplifyLambda</code> parameter.</p>
+
+</dd>
+<dt id="simplifyMinD-meters1"><b><code>-simplifyMinD</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is if you want to use a modification to the simplification algorithm where the maximum deviation allowed as a value for segments in the zero-length limit of the value specified with <code>-simplifyMinD</code>. The transition from short-spacing to long-spacing is an exponential with this scale langth. The default is 50 meters. If it is non-positive then only <code>-simplifyD</code> is used. The <code>-simplifyMinD</code> parameter must also be specified as a positive value less than <code>-simplifyD</code>.</p>
 
 </dd>
 <dt id="simplifyPoints"><b><code>-simplifyPoints</code></b></dt>
@@ -1735,13 +1808,27 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="zShiftEnd-meters"><b><code>-zShiftEnd</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Distance on the route to end altitude shift. There will be a transition outside of this range. This is also used for <code>-zScale</code> and <code>-zOffset</code> (it affects each).</p>
+<p>Distance on the route to end altitude shift. There will be a transition at the endpoint. This is also used for <code>-zScale</code> and <code>-zOffset</code> (it affects each).</p>
+
+<p>This step is done early, before main processing. So the transition between shifted and unshifted may not be well resolved if the point density is sparce on the input file.</p>
+
+<p>If you do not specify <code>-zShiftStart</code>, it will begin shifting at the start of the course. If this is a loop course this may not be what you want, as it may create an altitude step at the S/F.</p>
 
 </dd>
 <dt id="zShiftStart-meters"><b><code>-zShiftStart</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>Distance on the route to start altitude shift. There will be a transition outside of this range. This is also used for <code>-zScale</code> and <code>-zOffset</code> (it affects each).</p>
+<p>Distance on the route to start altitude shift. There will be a transition near the startpoint. This is also used for <code>-zScale</code> and <code>-zOffset</code> (it affects each).</p>
+
+<p>This step is done early, before main processing. So the transition between shifted and unshifted may not be well resolved if the point density is sparce on the input file.</p>
+
+<p>If you do not specify <code>-zShiftEnd</code>, it will extend to the end of the course. If this is a loop course this may not be what you want, as it may create an altitude step at the S/F.</p>
+
+</dd>
+<dt id="zShiftTransition-meters"><b><code>-zShiftTransition</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>If you specify <code>-zShiftStart</code> and/or <code>-zShiftEnd</code>, then a transition will be applied at the boundaries. By default a reasonable transition length is calculated to avoid excessive gradient perturbations. However, you can specify an alternate positive value to use instead of the default. If the value is non-positive, the default will be used.</p>
 
 </dd>
 <dt id="zSmooth"><b><code>-zSmooth</code></b></dt>
@@ -1766,7 +1853,15 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p><code>processGPX -auto GPXData.gpx</code></p>
 
-<p>This will create an output file &quot;GPXData_processed.gpx&quot; with various options automatically chosen.</p>
+<p>This will create an output file &quot;<code>GPXData_processed.gpx</code>&quot; with various options automatically chosen.</p>
+
+<p>If you want to add or subtract options from <code>-auto</code>, you can provide them in the command line. For example, if I want to run <code>-auto</code> but not <code>-simplineInterpolation</code>, I can do :</p>
+
+<p><code>processGPX -auto -nosplineInterpolation GPXData.gpx</code></p>
+
+<p>Similarly I might want to change a parameter used in <code>-auto</code>. For example, the following specifies the use of the &quot;gradient smoothing&quot; algorithm rather than &quot;altitude smoothing&quot; for additional profile smoothing.</p>
+
+<p><code>processGPX -auto -smoothZ 0 -smoothG 15 GPXData.gpx</code></p>
 
 <h2 id="criterium-course">criterium course</h2>
 
@@ -1786,7 +1881,7 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This should make the corners more uniform radius, a general good practice, especially on criterium-type courses.</p>
 
 </dd>
-<dt id="laneshift--3"><b><code>-laneshift -3</code></b></dt>
+<dt id="laneShift--3"><b><code>-laneShift -3</code></b></dt>
 <dd>
 
 <p>Riders remain to the left left on the out-and-back portion, so each direction is shifted 4 meters to the left. The negative number implies left, a positive number implies right.</p>
@@ -1795,9 +1890,9 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="shiftStart-740--shiftEnd-1390"><b><code>-shiftStart 740 -shiftEnd 1390</code></b></dt>
 <dd>
 
-<p>The lane shift is applied starting at 740 meters and ending at 1390 meters, with a transition calculated from the lane shift. This is applied after all smoothing, but before the lane shifting, and importantly, before the route start shift. Note there is a default &quot;<code>-shiftSF -60</code>&quot; applied at the end of the process, so if you want to determine the distance to apply the lane shift, then make sure to either do a run first with &quot;<code>-shiftSF 0 -laneShift 0</code>&quot;, or subtract 100 meters from the distance coordinates to judge what the distance would have been at the time the lane shift is applied.</p>
+<p>The lane shift is applied starting at 740 meters and ending at 1390 meters, with a transition calculated from the lane shift. This is applied after all smoothing, but before the lane shifting, and importantly, before the route start shift.</p>
 
-<p>It&#39;s important to check to make sure at the edge of the lane shift region the two directions don&#39;t get too close, due to the transition. If they do, then extend the lane shift region somewhat to make room for the transition. Also check the lane shift hasn&#39;t caused any corners to fold into points, or invert. If this happens, apply more smoothing to round the corners more before applying the lane shift. Unfortunately there is no support yet for position-dependent smoothing, which would help.</p>
+<p>It&#39;s important to check to make sure at the edge of the lane shift region the two directions don&#39;t get too close, due to the transition. If they do, then extend the lane shift region somewhat to make room for the transition. Also check the lane shift hasn&#39;t caused any corners to fold into points, or invert. If this happens, apply more smoothing to round the corners more before applying the lane shift.</p>
 
 </dd>
 <dt id="spacing-3"><b><code>-spacing 3</code></b></dt>
@@ -1821,7 +1916,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="minRadius-6"><b><code>-minRadius 6</code></b></dt>
 <dd>
 
-<p>Make sure the corner isn&#39;t too sharp for BikeTerra.</p>
+<p>Make sure the corner isn&#39;t too sharp for BikeTerra. You can maybe reduce this down to 5, but lower and corners will get irregular.</p>
 
 </dd>
 <dt id="prune1"><b><code>-prune</code></b></dt>
@@ -1839,7 +1934,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="snapDistance-2--snap-1"><b><code>-snapDistance 2 -snap 1</code></b></dt>
 <dd>
 
-<p>Snap the return leg in the out-and-back to match the outgoing leg when the two are within 2 meters. The &quot;1&quot; refers to replacing later occurances of road with preceding cases: &quot;2&quot; would replace the earlier occurance. 2 meters is presently the default snap distance. With Strava Route Editor data, 1 meter can result in a fragmented replacement, and bad results. When a road has curves, a larger snapDistance than the default may be necessary. Too large a value may cause merging roads to suddenly &quot;snap&quot; together from too far a range, however, or even adjacent roads or lanes to merge. For reference, in RGT Cycling, road width is 8 meters.</p>
+<p>Snap the return leg in the out-and-back to match the outgoing leg when the two are within 2 meters. The &quot;1&quot; refers to replacing later occurances of road with preceding cases: &quot;2&quot; would replace the earlier occurance. 2 meters is presently the default snap distance. With Strava Route Editor data, 1 meter can result in a fragmented replacement, and bad results. When a road has curves, a larger snapDistance than the default may be necessary. Too large a value may cause merging roads to suddenly &quot;snap&quot; together from too far a range, however, or even adjacent roads or lanes to merge. For reference, in Training Peaks Virtual road width is 8 meters, while in Biketerra it is 6 meters.</p>
 
 </dd>
 <dt id="closeLoop1"><b><code>-closeLoop</code></b></dt>
@@ -1870,7 +1965,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>This example uses the -outAndBackLap shortcut to create an out-and-back circuit with loops at both ends to create a circuit.</p>
 
-<p>Point-to-point routes on BikeTerra have automatically generated turnarounds at the end so this is nor normally needed there, unless for example you prefer having larger-radius turnarounds.</p>
+<p>Point-to-point routes on BikeTerra have automatically generated turnarounds at the end so this is nor normally needed there, unless for example you prefer having larger-radius turnarounds, or if you want to use a new full-road-width option in events.</p>
 
 <p><code>processGPX -outAndBackLap outSection.gpx -out outAndBackCircuit.gpx</code></p>
 
@@ -1897,7 +1992,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="fitArcs2"><b><code>-fitArcs</code></b></dt>
 <dd>
 
-<p>This should make the corners more uniform radius, a general good practice, especially on criterium-type courses.</p>
+<p>This should make the corners more uniform radius, a general good practice.</p>
 
 </dd>
 <dt id="crop-38730"><b><code>-crop 38730</code></b></dt>
@@ -1918,7 +2013,7 @@ Pod::Usage   : for the -help option</code></pre>
 <p>A point spacing of 10 meters is initially established. This is more than what was used in the criterium course example, since for a longer course, smaller spacing results in more points.</p>
 
 </dd>
-<dt id="autospacing"><b><code>-autospacing</code></b></dt>
+<dt id="autoSpacing2"><b><code>-autoSpacing</code></b></dt>
 <dd>
 
 <p>Automatically put extra points near corners before smoothing. This is a good option to assure smooth corners.</p>
@@ -1927,7 +2022,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="smoothAngle-10"><b><code>-smoothAngle 10</code></b></dt>
 <dd>
 
-<p>Target the angle between segments at the apex of corners to be no more than 20 degrees. This seems to work fairly well. You can compare to 10 degrees. Most of the corner will end up with smaller angles than this, as will corners which are less than 90 degrees.</p>
+<p>Target the angle between segments at the apex of corners to be no more than 10 degrees. The default of 15 is typically fine; this is here just as an example.</p>
 
 </dd>
 <dt id="prune2"><b><code>-prune</code></b></dt>
@@ -1957,13 +2052,13 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="autoSegments-10-0.5"><b><code>-autoSegments 10 0.5</code></b></dt>
 <dd>
 
-<p>This specifies that segments should be generated for hills found in the route. The first number is the approximate altitude gained in meters needed for a hill to be marked as a segment. THe second is how strongly average gradient should be used in segment placement: a higher number places a higher value on segments having a higher average gradient.</p>
+<p>This specifies that segments should be generated for hills found in the route. The first number is the approximate altitude gained in meters needed for a hill to be marked as a segment. The second is how strongly average gradient should be used in segment placement: a higher number places a higher value on segments having a higher average gradient.</p>
 
 </dd>
 <dt id="cornerCrop-61"><b><code>-cornerCrop 6</code></b></dt>
 <dd>
 
-<p>It is generally good practice to set <code>-cornerCrop</code> to match <code>-minRadius</code>, to replace sharp corners with circular arcs before further processing.</p>
+<p>It is generally good practice to set <code>-cornerCrop</code> to match <code>-minRadius</code>, to replace sharp corners with circular arcs before further processing. Sometimes increasing this further can help create better corners.</p>
 
 </dd>
 <dt id="minRadius-61"><b><code>-minRadius 6</code></b></dt>
@@ -2027,7 +2122,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="selectiveSmooth-15-270-5-1540-15"><b><code>-selectiveSmooth 15 270 5 1540 15</code></b></dt>
 <dd>
 
-<p>This says to smooth with a smoothing length up to 270 meter distance, then 5 meters from there up to 1540 meter distance, and from there 15 meters again to the end of the lap.</p>
+<p>This says to smooth with a smoothing length of 15 minutes up to 270 meter distance, then 5 meters from there up to 1540 meter distance, and from there 15 meters again to the end of the lap.</p>
 
 </dd>
 </dl>
@@ -2038,7 +2133,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>For this I used -smoothStart and -smoothEnd, to isolate the oval, but then to get smoothing on the rest of the loop as well, I needed to run the code twice:</p>
 
-<p><code>processGPX -fitArcs -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -closeLoop -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -minRadius 6 -out processed.gpx</code></p>
+<p><code>processGPX -fitArcs -arcInterpolation -shiftSF 0 -lap -spacing 3 -zsmooth 10 -smooth 5 original.gpx -out - | processGPX - -closeLoop -smooth 15 -prune -smoothStart 1540 -smoothEnd 270 -minRadius 6 -out processed.gpx</code></p>
 
 <p>This uses a shell &quot;pipe&quot;, which is a way to run the program twice on the same data without saving to an intermediate file. although the intermediate file would be useful for debugging.</p>
 
@@ -2048,6 +2143,12 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>This should make the corners more uniform radius, a general good practice, especially on criterium-type courses. This is done on the first step, since it avoids issues with interpolating corners using line segments.</p>
+
+</dd>
+<dt id="arcInterpolation1"><b><code>-arcInterpolation</code></b></dt>
+<dd>
+
+<p>This is similar in some ways to <code>-fitArcs</code>, but is designed for corners which are not uniform radius. It&#39;s another method to create smoother curves.</p>
 
 </dd>
 <dt id="shiftSF-0"><b><code>-shiftSF 0</code></b></dt>
@@ -2074,7 +2175,7 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This is a fairly small amount of smoothing, for urban corners with some rounding, or where the actual road is wider than the Magic Roads 8 meter road width, and wider lines are available.</p>
 
 </dd>
-<dt id="original.gpx1"><b>original.gpx</b></dt>
+<dt id="original.gpx1"><b><code>original.gpx</code></b></dt>
 <dd>
 
 <p>This is the name of the original GPX file</p>
@@ -2162,6 +2263,24 @@ Pod::Usage   : for the -help option</code></pre>
 </dd>
 </dl>
 
+<h2 id="shifting-a-route">shifting a route</h2>
+
+<p>With fantasy routes, for example, sometimes you want to shift the route to a different position. You have two options here: relative shifts, and absolute shifts.</p>
+
+<p>Relative shifts move the coordinates of points a fixed distance in meters from the start. An example is the following:</p>
+
+<p><code>processGPX -shiftX 100 -shiftY -50 -shiftZ 10 original.gpx -out shifted.gpx</code></p>
+
+<p>This creates a new route with coordinates shifted 100 meters to the east, 50 meters to the south, and 10 meters in elevation.</p>
+
+<p>For absolute shifts, you specify the coordinates of the starting point, and remaining points are shifted to maintain approximately the same route (of course, the fact the Earth is a sphere may create some distortions, in particular near the poles).</p>
+
+<p><code>processGPX -newLat 40.79 -newLon -113.5 -newZ 1590 original.gpx -out shifted.gpx</code></p>
+
+<p>This specifies that the first point of the route should be shifted to the specified latitude, longtitude, and elevation.</p>
+
+<p>The two options can be combined. If both absolute and relative shifts are provided, the absolute shift is done first, then the relative shift.</p>
+
 <h2 id="segment-generation">segment generation</h2>
 
 <p><code>processGPX -stripSegments -autoSegments 100 0.5 -segments 1500,2000,&quot;bonus segment&quot; input.gpx -out output.gpx</code></p>
@@ -2177,7 +2296,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="autoSegments-20-0.5"><b><code>-autoSegments 20 0.5</code></b></dt>
 <dd>
 
-<p>This tells the code that automatic segments should be generated for climbs gaining at least 20 meters if they average 10% gradient. Shallower climbs need to gain more, steeper climbs don&#39;t need to gain as much. The power assigned to gradient is 0.5, so for example if the gradient is 5% instead of 10%, then since the square root of 5/10 = 0.71, this climb would need to gain at least 28.2 meters instead of 20 meters to be considered as a timed segment.</p>
+<p>This tells the code that automatic segments should be generated for climbs gaining at least 20 meters if they average 10% gradient. Shallower climbs need to gain more, steeper climbs don&#39;t need to gain as much. The power assigned to gradient is 0.5, so for example if the gradient is 5% instead of 10%, then since the square root of 5/10 = 0.71, this climb would need to gain at least 28.2 meters instead of 20 meters to be used as a segment.</p>
 
 </dd>
 <dt id="segments-1500-2000-bonus-segment"><b><code>-segments 1500,2000,&quot;bonus segment&quot;</code></b></dt>
@@ -2188,9 +2307,9 @@ Pod::Usage   : for the -help option</code></pre>
 </dd>
 </dl>
 
-<p><code>processGPX -stripSegments -autoSegmentMargin 1000-autoSegmentStretch 1 -autoSegments 5 1 input.gpx -out output.gpx</code></p>
+<p><code>processGPX -stripSegments -autoSegmentMargin 1000 -autoSegmentStretch 1 -autoSegments 5 1 input.gpx -out output.gpx</code></p>
 
-<p>This example uses a gradient power of 1, placing a large emphasis on local gradient, but then increases the auto-segment stretch factor from its default to 1. This might be useful if I had a long climb with intermediate descents along the way, and I wanted separate climb segments for each climbing portion rather than the net climb, but I wanted the endpoints of these segments to be on flat road if that was at all possible within the constraints of he margin, which is set to 400 meters.</p>
+<p>This example uses a gradient power of 1, placing a large emphasis on local gradient, but then increases the auto-segment stretch factor from its default to 1. This might be useful if I had a long climb with intermediate descents along the way, and I wanted separate climb segments for each climbing portion rather than the net climb, but I wanted the endpoints of these segments to be on flat road if that was at all possible within the constraints of he margin.</p>
 
 <dl>
 
@@ -2233,8 +2352,6 @@ Pod::Usage   : for the -help option</code></pre>
 </dl>
 
 <h2 id="adding-gradient-signs">adding gradient signs</h2>
-
-<p>This is an <i>experimental</i> feature since RGT, the game which is the primary target of this code, does not at present include waypoint support.</p>
 
 <p>The following shows a partial command line, so added to other elements of a command line:</p>
 
@@ -2290,6 +2407,8 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p><code>processGPX BikeTerraRoute:12426 -out route.gpx</code></p>
 
+<p>This approach uses a &lt;i&gt;simplified&lt;/i&gt; form of the Biketerra route, not the full resolution version, which would require authentication to access.</p>
+
 <h2 id="specifying-metadata">specifying metadata</h2>
 
 <p>GPX files have &quot;metadata&quot; which is various tags. You can change values of metadata with various options. This is an example:</p>
@@ -2308,7 +2427,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <h1 id="NAMED-SEGMENTS">NAMED SEGMENTS</h1>
 
-<p>The code has been enhanced to handle &quot;named segments&quot; as was interpreted by RGT. Segments are defined in the GPX standard such that a &quot;track&quot; consists of a series of &quot;segments&quot;, and a &quot;segment&quot; consists of a series of &quot;trackpoints&quot;. In RGT, segments are assumed to be contiguous, such that a route is defined as the first segment, connected to the second segment, connected to the third segment, etc.</p>
+<p>This code handles &quot;named segments&quot; as was interpreted by RGT. Segments are defined in the GPX standard such that a &quot;track&quot; consists of a series of &quot;segments&quot;, and a &quot;segment&quot; consists of a series of &quot;trackpoints&quot;. In RGT, segments were assumed to be contiguous, such that a route is defined as the first segment, connected to the second segment, connected to the third segment, etc.</p>
 
 <p>RGT no longer exists, but this code is retained since there is a chance another game will implement similar functionality. If the details differ, then this code will be updated to accomodate that. If anyone knows of any other games which support a similar function, let me know.</p>
 
@@ -2352,7 +2471,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <h1 id="AUTHORS">AUTHORS</h1>
 
-<p>Daniel Connelly &lt;<i>djconnel@gmail.com</i>&gt;</p>
+<p>&lt;Daniel Connelly &lt;<i>djconnel@gmail.com</i>&gt;</p>
 
 <h1 id="LICENSE">LICENSE</h1>
 
