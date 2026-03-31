@@ -294,8 +294,10 @@ sub loadBTRoute {
 #
 sub loadBTJSON {
   my $BTJSON = shift;
-  use File::Slurp;
-  my $s = read_file($BTJSON);
+
+  $/ = undef;
+  open my $fp, "<$BTJSON" or die("ERROR opening file $BTJSON\n");
+  my $s = <$fp>;
 
   # Parse JSON data
   my $json = JSON::PP->new();
@@ -9498,6 +9500,9 @@ For processing BikeTerra routes or GPX files directly you need:
 and for BikeTerra route data (as opposed to GPX files) you need:
 
  JSON         : used for parsing JSON-formatted files.
+
+for processing BikeTerra JSON files, it uses:
+ File::Slurp  : used for reading the file
 
 =head1 SPECIFYING INPUT SOURCES
 
