@@ -6769,6 +6769,7 @@ my $gAutoSmooth = 0;   # auto-smoothing based on gradient
 my $gradientPower = 2; # power to raise gradient in evaluating segments for gradient signs
 my $gradientThreshold = 100; # minimum climb @ 10% grade to get a gradient sign
 my $gSmooth = 0;          # smoothing applied additionally to gradient
+my $interpolateZ;      # whether interpolated points get linear elevations (default: only if no -dem)
 my $isLoop;            # whether to apply periodic boundary conditions (smooth around the Loop)
 my $lAutoSmooth = 0;   # auto-smoothing based on position
 my $lSmooth;           # general smoothing, applies to positions and all other fields
@@ -6993,6 +6994,7 @@ GetOptions (
             "join=s{1,100}" => \@join,
             "keywords=s"    => \$newKeywords,
             "interpolate=f" => \$spacing,
+            "interpolateZ!" => \$interpolateZ,
             "laneShift=f"   => \$laneShift,
             "laneShiftEnd=f"    => \$shiftEnd,
             "laneShiftSF=f"     => \$shiftSF,
@@ -7180,6 +7182,11 @@ if (defined $dem) {
       unless ((defined $demKey) && length($demKey));
   }
 }
+# by default, points created by interpolation get their elevations from the
+# DEM if one is specified, and by linear interpolation otherwise
+$interpolateZ //= ! (defined $dem);
+die("ERROR: -nointerpolateZ requires a DEM source, for example \"-dem gpxz\"\n")
+  if ((! $interpolateZ) && (! (defined $dem)));
 
 # short-cut for out-and-back
 if ( $outAndBack || $outAndBackLap ) {
@@ -8330,11 +8337,13 @@ sub demElevation {
 #
 # set point elevations from the DEM.
 # points the DEM has no data for get their elevation removed, to be
-# filled in later by fixMissingElevation
+# filled in later by fixMissingElevation, unless keepMissing is set,
+# in which case they keep their existing elevation
 #
 sub applyDEMElevations {
   my %var = @_;
   my $points = $var{points} // [];
+  my $keepMissing = $var{keepMissing} // 0;
   return unless (@$points);
   note("DEM: setting elevations of " . scalar(@$points) . " points from $dem...\n");
   my $missing = 0;
@@ -8344,10 +8353,11 @@ sub applyDEMElevations {
       $p->{ele} = $z;
     } else {
       $missing++;
-      delete $p->{ele};
+      delete $p->{ele} unless ($keepMissing);
     }
   }
-  warn("WARNING: DEM has no data for $missing points: their elevations will be interpolated\n")
+  warn("WARNING: DEM has no data for $missing points: their elevations will be " .
+       ($keepMissing ? "kept" : "interpolated") . "\n")
     if ($missing > 0);
 }
 
@@ -8938,6 +8948,12 @@ for my $file ( @files ) {
     processCircle(points=> $points, circle=> \@circle, circleStart=> \@circleStart, circleEnd=> \@circleEnd, isLoop=> $isLoop);
   }
 
+  # note which points exist before spacing interpolation, so DEM
+  # elevations are applied only to newly created points
+  my %preSpacingPoint;
+  %preSpacingPoint = map { ($_, 1) } @$points
+    unless ($interpolateZ);
+
   # automatic interpolation at corners
   if ( $autoSpacing && (($lSmooth > 0) || ($minRadius > 0)) ) {
     $points =
@@ -8976,6 +8992,15 @@ for my $file ( @files ) {
     }
   }
 
+  # unless -interpolateZ, points created by spacing interpolation get their
+  # elevations from the DEM.  This happens before snapping and smoothing;
+  # the DEM is never queried during later route manipulation
+  unless ($interpolateZ) {
+    my @newPoints = grep { ! $preSpacingPoint{$_} } @$points;
+    note("DEM: " . scalar(@newPoints) . " points added by spacing interpolation\n");
+    applyDEMElevations(points=> \@newPoints, keepMissing=> 1)
+      if (@newPoints);
+  }
 
   # check for snapping
   # this is done after point interpolation as well as before
@@ -11023,7 +11048,9 @@ C<terrarium> is the free AWS terrain tiles dataset
 but the underlying source data is generally coarser (typically 10 to 30
 meters), and ocean areas return bathymetry (negative elevations).
 
-See also C<-demResolution>, C<-demCache>, and C<-demCacheDir>.
+By default, points created later by interpolation also get their
+elevations from the DEM: see C<-interpolateZ>.  See also
+C<-demResolution>, C<-demCache>, and C<-demCacheDir>.
 
 =item B<C<-demCache>>
 
@@ -11290,6 +11317,24 @@ steep climbs need to be depends on C<-gradientPower>.
 =item B<C<-interpolate>> <meters>
 
 Synonym for C<-spacing>
+
+=item B<C<-interpolateZ>>
+
+Whether points newly created by point interpolation (C<-spacing>,
+C<-autoSpacing>, or C<-selectiveSpacing>) get their elevations
+interpolated linearly between the neighboring points.  If unset, this
+defaults to the inverse of C<-dem>: with a DEM specified, new points
+instead get elevations sampled from the DEM at their location, adding
+real terrain detail between the original track points ahead of the
+usual altitude smoothing.  The DEM is consulted only at this stage:
+later route manipulation, such as smoothing or spline fitting, does not
+query the DEM.  Points for which the DEM has no data keep their
+linearly interpolated elevations.  Since route geometry created before
+spacing interpolation (for example start or finish circuits, or
+turn-around loops) can deviate from real roads, C<-interpolateZ> may be
+preferable for routes that do not follow actual roads.  C<-interpolateZ>
+forces linear interpolation even with C<-dem>; C<-nointerpolateZ>
+without C<-dem> is an error.
 
 =item B<C<-join>> <filenames>
 
