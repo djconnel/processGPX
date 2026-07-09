@@ -7162,8 +7162,8 @@ if ($loopLeft && $loopRight) {
 # check DEM options
 if (defined $dem) {
   $dem = lc $dem;
-  die("ERROR: unknown DEM source \"$dem\": supported sources: gpxz\n")
-    unless ($dem eq "gpxz");
+  die("ERROR: unknown DEM source \"$dem\": supported sources: gpxz, terrarium\n")
+    unless (($dem eq "gpxz") || ($dem eq "terrarium"));
   if ((lc($demResolution) eq "best") ||
       (($demResolution =~ /^$number_regexp$/) && ($demResolution == 0))) {
     # resolution of the best available source data, determined later by a probe
@@ -8019,6 +8019,44 @@ sub gridElevation {
     $z[3] * $fx * $fy;
 }
 
+# full path of a DEM cache file, or undef if caching is disabled
+sub demCacheFile {
+  my $name = shift();
+  return undef unless ($demCache);
+  $demCacheDir //= ($ENV{HOME} // ".") . "/.processGPX/demCache";
+  return "$demCacheDir/$name";
+}
+
+# read a cached DEM raster; returns undef if not cached
+sub demCacheRead {
+  my $cacheFile = shift();
+  return undef unless ((defined $cacheFile) && (-f $cacheFile));
+  note("DEM: using cached raster $cacheFile\n");
+  my $data;
+  if (open(my $fh, "<", $cacheFile)) {
+    binmode($fh);
+    $data = do { local $/; <$fh> };
+    close($fh);
+  }
+  return $data;
+}
+
+# save a DEM raster to the cache
+sub demCacheWrite {
+  my ($cacheFile, $data) = @_;
+  return unless (defined $cacheFile);
+  use File::Path;
+  File::Path::make_path($demCacheDir) unless (-d $demCacheDir);
+  if (open(my $fh, ">", "$cacheFile.part")) {
+    binmode($fh);
+    print $fh $data;
+    close($fh);
+    rename("$cacheFile.part", $cacheFile);
+  } else {
+    warn("WARNING: unable to write DEM cache file $cacheFile: $!\n");
+  }
+}
+
 # degrees of latitude and longitude spanned by a DEM tile
 sub demTileDegs {
   return $demMaxPx * $demResolution / $mPerDegLat;
@@ -8041,47 +8079,20 @@ sub demLoadTile {
   $lonMin = -180 if ($lonMin < -180);
   $lonMax =  180 if ($lonMax >  180);
 
-  my $data;
-  my $cacheFile;
-  if ($demCache) {
-    $demCacheDir //= ($ENV{HOME} // ".") . "/.processGPX/demCache";
-    $cacheFile = sprintf("%s/%s_%gm_%d_%d.tif", $demCacheDir, $dem, $demResolution, $ix, $iy);
-    if (-f $cacheFile) {
-      note("DEM: using cached raster $cacheFile\n");
-      if (open(my $fh, "<", $cacheFile)) {
-        binmode($fh);
-        $data = do { local $/; <$fh> };
-        close($fh);
-      }
-    }
-  }
+  my $cacheFile = demCacheFile(sprintf("%s_%gm_%d_%d.tif", $dem, $demResolution, $ix, $iy));
+  my $data = demCacheRead($cacheFile);
 
   unless (defined $data) {
     $demFetchCount++;
     die("ERROR: DEM requires more than $demMaxFetch rasters: consider increasing -demResolution\n")
       if ($demFetchCount > $demMaxFetch);
-    if ($dem eq "gpxz") {
-      my $url = sprintf("https://api.gpxz.io/v1/elevation/raster?" .
-                        "bbox_left=%.7f&bbox_right=%.7f&bbox_bottom=%.7f&bbox_top=%.7f&resolution_m=%g",
-                        $lonMin, $lonMax, $latMin, $latMax, $demResolution);
-      note(sprintf("DEM: fetching GPXZ raster for lat %.4f to %.4f, lon %.4f to %.4f at %g meters...\n",
-                   $latMin, $latMax, $lonMin, $lonMax, $demResolution));
-      $data = loadBinaryURL($url, { "x-api-key" => $demKey });
-    } else {
-      die("ERROR: unknown DEM source \"$dem\"\n");
-    }
-    if (defined $cacheFile) {
-      use File::Path;
-      File::Path::make_path($demCacheDir) unless (-d $demCacheDir);
-      if (open(my $fh, ">", "$cacheFile.part")) {
-        binmode($fh);
-        print $fh $data;
-        close($fh);
-        rename("$cacheFile.part", $cacheFile);
-      } else {
-        warn("WARNING: unable to write DEM cache file $cacheFile: $!\n");
-      }
-    }
+    my $url = sprintf("https://api.gpxz.io/v1/elevation/raster?" .
+                      "bbox_left=%.7f&bbox_right=%.7f&bbox_bottom=%.7f&bbox_top=%.7f&resolution_m=%g",
+                      $lonMin, $lonMax, $latMin, $latMax, $demResolution);
+    note(sprintf("DEM: fetching GPXZ raster for lat %.4f to %.4f, lon %.4f to %.4f at %g meters...\n",
+                 $latMin, $latMax, $lonMin, $lonMax, $demResolution));
+    $data = loadBinaryURL($url, { "x-api-key" => $demKey });
+    demCacheWrite($cacheFile, $data);
   }
 
   my $grid = decodeGeoTIFF($data);
@@ -8119,9 +8130,194 @@ sub demResolveResolution {
   }
 }
 
+#
+# terrarium DEM source: AWS terrain tiles (https://registry.opendata.aws/terrain-tiles/)
+# 256x256-pixel PNG tiles in the Web Mercator "slippy map" tiling scheme,
+# with elevation encoded in the pixel colors.  Free, and no API key needed,
+# but the underlying source data is generally coarser than GPXZ
+#
+
+my $demZoom;                 # terrarium zoom level, set on first use
+my $terrariumBestRes = 30;   # -demResolution best: match typical ~30 meter source data
+my $earthCircumference = 40075016.686; # meters, at the equator
+my $demPi = 4 * atan2(1, 1);
+
+#
+# decode an 8-bit PNG image into raw pixels (one byte per channel)
+#
+sub decodePNG {
+  my $data = shift();
+
+  use Compress::Zlib;
+
+  die("ERROR: DEM tile is not a PNG file\n")
+    unless (substr($data, 0, 8) eq "\x89PNG\r\n\x1a\n");
+
+  # walk the chunks for the header and compressed image data
+  my ($width, $height, $bitDepth, $colorType, $interlace);
+  my $idat = "";
+  my $pos = 8;
+  while ($pos + 8 <= length($data)) {
+    my ($len, $type) = unpack("Na4", substr($data, $pos, 8));
+    my $chunk = substr($data, $pos + 8, $len);
+    $pos += 12 + $len;
+    if ($type eq "IHDR") {
+      ($width, $height, $bitDepth, $colorType, undef, undef, $interlace) =
+        unpack("NNCCCCC", $chunk);
+    } elsif ($type eq "IDAT") {
+      $idat .= $chunk;
+    } elsif ($type eq "IEND") {
+      last;
+    }
+  }
+  die("ERROR: DEM PNG tile has no image header\n")
+    unless (defined $width);
+  my %channelCount = ( 0 => 1, 2 => 3, 4 => 2, 6 => 4 );
+  my $channels = $channelCount{$colorType};
+  die("ERROR: unsupported DEM PNG tile format (bit depth = $bitDepth, color type = $colorType, interlace = $interlace)\n")
+    unless ((defined $channels) && ($bitDepth == 8) && ($interlace == 0));
+
+  my $raw = Compress::Zlib::uncompress($idat);
+  die("ERROR: failed to decompress DEM PNG tile data\n")
+    unless (defined $raw);
+
+  # undo the per-scanline filters
+  my $stride = $width * $channels;
+  my $pixels = "";
+  my @prev = (0) x $stride;
+  $pos = 0;
+  for my $y ( 0 .. $height - 1 ) {
+    my ($filter, @row) = unpack("C" . ($stride + 1), substr($raw, $pos, $stride + 1));
+    $pos += $stride + 1;
+    if ($filter == 1) {         # sub
+      for my $i ( $channels .. $stride - 1 ) {
+        $row[$i] = ($row[$i] + $row[$i - $channels]) & 0xff;
+      }
+    } elsif ($filter == 2) {    # up
+      for my $i ( 0 .. $stride - 1 ) {
+        $row[$i] = ($row[$i] + $prev[$i]) & 0xff;
+      }
+    } elsif ($filter == 3) {    # average
+      for my $i ( 0 .. $stride - 1 ) {
+        my $a = ($i >= $channels) ? $row[$i - $channels] : 0;
+        $row[$i] = ($row[$i] + (($a + $prev[$i]) >> 1)) & 0xff;
+      }
+    } elsif ($filter == 4) {    # Paeth
+      for my $i ( 0 .. $stride - 1 ) {
+        my $a = ($i >= $channels) ? $row[$i - $channels] : 0;
+        my $b = $prev[$i];
+        my $c = ($i >= $channels) ? $prev[$i - $channels] : 0;
+        my $p = $a + $b - $c;
+        my ($pa, $pb, $pc) = (abs($p - $a), abs($p - $b), abs($p - $c));
+        my $pr = (($pa <= $pb) && ($pa <= $pc)) ? $a : (($pb <= $pc) ? $b : $c);
+        $row[$i] = ($row[$i] + $pr) & 0xff;
+      }
+    } elsif ($filter != 0) {
+      die("ERROR: unsupported DEM PNG tile filter ($filter)\n");
+    }
+    $pixels .= pack("C*", @row);
+    @prev = @row;
+  }
+
+  return {
+    width    => $width,
+    height   => $height,
+    channels => $channels,
+    pixels   => $pixels,
+  };
+}
+
+# load a terrarium tile, from cache if possible, and decode its pixel
+# colors into elevations
+sub terrariumLoadTile {
+  my ($tx, $ty) = @_;
+
+  my $cacheFile = demCacheFile(sprintf("terrarium_z%d_%d_%d.png", $demZoom, $tx, $ty));
+  my $data = demCacheRead($cacheFile);
+
+  unless (defined $data) {
+    $demFetchCount++;
+    die("ERROR: DEM requires more than $demMaxFetch tiles: consider increasing -demResolution\n")
+      if ($demFetchCount > $demMaxFetch);
+    my $url = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/$demZoom/$tx/$ty.png";
+    note("DEM: fetching terrarium tile $demZoom/$tx/$ty...\n");
+    $data = loadBinaryURL($url, {});
+    demCacheWrite($cacheFile, $data);
+  }
+
+  my $png = decodePNG($data);
+  die("ERROR: expected a 256x256 terrarium tile, got $png->{width}x$png->{height}\n")
+    unless (($png->{width} == 256) && ($png->{height} == 256));
+
+  # elevation = (red * 256 + green + blue / 256) - 32768
+  my $ch = $png->{channels};
+  die("ERROR: terrarium tile is not a color image\n")
+    if ($ch < 3);
+  my @b = unpack("C*", $png->{pixels});
+  my @elevations;
+  my $k = 0;
+  for ( 1 .. 65536 ) {
+    push @elevations, ($b[$k] * 256 + $b[$k + 1] + $b[$k + 2] / 256) - 32768;
+    $k += $ch;
+  }
+  my $grid = { samples => pack("f<*", @elevations) };
+  $demGrids{"$demZoom,$tx,$ty"} = $grid;
+  return $grid;
+}
+
+# elevation at integer global-pixel coordinates on the terrarium grid;
+# rows clamp at the poles and columns wrap around the antimeridian
+sub terrariumSample {
+  my ($gx, $gy) = @_;
+  my $worldPx = 256 * (2 ** $demZoom);
+  $gy = 0 if ($gy < 0);
+  $gy = $worldPx - 1 if ($gy > $worldPx - 1);
+  $gx %= $worldPx;
+  $gx += $worldPx if ($gx < 0);
+  my $tx = floor($gx / 256);
+  my $ty = floor($gy / 256);
+  my $grid = $demGrids{"$demZoom,$tx,$ty"} // terrariumLoadTile($tx, $ty);
+  return unpack("f<", substr($grid->{samples}, 4 * (($gy - 256 * $ty) * 256 + $gx - 256 * $tx), 4));
+}
+
+# terrarium elevation of a single point, sampled bilinearly in global
+# pixel space, so tile seams need no special treatment
+sub demElevationTerrarium {
+  my ($lat, $lon) = @_;
+
+  # pick a zoom level whose pixel size at this latitude matches the
+  # requested resolution
+  unless (defined $demZoom) {
+    my $res = ($demResolution eq "best") ? $terrariumBestRes : $demResolution;
+    my $mPerPx0 = $earthCircumference * cos($lat * $demPi / 180) / 256;
+    my $z = ceil(log($mPerPx0 / $res) / log(2));
+    $z = 0 if ($z < 0);
+    $z = 15 if ($z > 15);
+    $demZoom = $z;
+    note(sprintf("DEM: using terrarium zoom %d (%.1f meter pixels at latitude %.2f)\n",
+                 $z, $mPerPx0 / (2 ** $z), $lat));
+  }
+
+  my $worldPx = 256 * (2 ** $demZoom);
+  my $latRad = $lat * $demPi / 180;
+  my $colF = ($lon + 180) / 360 * $worldPx - 0.5;
+  my $rowF = (1 - log(tan($latRad) + 1 / cos($latRad)) / $demPi) / 2 * $worldPx - 0.5;
+  my $c0 = floor($colF);
+  my $r0 = floor($rowF);
+  my $fx = $colF - $c0;
+  my $fy = $rowF - $r0;
+  return
+    terrariumSample($c0,     $r0)     * (1 - $fx) * (1 - $fy) +
+    terrariumSample($c0 + 1, $r0)     * $fx * (1 - $fy) +
+    terrariumSample($c0,     $r0 + 1) * (1 - $fx) * $fy +
+    terrariumSample($c0 + 1, $r0 + 1) * $fx * $fy;
+}
+
 # elevation of a single point from the DEM; undef if the DEM has no data
 sub demElevation {
   my ($lat, $lon) = @_;
+  return demElevationTerrarium($lat, $lon)
+    if ($dem eq "terrarium");
   demResolveResolution($lat, $lon)
     if ($demResolution eq "best");
   my $td = demTileDegs();
@@ -10813,13 +11009,21 @@ has been deleted.
 Set the elevation of route points from a digital elevation model (DEM)
 fetched from a web API, replacing the elevations (if any) found in the
 input file.  This is applied before any altitude processing or smoothing.
-Currently the only supported source is C<gpxz> (L<https://www.gpxz.io>),
-which requires an API key: use C<-demKey> or set the C<GPXZ_API_KEY>
-environment variable.  Elevation rasters covering the route are downloaded
-in tiles and elevations are sampled with bilinear interpolation.  Points
-for which the DEM has no data are filled in by interpolation, as with
-missing elevations in the input file.  See also C<-demResolution>,
-C<-demCache>, and C<-demCacheDir>.
+Elevation rasters covering the route are downloaded in tiles and
+elevations are sampled with bilinear interpolation.  Points for which the
+DEM has no data are filled in by interpolation, as with missing
+elevations in the input file.  Two sources are supported:
+
+C<gpxz> (L<https://www.gpxz.io>) requires an API key: use C<-demKey> or
+set the C<GPXZ_API_KEY> environment variable.  GPXZ merges the best
+available data for each region, down to 0.5 meter lidar in some areas.
+
+C<terrarium> is the free AWS terrain tiles dataset
+(L<https://registry.opendata.aws/terrain-tiles/>): no API key is needed,
+but the underlying source data is generally coarser (typically 10 to 30
+meters), and ocean areas return bathymetry (negative elevations).
+
+See also C<-demResolution>, C<-demCache>, and C<-demCacheDir>.
 
 =item B<C<-demCache>>
 
@@ -10840,20 +11044,27 @@ needed.
 
 An API key for the DEM source (see C<-dem>).  For the C<gpxz> source, if
 this option is not given, the C<GPXZ_API_KEY> environment variable is
-used.
+used.  The C<terrarium> source needs no key.
 
 =item B<C<-demResolution>> <meters>
 
 The resolution, in meters, of the elevation rasters requested from the
-DEM source (see C<-dem>).  The default is C<best> (or equivalently 0),
-which determines the native resolution of the best source data available
-near the start of the route with a small probe request, and then requests
-rasters at that resolution.  For the C<gpxz> source an explicit resolution
-must be between 0.5 and 1000 meters.  Requesting finer resolution than
-the source data provides no benefit: the source is simply interpolated to
-the requested grid, increasing download sizes, since more raster tiles
-are needed to cover the same route.  Coarser resolutions reduce download
-sizes and smooth the terrain.
+DEM source (see C<-dem>).  The default is C<best> (or equivalently 0).
+
+For the C<gpxz> source, C<best> determines the native resolution of the
+best source data available near the start of the route with a small probe
+request, and then requests rasters at that resolution.  An explicit
+resolution must be between 0.5 and 1000 meters.
+
+For the C<terrarium> source, the resolution picks the zoom level (up to
+the maximum of 15) whose pixels at the route's latitude are at least as
+fine as requested; C<best> targets 30 meters, matching the typical
+resolution of the underlying data.
+
+Requesting finer resolution than the source data provides no benefit:
+the source is simply interpolated to the requested grid, increasing
+download sizes.  Coarser resolutions reduce download sizes and smooth
+the terrain.
 
 =item B<C<-description>> <string>
 
