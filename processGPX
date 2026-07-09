@@ -6747,6 +6747,11 @@ my $crossingHeight = 2; # crossing should have same altitude, or at least this h
 my $crossingTransition; # transition length for crossings
 my $csv = 0;           # whether to use CSV instead of GPX
 my $curvatureSmoothing = 0; # smoothing for curvature for most purposes
+my $dem;               # DEM source for setting elevations (currently only "gpxz")
+my $demCache = 1;      # whether to cache DEM rasters on disk
+my $demCacheDir;       # where to cache DEM rasters (default: ~/.processGPX/demCache)
+my $demKey;            # API key for the DEM source (default: GPXZ_API_KEY environment variable)
+my $demResolution = "best"; # resolution (meters) of rasters requested from the DEM source, or "best"
 my $description;       # description, for GPX metadata
 my $extend = 0;        # apply to both append and prepend
 my $extendBack;        # amount to extend the route with a loop.
@@ -6957,6 +6962,11 @@ GetOptions (
             "csv!"          => \$csv,
             "curvatureSmoothing=f" => \$curvatureSmoothing,
             "deleteRange=f{1,100}" => \@deleteRange,
+            "dem=s"         => \$dem,
+            "demCache!"     => \$demCache,
+            "demCacheDir=s" => \$demCacheDir,
+            "demKey=s"      => \$demKey,
+            "demResolution=s" => \$demResolution,
             "description=s" => \$description,
             "extend=f"      => \$extend,
             "extendBack=f"  => \$extendBack,
@@ -7147,6 +7157,28 @@ die("-repeatedLaps limited to range 0 to 100\n")
 # check loopLeft and loopRight
 if ($loopLeft && $loopRight) {
   die("ERROR: you cannot specify both -loopLeft and -loopRight\n");
+}
+
+# check DEM options
+if (defined $dem) {
+  $dem = lc $dem;
+  die("ERROR: unknown DEM source \"$dem\": supported sources: gpxz\n")
+    unless ($dem eq "gpxz");
+  if ((lc($demResolution) eq "best") ||
+      (($demResolution =~ /^$number_regexp$/) && ($demResolution == 0))) {
+    # resolution of the best available source data, determined later by a probe
+    $demResolution = "best";
+  } elsif ($demResolution =~ /^$number_regexp$/) {
+    die("ERROR: -demResolution must be between 0.5 and 1000 meters\n")
+      if (($demResolution < 0.5) || ($demResolution > 1000));
+  } else {
+    die("ERROR: -demResolution must be a number of meters, or \"best\"\n");
+  }
+  if ($dem eq "gpxz") {
+    $demKey //= $ENV{GPXZ_API_KEY};
+    die("ERROR: -dem gpxz requires an API key: use -demKey or set the GPXZ_API_KEY environment variable\n")
+      unless ((defined $demKey) && length($demKey));
+  }
 }
 
 # short-cut for out-and-back
@@ -7741,6 +7773,388 @@ sub note {
   warn(@_) unless ($quiet);
 }
 
+#
+# DEM (digital elevation model) support:
+# fetch elevation rasters from a web API and sample point elevations from them.
+# currently the only source is "gpxz" (https://www.gpxz.io), which serves
+# cloud-optimized GeoTIFF rasters.
+#
+# rasters are fetched in fixed tiles: the tile size is chosen so a tile spans
+# at most $demMaxPx pixels at the requested resolution, and tile boundaries
+# are quantized on a global grid, so cached tiles are reused between runs
+# even if the route changes.
+#
+
+my %demGrids;            # decoded rasters, keyed by tile index
+my $demFetchCount = 0;   # how many rasters have been requested so far
+my $demMaxPx = 2400;     # GPXZ raster API limit is 2500 pixels per side: leave headroom
+my $demMaxFetch = 100;   # safety limit on raster requests in a single run
+my $mPerDegLat = 111320; # meters per degree of latitude
+
+# fetch a URL with request headers, returning the raw response content
+sub loadBinaryURL {
+  my ($url, $headers) = @_;
+
+  use HTTP::Tiny;
+  my $http = HTTP::Tiny->new(timeout=> 120);
+  my $res = $http->get($url, { headers=> $headers });
+  return $res->{content} if ($res->{success});
+
+  # status 599 is an internal error (for example missing SSL support): try curl
+  if ($res->{status} == 599) {
+    my @cmd = ("curl", "-s", "-f");
+    for my $h ( sort keys %$headers ) {
+      push @cmd, "-H", "$h: $headers->{$h}";
+    }
+    push @cmd, $url;
+    if (open(my $fh, "-|", @cmd)) {
+      binmode($fh);
+      my $content = do { local $/; <$fh> };
+      close($fh);
+      return $content
+        if ((defined $content) && length($content) && ($? == 0));
+    }
+  }
+  my $msg = substr($res->{content} // "", 0, 300);
+  die("ERROR: DEM raster request failed: $res->{status} $res->{reason}\n$msg\n");
+}
+
+#
+# decode a single-channel 32-bit floating point (Big)TIFF, as served by GPXZ,
+# into a grid: a packed string of little-endian floats, row-major from the
+# northwest corner, plus geo-referencing information
+#
+sub decodeGeoTIFF {
+  my $data = shift();
+
+  use Compress::Zlib;
+
+  die("ERROR: DEM raster is not a little-endian TIFF file\n")
+    unless (substr($data, 0, 2) eq "II");
+  my $magic = unpack("v", substr($data, 2, 2));
+  my ($big, $ifdOffset);
+  if ($magic == 42) {
+    $big = 0;
+    $ifdOffset = unpack("V", substr($data, 4, 4));
+  } elsif ($magic == 43) {
+    $big = 1;
+    $ifdOffset = unpack("Q<", substr($data, 8, 8));
+  } else {
+    die("ERROR: DEM raster is not a TIFF file (magic = $magic)\n");
+  }
+
+  # TIFF data type => [byte size, unpack format]
+  my %typeInfo = (
+    1  => [1, "C"],   # BYTE
+    2  => [1, undef], # ASCII
+    3  => [2, "v"],   # SHORT
+    4  => [4, "V"],   # LONG
+    12 => [8, "d<"],  # DOUBLE
+    16 => [8, "Q<"],  # LONG8
+    17 => [8, "q<"],  # SLONG8
+  );
+
+  my ($nTags, $entrySize, $inlineSize);
+  if ($big) {
+    $nTags = unpack("Q<", substr($data, $ifdOffset, 8));
+    $entrySize = 20;
+    $inlineSize = 8;
+    $ifdOffset += 8;
+  } else {
+    $nTags = unpack("v", substr($data, $ifdOffset, 2));
+    $entrySize = 12;
+    $inlineSize = 4;
+    $ifdOffset += 2;
+  }
+
+  my %tag;
+  for my $i ( 0 .. $nTags - 1 ) {
+    my $entry = substr($data, $ifdOffset + $i * $entrySize, $entrySize);
+    my ($id, $type, $count) = $big ?
+      unpack("vvQ<", $entry) :
+      unpack("vvV", $entry);
+    next unless (defined $typeInfo{$type});
+    my ($size, $fmt) = @{$typeInfo{$type}};
+    my $total = $size * $count;
+    my $valueData;
+    if ($total <= $inlineSize) {
+      $valueData = substr($entry, $entrySize - $inlineSize, $total);
+    } else {
+      my $valueOffset = $big ?
+        unpack("Q<", substr($entry, 12, 8)) :
+        unpack("V", substr($entry, 8, 4));
+      $valueData = substr($data, $valueOffset, $total);
+    }
+    if ($type == 2) {
+      $valueData =~ s/\0.*//s;
+      $tag{$id} = [ $valueData ];
+    } else {
+      $tag{$id} = [ unpack("$fmt$count", $valueData) ];
+    }
+  }
+
+  my $width  = $tag{256}->[0];
+  my $height = $tag{257}->[0];
+  die("ERROR: DEM raster TIFF is missing width or height\n")
+    unless ($width && $height);
+  my $bits            = (defined $tag{258}) ? $tag{258}->[0] : 1;
+  my $compression     = (defined $tag{259}) ? $tag{259}->[0] : 1;
+  my $predictor       = (defined $tag{317}) ? $tag{317}->[0] : 1;
+  my $samplesPerPixel = (defined $tag{277}) ? $tag{277}->[0] : 1;
+  my $sampleFormat    = (defined $tag{339}) ? $tag{339}->[0] : 1;
+  die("ERROR: unsupported DEM raster TIFF format: expecting single-channel 32-bit floating point " .
+      "(bits = $bits, sample format = $sampleFormat, samples per pixel = $samplesPerPixel, predictor = $predictor)\n")
+    unless (($bits == 32) && ($sampleFormat == 3) && ($samplesPerPixel == 1) && ($predictor == 1));
+  die("ERROR: unsupported DEM raster TIFF compression ($compression): expecting none (1) or deflate (8)\n")
+    unless (($compression == 1) || ($compression == 8) || ($compression == 32946));
+
+  # geo referencing: pixel scale and tie point give the northwest corner
+  die("ERROR: DEM raster TIFF has no geo-referencing tags\n")
+    unless ((defined $tag{33550}) && (defined $tag{33922}));
+  my ($sx, $sy) = @{$tag{33550}};
+  my ($ti, $tj, undef, $tx, $ty) = @{$tag{33922}};
+
+  my $noData;
+  $noData = $tag{42113}->[0] + 0
+    if ((defined $tag{42113}) && ($tag{42113}->[0] =~ /\d/));
+
+  # data sources, from GDAL metadata (GPXZ reports its sources there)
+  my $sources;
+  $sources = $1
+    if ((defined $tag{42112}) &&
+        ($tag{42112}->[0] =~ m(<Item name="gpxz-sources">([^<]+)</Item>)));
+
+  # assemble the decompressed pixels into a single packed string
+  my $samples = "\0" x (4 * $width * $height);
+
+  my $unzip = sub {
+    my $z = shift();
+    return $z if ($compression == 1);
+    my $raw = Compress::Zlib::uncompress($z);
+    die("ERROR: failed to decompress DEM raster TIFF data\n")
+      unless (defined $raw);
+    return $raw;
+  };
+
+  if (defined $tag{322}) {
+    # tiled organization
+    my $tw = $tag{322}->[0];
+    my $th = $tag{323}->[0];
+    my $offsets = $tag{324};
+    my $counts  = $tag{325};
+    my $tilesX = ceil($width / $tw);
+    my $tilesY = ceil($height / $th);
+    for my $tyIdx ( 0 .. $tilesY - 1 ) {
+      for my $txIdx ( 0 .. $tilesX - 1 ) {
+        my $t = $tyIdx * $tilesX + $txIdx;
+        my $raw = &$unzip(substr($data, $offsets->[$t], $counts->[$t]));
+        my $gx = $txIdx * $tw;
+        my $n = ($gx + $tw <= $width) ? $tw : ($width - $gx);
+        for my $r ( 0 .. $th - 1 ) {
+          my $gy = $tyIdx * $th + $r;
+          last if ($gy >= $height);
+          substr($samples, 4 * ($gy * $width + $gx), 4 * $n) =
+            substr($raw, 4 * $r * $tw, 4 * $n);
+        }
+      }
+    }
+  } elsif (defined $tag{273}) {
+    # strip organization
+    my $rowsPerStrip = (defined $tag{278}) ? $tag{278}->[0] : $height;
+    my $offsets = $tag{273};
+    my $counts  = $tag{279};
+    for my $s ( 0 .. $#$offsets ) {
+      my $raw = &$unzip(substr($data, $offsets->[$s], $counts->[$s]));
+      my $gy = $s * $rowsPerStrip;
+      my $nRows = ($gy + $rowsPerStrip <= $height) ? $rowsPerStrip : ($height - $gy);
+      substr($samples, 4 * $gy * $width, 4 * $nRows * $width) =
+        substr($raw, 0, 4 * $nRows * $width);
+    }
+  } else {
+    die("ERROR: DEM raster TIFF has neither tiles nor strips\n");
+  }
+
+  return {
+    width    => $width,
+    height   => $height,
+    lonUL    => $tx - $ti * $sx,
+    latUL    => $ty + $tj * $sy,
+    lonScale => $sx,
+    latScale => $sy,
+    noData   => $noData,
+    sources  => $sources,
+    samples  => $samples,
+  };
+}
+
+# bilinear sample of a grid; clamps to raster edges; returns undef on nodata
+sub gridElevation {
+  my ($grid, $lat, $lon) = @_;
+  my $w = $grid->{width};
+  my $h = $grid->{height};
+  my $noData = $grid->{noData};
+  my $colF = ($lon - $grid->{lonUL}) / $grid->{lonScale} - 0.5;
+  my $rowF = ($grid->{latUL} - $lat) / $grid->{latScale} - 0.5;
+  my $c0 = floor($colF);
+  my $r0 = floor($rowF);
+  my $fx = $colF - $c0;
+  my $fy = $rowF - $r0;
+  my @z;
+  for my $corner ( [$c0, $r0], [$c0 + 1, $r0], [$c0, $r0 + 1], [$c0 + 1, $r0 + 1] ) {
+    my ($c, $r) = @$corner;
+    $c = 0 if ($c < 0);
+    $c = $w - 1 if ($c > $w - 1);
+    $r = 0 if ($r < 0);
+    $r = $h - 1 if ($r > $h - 1);
+    my $z = unpack("f<", substr($grid->{samples}, 4 * ($r * $w + $c), 4));
+    return undef
+      if (($z != $z) ||
+          ((defined $noData) && (abs($z - $noData) <= 1e-6 * (1 + abs($noData)))));
+    push @z, $z;
+  }
+  return
+    $z[0] * (1 - $fx) * (1 - $fy) +
+    $z[1] * $fx * (1 - $fy) +
+    $z[2] * (1 - $fx) * $fy +
+    $z[3] * $fx * $fy;
+}
+
+# degrees of latitude and longitude spanned by a DEM tile
+sub demTileDegs {
+  return $demMaxPx * $demResolution / $mPerDegLat;
+}
+
+# load the DEM tile with the given tile indices, from cache if possible
+sub demLoadTile {
+  my ($ix, $iy) = @_;
+
+  my $td = demTileDegs();
+  # extend tiles a few pixels into their neighbors so bilinear sampling
+  # near a tile boundary stays within the raster
+  my $margin = 3 * $demResolution / $mPerDegLat;
+  my $lonMin = $ix * $td - $margin;
+  my $lonMax = ($ix + 1) * $td + $margin;
+  my $latMin = $iy * $td - $margin;
+  my $latMax = ($iy + 1) * $td + $margin;
+  $latMin = -90 if ($latMin < -90);
+  $latMax =  90 if ($latMax >  90);
+  $lonMin = -180 if ($lonMin < -180);
+  $lonMax =  180 if ($lonMax >  180);
+
+  my $data;
+  my $cacheFile;
+  if ($demCache) {
+    $demCacheDir //= ($ENV{HOME} // ".") . "/.processGPX/demCache";
+    $cacheFile = sprintf("%s/%s_%gm_%d_%d.tif", $demCacheDir, $dem, $demResolution, $ix, $iy);
+    if (-f $cacheFile) {
+      note("DEM: using cached raster $cacheFile\n");
+      if (open(my $fh, "<", $cacheFile)) {
+        binmode($fh);
+        $data = do { local $/; <$fh> };
+        close($fh);
+      }
+    }
+  }
+
+  unless (defined $data) {
+    $demFetchCount++;
+    die("ERROR: DEM requires more than $demMaxFetch rasters: consider increasing -demResolution\n")
+      if ($demFetchCount > $demMaxFetch);
+    if ($dem eq "gpxz") {
+      my $url = sprintf("https://api.gpxz.io/v1/elevation/raster?" .
+                        "bbox_left=%.7f&bbox_right=%.7f&bbox_bottom=%.7f&bbox_top=%.7f&resolution_m=%g",
+                        $lonMin, $lonMax, $latMin, $latMax, $demResolution);
+      note(sprintf("DEM: fetching GPXZ raster for lat %.4f to %.4f, lon %.4f to %.4f at %g meters...\n",
+                   $latMin, $latMax, $lonMin, $lonMax, $demResolution));
+      $data = loadBinaryURL($url, { "x-api-key" => $demKey });
+    } else {
+      die("ERROR: unknown DEM source \"$dem\"\n");
+    }
+    if (defined $cacheFile) {
+      use File::Path;
+      File::Path::make_path($demCacheDir) unless (-d $demCacheDir);
+      if (open(my $fh, ">", "$cacheFile.part")) {
+        binmode($fh);
+        print $fh $data;
+        close($fh);
+        rename("$cacheFile.part", $cacheFile);
+      } else {
+        warn("WARNING: unable to write DEM cache file $cacheFile: $!\n");
+      }
+    }
+  }
+
+  my $grid = decodeGeoTIFF($data);
+  note("DEM: raster data sources: $grid->{sources}\n")
+    if (defined $grid->{sources});
+  $demGrids{"$ix,$iy"} = $grid;
+  return $grid;
+}
+
+# determine the resolution (meters) of the best available DEM source data
+# near a point, by requesting a tiny raster with minimal interpolation and
+# inspecting its native pixel size.  Sets $demResolution.
+sub demResolveResolution {
+  my ($lat, $lon) = @_;
+
+  $demFetchCount++;
+  if ($dem eq "gpxz") {
+    my $d = 0.0005;  # roughly 50 meters
+    my $url = sprintf("https://api.gpxz.io/v1/elevation/raw-raster?" .
+                      "bbox_left=%.7f&bbox_right=%.7f&bbox_bottom=%.7f&bbox_top=%.7f",
+                      $lon - $d, $lon + $d, $lat - $d, $lat + $d);
+    note("DEM: querying GPXZ for the best available resolution...\n");
+    my $grid = decodeGeoTIFF(loadBinaryURL($url, { "x-api-key" => $demKey }));
+    my $res = $grid->{latScale};
+    # the native pixel size may be in degrees or meters, depending on the
+    # projection of the source data
+    $res *= $mPerDegLat if ($res < 0.01);
+    $res = 0.5 if ($res < 0.5);
+    $res = 1000 if ($res > 1000);
+    $demResolution = sprintf("%.4g", $res) + 0;
+    note("DEM: best available resolution: $demResolution meters" .
+         ((defined $grid->{sources}) ? " (sources: $grid->{sources})" : "") . "\n");
+  } else {
+    die("ERROR: unknown DEM source \"$dem\"\n");
+  }
+}
+
+# elevation of a single point from the DEM; undef if the DEM has no data
+sub demElevation {
+  my ($lat, $lon) = @_;
+  demResolveResolution($lat, $lon)
+    if ($demResolution eq "best");
+  my $td = demTileDegs();
+  my $ix = floor($lon / $td);
+  my $iy = floor($lat / $td);
+  my $grid = $demGrids{"$ix,$iy"} // demLoadTile($ix, $iy);
+  return gridElevation($grid, $lat, $lon);
+}
+
+#
+# set point elevations from the DEM.
+# points the DEM has no data for get their elevation removed, to be
+# filled in later by fixMissingElevation
+#
+sub applyDEMElevations {
+  my %var = @_;
+  my $points = $var{points} // [];
+  return unless (@$points);
+  note("DEM: setting elevations of " . scalar(@$points) . " points from $dem...\n");
+  my $missing = 0;
+  for my $p ( @$points ) {
+    my $z = demElevation($p->{lat}, $p->{lon});
+    if (defined $z) {
+      $p->{ele} = $z;
+    } else {
+      $missing++;
+      delete $p->{ele};
+    }
+  }
+  warn("WARNING: DEM has no data for $missing points: their elevations will be interpolated\n")
+    if ($missing > 0);
+}
+
 # if extendBack is specified, we need a turnaround loop... calculate crop
 # later
 $extendBack //= 0;
@@ -8048,6 +8462,10 @@ for my $file ( @files ) {
 
   # look for loops
   findLoops($points, $isLoop);
+
+  # set elevations from a DEM, if requested
+  applyDEMElevations(points=> $points)
+    if (defined $dem);
 
   # fix missing elevation
   fixMissingElevation(points=> $points, isLoop=> $isLoop);
@@ -10389,6 +10807,53 @@ meters.  I will now have points at 0, 250 meters, 750 meters, and
 1000 meters.  The points at 250 meters and 750 meters have been
 interpolated to define the deletion range, and the point at 500 meters
 has been deleted.
+
+=item B<C<-dem>> <source>
+
+Set the elevation of route points from a digital elevation model (DEM)
+fetched from a web API, replacing the elevations (if any) found in the
+input file.  This is applied before any altitude processing or smoothing.
+Currently the only supported source is C<gpxz> (L<https://www.gpxz.io>),
+which requires an API key: use C<-demKey> or set the C<GPXZ_API_KEY>
+environment variable.  Elevation rasters covering the route are downloaded
+in tiles and elevations are sampled with bilinear interpolation.  Points
+for which the DEM has no data are filled in by interpolation, as with
+missing elevations in the input file.  See also C<-demResolution>,
+C<-demCache>, and C<-demCacheDir>.
+
+=item B<C<-demCache>>
+
+Whether downloaded DEM rasters are cached on disk, so repeated runs over
+the same area do not fetch them again.  This is on by default: use
+C<-nodemCache> to disable it.  Tiles are aligned to a fixed global grid,
+so cached rasters are reused even if the route is modified.  Cached
+rasters are kept indefinitely: delete the cache directory (see
+C<-demCacheDir>) to force fresh downloads.
+
+=item B<C<-demCacheDir>> <directory>
+
+The directory used to cache downloaded DEM rasters (see C<-demCache>).
+The default is C<~/.processGPX/demCache>.  The directory is created if
+needed.
+
+=item B<C<-demKey>> <key>
+
+An API key for the DEM source (see C<-dem>).  For the C<gpxz> source, if
+this option is not given, the C<GPXZ_API_KEY> environment variable is
+used.
+
+=item B<C<-demResolution>> <meters>
+
+The resolution, in meters, of the elevation rasters requested from the
+DEM source (see C<-dem>).  The default is C<best> (or equivalently 0),
+which determines the native resolution of the best source data available
+near the start of the route with a small probe request, and then requests
+rasters at that resolution.  For the C<gpxz> source an explicit resolution
+must be between 0.5 and 1000 meters.  Requesting finer resolution than
+the source data provides no benefit: the source is simply interpolated to
+the requested grid, increasing download sizes, since more raster tiles
+are needed to cover the same route.  Coarser resolutions reduce download
+sizes and smooth the terrain.
 
 =item B<C<-description>> <string>
 
