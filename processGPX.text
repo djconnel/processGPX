@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.65
+    0.66
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -126,7 +126,7 @@ DEPENDENCIES
 
     For processing BikeTerra routes or GPX files directly you need:
 
-     HTTP::Tiny   : used for downloading data from the web.
+      HTTP::Tiny  : used for downloading data from the web.
 
     and for BikeTerra route data (as opposed to GPX files) you need:
 
@@ -660,8 +660,10 @@ OPTIONS
         ends at the end of the track.
 
     "-closed"
-    "-closedLoop"
+    "-closeLap"
     "-closeLoop"
+    "-closedLap"
+    "-closedLoop"
         Equivalent to "-copyPoint" "-loop". Negation negates "-copyPoint"
         and negates "-loop" unless it has already been been set.
 
@@ -1038,16 +1040,74 @@ OPTIONS
         specified and they overlap, the "-flatten" will replace the
         "-uniformGradient".
 
+    "-gpxz"
+        Specifies that GPXZ elevations will be applied to points. This step
+        is done very early, before any other processing. So if you, for
+        example, apply smoothing or use "-join" or "-split" or "-crop" then
+        the elevation lookup will be done before any of these operations.
+        Additionally, all point smoothing, curve fitting, etc, will happen
+        after elevation substitution.
+
+        GPXz requires an API key. There are two ways to provide this. One is
+        to use the "GPXZ_API_KEY" environment variable. The other is to
+        specify an API key with the "-gpxzAPIKey" option. Specifying the API
+        key does not initiate GPXZ elevation, however. You still need to
+        specify either this or one of the other options.
+
+        GPXZ is prone to issues. For example, it is the terrain elevation,
+        so bridges and tunnels will have elevations associated with the
+        terrain, not the road. So proceed with caution. A recommended
+        process flow is to do GPXZ first, then check results in an editor
+        like GPXMagic, then do processing with a second processGPX step. If
+        you are 100% confident in the GPXz data for a particular route, then
+        of course you can combine smoothing and GPXz in the same step, for
+        example with "-processGPX -gpxz -auto".
+
+    "-gpxzAPIKey"
+        This specifies a GPXZ API key, for GPXZ elevation substitution. An
+        alternate to using this option is to set the GPXZ_API_KEY
+        environment variable. This option does not initiate GPXZ elevation
+        substitution: you still need to specify one of the other options.
+
+    "-gpxzEnd" <meters>
+        This specifies a course distance at which to end GPXZ elevation
+        lookup. It by default automatically applies the "-gpxz" option, so
+        no need to apply both.
+
+        Positions are determined from the starting file, before any
+        smoothing, splitting, joining, cropping, etc. Of course positions
+        may differ between this and other tools such as GPXMagic due to the
+        use of different algorithms
+
+        If the end is before the start the region will wrap around from the
+        finish to the start.
+
+    "-gpxzStart" <meters>
+        This specifies a course distance at which to begin GPXZ elevation
+        lookup. It by default automatically applies the "-gpxz" option, so
+        no need to apply both.
+
+        Positions are determined from the starting file, before any
+        smoothing, splitting, joining, cropping, etc. Of course positions
+        may differ between this and other tools such as GPXMagic due to the
+        use of different algorithms
+
+        If the end is before the start the region will wrap around from the
+        finish to the start.
+
+    "-gpxzStop" <meters>
+        This is a synonym for "-GPXZEnd".
+
     "-gAutoSmooth"
         Synonym for "-autoSmoothG"
 
-    "-gSmooth"
+    "-gSmooth" <meters>
         Synonym for "-smoothG"
 
-    "-gSigma"
+    "-gSigma" <meters>
         Synonym for "-smoothG"
 
-    "-gradientPower"
+    "-gradientPower" <number>
         For gradient signs, how much of a power to apply to gradient in
         determining where signs go. If 0, then all that matters is altitude:
         put the signs between peaks and valleys. If 1, then a climb which is
@@ -1056,7 +1116,7 @@ OPTIONS
         short steep pitch versus a longer, more gradual climb containing the
         short steep pitch.
 
-    "-gradientThreshold"
+    "-gradientThreshold" <meters>
         This determines the threshold at which a gradient sign gets put in.
         The units are meters: a 10% climb needs to gain this much altitude
         to get a gradient sign. How much altitude steeper or less steep
@@ -1251,7 +1311,7 @@ OPTIONS
         This is the same as "-outAndBack" (read that section as well),
         except also adds a turn-around to create a lappable course. If you
         want the turnaround and lap loops to be different than the default
-        radius, then you can specify these separately with -rTurnaround
+        radius, then you can specify these separately with "-rTurnaround"
         and/or "-rLap".
 
         This option is not generally needed with BikeTerra which
@@ -1472,6 +1532,18 @@ OPTIONS
         serves no purpose. It will be revised if and when another program is
         identified which develops similar functionality.
 
+    "-selectiveGPXZ" <meters> ...
+        This specifies range(s) over which to apply GPXZ elevation
+        substitution. As with other range options, it alternates start and
+        end positions. Positions are determined from the unprocessed
+        starting file, before any smoothing, cropping, joining, splitting,
+        etc.
+
+        You specify alternating start and stop positions. If a stop is
+        before a start, then the interval wraps around the start/finish. If
+        an end position is missing, the interval extends to the end of the
+        route. There is no way for a start position to be missing.
+
     "-selectiveGSmooth" <meters> ...
         This is an alias for "-selectiveSmoothG", which provides for
         selective gradient smoothing.
@@ -1562,7 +1634,7 @@ OPTIONS
         "-selectiveSmoothZ 15 4000 50 5000 15"
 
     "-selectiveZSmooth" <meters> ...
-        an alias for -selectiveSmoothZ
+        an alias for "-selectiveSmoothZ"
 
     "-selectiveSpacing" <meters> ...
         This applies selective point spacing on the course before other

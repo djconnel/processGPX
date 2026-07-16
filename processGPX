@@ -64,12 +64,14 @@ use Pod::Usage;
 #               added marking of interpolated points, -curvatureSmoothing added, old -curvatureSmoothing now -cornerSmoothing, -curvatureThreshold
 #               is now -cornerThreshold
 # version 0.65: snapping bug fix, -uniformGradient bugs, added -uniformGradientTransition, put flatten after uniformGradient, -simplify bugs
-#               changed snapTransition to be completely flat near snap, smoothKernal, -zStart, -zEnd added, minRadius improved,
-#               autoSpacing uses same spacing as -auto, fixed autoloop bug; apply curvature smoothing to minRadius, applySelectiveField added
-#               selectiveMinRadius added, arcFit alias of fitArcs, curvature bug fix, reversePoints redone, fixCrossings interpolatePoint bug
-#               maxSlope removed
+#               fixed and default distance increased to 1, changed snapTransition to be completely flat near snap, smoothKernal,
+#               -zStart, -zEnd added, minRadius improved, autoSpacing uses same spacing as -auto, fixed autoloop bug; apply curvature
+#               smoothing to minRadius, applySelectiveField added, selectiveMinRadius added, arcFit alias of fitArcs, curvature bug fix,
+#               reversePoints redone, fixCrossings interpolatePoint bug, maxSlope removed, new BTJSON format replaces old format
+# version 0.66: add GPXZ, added isPointInIntervals, more consistent use of start..end instead of start...stop. Options:
+#               -gpxz, -gpxzAPIKey, -gpxzStart, -gpxzEnd, -gpxzStop, -selectiveGPXZ.  Also added -closeLap and -closedLap aliases
 
-my $version = "0.65"; # make sure this matches pod value
+my $version = "0.66"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -84,21 +86,38 @@ my $pi2 = atan2(1, 0);
 #
 sub loadURL {
   my $url = shift();
+  my $headers = shift();
 
   use HTTP::Tiny;
 
-  # Create HTTP::Tiny object and download the data
   my $http = HTTP::Tiny->new();
-  my $res = $http->get($url);
-
+  my $res;
+  if (defined $headers) {
+    $res = $http->get($url, { headers=> $headers });
+  }
+  else {
+    $res = $http->get($url);
+  }
   # Check if the request was successful
   my $s;
   if ( $res->{success} ) {
     $s = $res->{content};
   } else {
-    warn "Attempt to download JSON data from URL = $url failed:\n$res->{status} $res->{reason}\n";
-    eval { $s = `curl $url` };
-    eval { $s = `wget -O - $url` } unless ( defined $s );
+    warn "Attempt to download data from URL = $url failed:\n" . $res->status_line . "\n";
+    my $command = "curl $url";
+    for my $h ( keys(%$headers) ) {
+      $command = "$command --header " . $h . ":" . $headers->{$h};
+    }
+    note("trying $command ...\n");
+    $s = eval { $s = `$command` };
+    unless ( defined $s ) {
+      $command = "wget $url";
+      for my $h ( keys(%$headers) ) {
+	$command = "$command --header=" . $h . ":" . $headers->{$h};
+      }
+      note("trying $command ...\n");
+      eval { $s = `$command` };
+    }
   }
   return $s;
 }
@@ -609,16 +628,15 @@ sub applySelectiveField {
     if ($dVal != 0) {
       my $start = $positions[$ip - 1] if ($isLoop || ($ip > 0));
       my $end   = $positions[$ip];
-      warn("$ip: start = $start; end = $end\n");
       for my $i ( 0 .. $#$points ) {
-	$field[$i] += $dVal * smoothWindow( s=> $points->[$i]->{distance}, start=> $start, end=> $end, transition=> $transition, isLoop=> $isLoop, courseDistance=> $courseDistance);
+        $field[$i] += $dVal * smoothWindow( s=> $points->[$i]->{distance}, start=> $start, end=> $end, transition=> $transition, isLoop=> $isLoop, courseDistance=> $courseDistance);
       }
     }
   }
   return \@field;
 }
 
-# isPointOnInterval: check whether a point is in an interval s1 <= s <= s2
+# check whether a point is in an interval s1 <= s <= s2
 sub isPointInInterval {
   my %var = @_;
   my $points = $var{points} // [];
@@ -626,18 +644,34 @@ sub isPointInInterval {
   my $s = $var{distance};
   my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
   my $start = $var{start} // $points->[0]->{distance};
-  my $stop = $var{stop} // $courseDistance // $points->[-1]->{distance};
-
+  my $end = $var{end} // $courseDistance // $points->[-1]->{distance};
+  
   return 0 unless (defined $s);
   if ($isLoop) {
     if (defined $courseDistance) {
       $start -= floor($start / $courseDistance) * $courseDistance;
-      $stop -= floor($stop / $courseDistance) * $courseDistance;
+      $end -= floor($end / $courseDistance) * $courseDistance;
     }
   }
-  return (($s >= $start) || ($s <= $stop))
-    if ($start > $stop);
-  return (($s >= $start) && ($stop >= $s));
+  return (($s >= $start) || ($s <= $end))
+    if ($start > $end);
+  return (($s >= $start) && ($end >= $s));
+}
+
+sub isPointInIntervals {
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $isLoop = $var{isLoop} // 0;
+  my $s = $var{distance};
+  my $intervals = $var{intervals};
+  addDistanceFieldIfNeeded(points=> $points);
+
+  return 1 unless (@$intervals);
+  for my $interval ( @$intervals ) {
+    return 1
+      if isPointInInterval(points=> $points, isLoop=> $isLoop, distance=> $s, start=> $interval->[0], end=> $interval->[1]);
+  }
+  return 0;
 }
 
 # set the suffix of a filename
@@ -1696,7 +1730,7 @@ sub checkAutoLoop {
   my $d = latlngDistance($points->[0], $points->[-1]);
   my $isLoop = (
                 ($d < 150) &&
-		(abs($points->[0]->{ele} - $points->[-1]->{ele}) < 10 + 0.4 * $d) &&
+                (abs($points->[0]->{ele} - $points->[-1]->{ele}) < 10 + 0.4 * $d) &&
                 (latlngDotProduct($points->[$i1], $points->[$i2], $points->[$i2], $points->[$i3]) > -0.1)
                );
   note("autoLoop detection: " . ($isLoop ? "true" : "false") . "\n");
@@ -1782,7 +1816,7 @@ sub cropCorners {
     }
 
     # pass criteria:
-    # 1. point is in limits defined by start and/or stop (if isLoop, start can be > stop)
+    # 1. point is in limits defined by start and/or end (if isLoop, start can be > end)
     # 2. corner is sufficiently far from neighbor corners (or for point-to-point, course terminals)
     push @cc, $cropCorners[$ic]
       if (
@@ -2168,7 +2202,7 @@ sub addSplines {
       my $j = ($i + 1) % @$points;
       next iLoop if (pointsAreClose($points->[$i], $points->[$j], 1));
 
-      # if start and stop points are specified, then check these
+      # if start and end points are specified, then check these
       # both points i and j must pass the test
       if ((defined $start) && (defined $end) && ($end < $start)) {
         next iLoop if (($points->[$i]->{distance} > $start) || ($points->[$j]->{distance} > $start) );
@@ -2745,7 +2779,7 @@ sub applyLaneShift {
             $points->[$j]->{shift} = $points->[$i]->{shift} + ($dShift <=> 0) * $d / 2;
           } else {
             last;
-	  }
+          }
           $j = ($j + $dir) % @$points;
         }
       }
@@ -2906,7 +2940,7 @@ sub smoothing {
       my $sum0 = 0;
       my %sum1;
       for my $field ( @smoothedFields ) {
-	$sum1{$field} = 0;
+        $sum1{$field} = 0;
       }
       for my $ii ( 0 .. $#us ) {
         my $u = $us[$ii];
@@ -2915,7 +2949,7 @@ sub smoothing {
         # weight by distance
         my $du = ($ii > 0) ? $u - $us[$ii - 1] : 0;
         $du += $us[$ii + 1] - $u if ($ii < $#us);
-	my $w = $du * smoothKernel($u);
+        my $w = $du * smoothKernel($u);
         $sum0 += $w;
 
         for my $field ( @smoothedFields ) {
@@ -2968,7 +3002,7 @@ sub applyMinRadius {
   return if (($minRadius <= 0) && (@$selectiveMinRadius == 0));
 
   #
-  # calculate a minimum radius field, starting with stop and start
+  # calculate a minimum radius field, starting with end and start
   # then supporting selective min radius
   #
   my $maxMinR = $minRadius;
@@ -2996,7 +3030,7 @@ sub applyMinRadius {
     my $radii = applySelectiveField(points=> $points, values=> $selectiveMinRadius, transition=> $transition, isLoop=> $isLoop, courseDistance=> $courseDistance);
     if ( @$radii ) {
       for my $i ( 0 .. $#$points ) {
-	$minRadii[$i] = $radii->[$i] if $radii->[$i] > $minRadii[$i];
+        $minRadii[$i] = $radii->[$i] if $radii->[$i] > $minRadii[$i];
       }
     }
   }
@@ -3778,7 +3812,7 @@ sub snapPoints {
         if (defined $p->{snapFrom}) {
           if ((defined $p->{next}) && (! defined $p->{next}->{snapFrom})) {
             $pSnap = $p;
-            $side = "stop";
+            $side = "end";
           }
           if ((defined $p->{prev}) && (! defined $p->{prev}->{snapFrom})) {
             next if (defined $pSnap);
@@ -3814,9 +3848,9 @@ sub snapPoints {
             $pt1 = $pt1->{prev} while ((defined $pt1->{prev}) && latlngDistance($pt1->{prev}, $p0) < $snapTransition);
             my $pt2 = $p0;
             $pt2 = $pt2->{next} while ((defined $pt2->{next}) && latlngDistance($pt2->{next}, $p0) < $snapTransition);
-            $pt2->{next}->{stop} = 1 if (defined $pt2->{stop});
+            $pt2->{next}->{end} = 1 if (defined $pt2->{end});
             # adjust the elevations
-            for (my $pt = $pt1; (defined $pt) && (! defined $pt->{stop}); $pt = $pt->{next}) {
+            for (my $pt = $pt1; (defined $pt) && (! defined $pt->{end}); $pt = $pt->{next}) {
               # smoothing is based on point separation, not distance difference
               my $fd = latlngDistance($p0, $pt) / $snapTransition;
               if (abs($fd) < 1) {
@@ -3826,7 +3860,7 @@ sub snapPoints {
                 last;
               }
             }
-            delete $pt2->{next}->{stop} if (defined $pt2->{next});
+            delete $pt2->{next}->{end} if (defined $pt2->{next});
           }
         }
       }
@@ -4225,7 +4259,7 @@ sub applySelectiveSpacing {
     my @newPoints = ($points->[0]);
     for (my $i = 1; $i <= $#$points;) {
       # if we're at beginning or end of the interval, interpolate the point
-      if ( isPointInInterval(points=> $points, start=> $newPoints[-1]->{distance}, stop=> $points->[$i]->{distance}, isLoop=> $isLoop, distance=> $si->[0]) ) {
+      if ( isPointInInterval(points=> $points, start=> $newPoints[-1]->{distance}, end=> $points->[$i]->{distance}, isLoop=> $isLoop, distance=> $si->[0]) ) {
         my $d1 = $si->[0] - $newPoints[-1]->{distance};
         $d1 += $courseDistance if ($isLoop && $d1 < 0);
         my $d2 = $points->[$i]->{distance} - $si->[0];
@@ -4241,7 +4275,7 @@ sub applySelectiveSpacing {
       }
 
       # add in points
-      while ( isPointInInterval(points=> $points, start=> $si->[0], stop=> $si->[1], isLoop=> $isLoop, distance=> $points->[$i]->{distance}) ) {
+      while ( isPointInInterval(points=> $points, start=> $si->[0], end=> $si->[1], isLoop=> $isLoop, distance=> $points->[$i]->{distance}) ) {
         my $d = pointSeparation($newPoints[-1], $points->[$i], $courseDistance, $isLoop);
         my $N = int($d / $spacing + 0.5);
         my $pLast = $newPoints[-1];
@@ -4257,7 +4291,7 @@ sub applySelectiveSpacing {
       }
 
       # if we're at the end of the interval, interpolate the point
-      if ( isPointInInterval(points=> $points, start=> $newPoints[-1]->{distance}, stop=> $points->[$i]->{distance}, isLoop=> $isLoop, distance=> $si->[1]) ) {
+      if ( isPointInInterval(points=> $points, start=> $newPoints[-1]->{distance}, end=> $points->[$i]->{distance}, isLoop=> $isLoop, distance=> $si->[1]) ) {
         my $pNew;
         # add the last point in the interval
         my $d1 =  $si->[1] - $newPoints[-1]->{distance};
@@ -4318,7 +4352,7 @@ sub applyUniformGradient {
   my $z1     = $var{z1};
   my $z2     = $var{z2};
   my $start  = $var{start};
-  my $stop   = $var{stop};
+  my $end    = $var{end};
   my $bow    = $var{bow} // 0;
 
   my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop) if ($isLoop);
@@ -4331,14 +4365,14 @@ sub applyUniformGradient {
     $z1 //= $points->[$i]->{ele};
   }
   {
-    my $s = $stop;
+    my $s = $end;
     $s -= $courseDistance * floor($s / $courseDistance) if $isLoop;
     ($points, my $i) = pointAtPosition(points=> $points, isLoop=> $isLoop, distance=> $s);
     $z2 //= $points->[$i]->{ele};
   }
 
   # limit lambda for loop
-  my $d = $stop - $start;
+  my $d = $end - $start;
   $d -= $courseDistance * floor($d / $courseDistance) if ($isLoop);
   my $mid = $start + $d / 2;  # midpoint between start and finish
   if ($isLoop) {
@@ -4351,15 +4385,15 @@ sub applyUniformGradient {
   if (abs($bow) > 0.01) {
     my $N = 1 + int(16 * $d / (1 + $d));
     my $spacing = $d / $N;
-    $points = applySelectiveSpacing(points=> $points, isLoop=> $isLoop, spacings=> [$spacing], intervals=> [[$start, $stop]]);
+    $points = applySelectiveSpacing(points=> $points, isLoop=> $isLoop, spacings=> [$spacing], intervals=> [[$start, $end]]);
   }
 
   for my $i ( 0 .. $#$points ) {
     my $s = $points->[$i]->{distance};
-    if (isPointInInterval(points=> $points, isLoop=> $isLoop, start=> $start - $lambda, stop=> $stop + $lambda, distance=> $s)) {
+    if (isPointInInterval(points=> $points, isLoop=> $isLoop, start=> $start - $lambda, end=> $end + $lambda, distance=> $s)) {
       my $d1 = $s - $start;
-      my $d2 = $stop - $s;
-      my $dd = $stop - $start;
+      my $d2 = $end - $s;
+      my $dd = $end - $start;
       if ($isLoop) {
         # adjust distances to wrap around in loop
         $d1 -= $courseDistance * floor($d1 / $courseDistance + 0.5);
@@ -4973,7 +5007,7 @@ sub checkRange {
   my $i = shift;
   addDistanceFieldIfNeeded(points=> $points);
 
-  # if start and stop points are specified, then check these
+  # if start and end points are specified, then check these
   # both points i and j must pass the test
   if ((defined $start) && (defined $end) && ($end < $start)) {
     return (($points->[$i]->{distance} >= $start) || ($points->[$i]->{distance} <= $end) );
@@ -5355,13 +5389,13 @@ sub circuitFromPosition {
 
   # search ahead for next point close to this point
   # search on intervals
-  my $stopIndex = ($isLoop) ? $startIndex : $#$points;  # quit searching at this point
+  my $endIndex = ($isLoop) ? $startIndex : $#$points;  # quit searching at this point
 
   my $p0 = $points->[$startIndex];  # start point
 
   my $flag = 0;  # marks that we've gotten far enough away from start point
   my $count = 0;
-  for (my $i = ($startIndex + 1) % @$points; $i != $stopIndex;) {
+  for (my $i = ($startIndex + 1) % @$points; $i != $endIndex;) {
     my $p1 = $points->[$i];
     my $index = $i;
 
@@ -5667,10 +5701,10 @@ sub addCurvatureField {
         }
       }
       $w = ($w + 1) % @$points
-	while (
-	       ((defined $points->[$w]->{interpolated}) || pointsAreClose($points->[$w], $points->[$v])) &&
-	       ($isLoop ? ((($w + 1) % @$points) != $u) : ($w < $#$points))
-	      );
+        while (
+               ((defined $points->[$w]->{interpolated}) || pointsAreClose($points->[$w], $points->[$v])) &&
+               ($isLoop ? ((($w + 1) % @$points) != $u) : ($w < $#$points))
+              );
       if (($u == $v) || ($v == $w)) {
         $points->[$v]->{curvature} = 0;
         next;
@@ -5884,13 +5918,12 @@ sub reversePoints {
   return unless @$points;
 
   if ($isLoop && ! pointsAreClose($points->[0], $points->[-1])) {
-    warn("fixing points before reverseing\n");
     # push old first point to the back, so it stays the first point
     push(@$points, shift @$points);
     # fix point distances
     if ((defined (my $d0 = $points->[0]->{distance})) && (defined (my $dL = $points->[-2]->{distance}))) {
       for my $p ( @$points[0 .. $#$points - 1] ) {
-	$p->{distance} -= $d0;
+        $p->{distance} -= $d0;
       }
       $points->[-1]->{distance} = $dL;
     }
@@ -5910,7 +5943,7 @@ sub reversePoints {
   for my $f ( "direction", "heading", "curvature", "laneShift" ) {
     if (exists $points->[0]->{$f}) {
       for my $p ( @$points ) {
-	$p->{$f} = -$p->{$f};
+        $p->{$f} = -$p->{$f};
       }
     }
   }
@@ -5921,12 +5954,12 @@ sub reversePoints {
     my @newGradients = ();
     if ( $isLoop ) {
       for my $i ( 0 .. $#$points ) {
-	push @newGradients, -$points->[($i + 1) % @$points]->{gradient}
+        push @newGradients, -$points->[($i + 1) % @$points]->{gradient}
       }
     }
     else {
       for my $i ( 0 .. $#$points - 1 ) {
-	push @newGradients, -$points->[$i + 1]->{gradient};
+        push @newGradients, -$points->[$i + 1]->{gradient};
       }
       push @newGradients, $newGradients[-1];
     }
@@ -6763,7 +6796,11 @@ my $fixSteps;          # whether to flatten altitude steps
 my $gAutoSmooth = 0;   # auto-smoothing based on gradient
 my $gradientPower = 2; # power to raise gradient in evaluating segments for gradient signs
 my $gradientThreshold = 100; # minimum climb @ 10% grade to get a gradient sign
-my $gSmooth = 0;          # smoothing applied additionally to gradient
+my $gSmooth = 0;       # smoothing applied additionally to gradient
+my $gpxz;              # whether to do GPXZ elevation lookup
+my $gpxzAPIKey;        # GPXZ API key
+my $gpxzEnd;           # where to end GPXZ elevation lookup
+my $gpxzStart;         # where to start GPXZ elevation lookup
 my $isLoop;            # whether to apply periodic boundary conditions (smooth around the Loop)
 my $lAutoSmooth = 0;   # auto-smoothing based on position
 my $lSmooth;           # general smoothing, applies to positions and all other fields
@@ -6861,6 +6898,7 @@ my @deleteRange;          # pairs of positions for deleting points
 my @flatten;              # points come in sets of 4: altitude, start point, finish point, lambda
 my @join;                 # GPX file(s) to join to this one
 my @splice;               # GPX file(s) to splice in
+my @selectiveGPXZ;        # range(s) of GPXZ substitution
 my @selectiveLaneShift;   # allow lane shift to be specified in segments along the course
 my @selectiveMinRadius;   # allow minimum radius to vary along course
 my @selectiveSmooth;      # alternative to specifying smoothing varying along the course
@@ -6933,6 +6971,8 @@ GetOptions (
             "circuitToPoint=f{1,30}"       => \@circuitToPosition,
             "circuitsToPoint=f{1,30}"      => \@circuitToPosition,
             "closed!"       => \$closeLoop,
+	    "closedLap!"    => \$closeLoop,
+	    "closeLap!"     => \$closeLoop,
             "closedLoop!"   => \$closeLoop,
             "closeLoop!"    => \$closeLoop,
             "copyPoint!"    => \$copyPoint,
@@ -6974,6 +7014,11 @@ GetOptions (
             "fixSteps!"         => \$fixSteps,
             "flatten=f{1,1000}" => \@flatten,
             "gAutoSmooth=f" => \$gAutoSmooth,
+            "gpxz"          => \$gpxz,
+            "gpxzAPIKey=s"  => \$gpxzAPIKey,
+	    "gpxzEnd=f"     => \$gpxzEnd,
+	    "gpxzStart=f"   => \$gpxzStart,
+	    "gpxzStop=f"    => \$gpxzEnd,
             "gSmooth=f"     => \$gSmooth,
             "gSigma=f"      => \$gSmooth,
             "gradientPower=f"   => \$gradientPower,
@@ -7033,8 +7078,9 @@ GetOptions (
             "saveSimplifiedCourse!" => \$saveSimplifiedCourse,
             "segment=s"     =>  \$namedSegments,
             "segments=s"    =>  \$namedSegments,
-	    "selectiveMinRadius=f{0,1000}" => \@selectiveMinRadius,
-	    "selectiveGSmooth=f{0,1000}" => \@selectiveSmoothG,
+	    "selectiveGPXZ=f{0,1000}" => \@selectiveGPXZ,
+            "selectiveMinRadius=f{0,1000}" => \@selectiveMinRadius,
+            "selectiveGSmooth=f{0,1000}" => \@selectiveSmoothG,
             "selectiveLaneShift=f{0,1000}" => \@selectiveLaneShift,
             "selectiveSmooth=f{0,1000}" => \@selectiveSmooth,
             "selectiveSmoothG=f{0,1000}" => \@selectiveSmoothG,
@@ -7104,7 +7150,7 @@ GetOptions (
             "xShift=f"      => \$xShift,
             "yShift=f"      => \$yShift,
             "zAutoSmooth=f" => \$zAutoSmooth,
-	    "zEnd=f"        => \$zEnd,
+            "zEnd=f"        => \$zEnd,
             "zOffset=f"     => \$zOffset,
             "zScaleRef=f"   => \$zScaleRef,
             "zScaleReference=f"  => \$zScaleRef,
@@ -7115,10 +7161,9 @@ GetOptions (
             "zShiftTransition=f" => \$zShiftTransition,
             "zSmooth=f"     => \$zSmooth,
             "zSigma=f"      => \$zSmooth,
-	    "zStart=f"      => \$zStart,
+            "zStart=f"      => \$zStart,
            )
   or die("$0: ERROR processing command line options\n");
-
 
 if ($needHelp) {
   pod2usage(-exitval=>0, -verbose=>2);
@@ -7148,6 +7193,9 @@ die("-repeatedLaps limited to range 0 to 100\n")
 if ($loopLeft && $loopRight) {
   die("ERROR: you cannot specify both -loopLeft and -loopRight\n");
 }
+
+# check gpxz
+$gpxz //= (defined $gpxzStart) || (defined $gpxzEnd) || (@selectiveGPXZ > 0);
 
 # short-cut for out-and-back
 if ( $outAndBack || $outAndBackLap ) {
@@ -7735,6 +7783,93 @@ sub addCornerWaypoints {
   return \@waypoints;
 }
 
+# replaces elevations in selected ranges
+# set elevations in selected ranges
+sub gpxzElevations {
+  my %var = @_;
+  my $points = $var{points};
+  my $isLoop = $var{isLoop};
+  my $apiKey = $var{apiKey} // $ENV{GPXZ_API_KEY};
+  my $ranges = $var{ranges} // [];
+  my $start  = $var{start};
+  my $end    = $var{end};
+
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+
+  if ((defined $start) || (defined $end)) {
+    $start //= 0;
+    $end //= $courseDistance;
+  }
+
+  die("ERROR: gpxz elevations requested without an api key.\n")
+    unless(defined $apiKey);
+
+  use URI::Escape;
+
+  my $N = scalar @$points;
+  my $NBatch = 512;
+    
+  # create intervals
+  my @intervals = ();
+  for (my $i = 0; $i < @$ranges; $i += 2) {
+    my $iStart = $ranges->[$i];
+    my $iStop  = $ranges->[$i + 1] // $courseDistance;
+    push @intervals, [$iStart, $iStop];
+  }
+  push @intervals, [$start, $end]
+    if ((defined $start) || (defined $end));
+
+  # Process points in batches of 500
+  my $batch = [];
+  my @batches = ();
+  for (my $i = 0; $i < $N; $i ++) {
+    my $s = $points->[$i]->{distance};
+    if (isPointInIntervals(points=> $points, isLoop=> $isLoop, distance=> $s, intervals=> \@intervals)) {
+      push @$batch, $i;
+      if (@$batch >= $NBatch) {
+	push @batches, $batch;
+	$batch = [];
+      }
+    }
+  }
+  push @batches, $batch
+    if (@$batch);
+
+  for my $iBatch ( 0 .. $#batches ) {
+    my $batch = $batches[$iBatch];
+    my @locations;
+    for my $u ( @$batch ) {
+      # Build the locations string for the API
+      push @locations, "$points->[$u]->{lat},$points->[$u]->{lon}";
+    }
+      
+    my $latLonString = join('|', @locations);
+      
+    # Build URL with query parameters
+    my $url = 'https://api.gpxz.io/v1/elevation/points?latlons=' . uri_escape($latLonString);
+    # my $url = 'https://api.gpxz.io/v1/elevation/points?latlons=' . $latLonString;
+    my $headers = { 'x-api-key' => $apiKey };
+    my $json = loadURL($url, $headers);
+
+    my $data = decode_json($json);
+
+    # Assign elevations back to the hash
+    if ($data->{results}) {
+      for my $i ( 0 .. $#$batch ) {
+	my $u = $batch->[$i];
+	if ($data->{results}[$i] && defined $data->{results}[$i]{elevation}) {
+	  $points->[$u]->{ele} = $data->{results}[$i]{elevation};
+	} else {
+	  warn "No elevation data for point: $u\n";
+	}
+      }
+    }
+     
+    # Be nice to the API - add a small delay between batches
+    sleep(1) if ($iBatch < $#batches);
+  }
+}
+
 # proc to print user messages
 # here so it can access $quiet as a global variable
 sub note {
@@ -7795,6 +7930,13 @@ for my $file ( @files ) {
   # eliminate duplicate x,y points
   $points = removeDuplicatePoints(points=> $points, isLoop=> $isLoop);
 
+
+  # GPXz elevation substitution
+  if ($gpxz) {
+    note("processing GPXz elevations...\n");
+    gpxzElevations(points=> $points, isLoop=> $isLoop, apiKey=> $gpxzAPIKey, ranges=> \@selectiveGPXZ, start=> $gpxzStart, end=> $gpxzEnd);
+  }    
+  
   # if repeat is specified, then create replicates
   {
     my $r = (($repeat > 0) ? $repeat : 0) + (($repeatedLaps > 1) ? $repeatedLaps - 1 : 0);
@@ -8078,7 +8220,6 @@ for my $file ( @files ) {
 
     my $dSlope = (defined $zEnd) ? ($zEnd - $zStart + $points->[0]->{ele} - $points->[-1]->{ele}) / $courseDistance : 0;
 
-    warn("zStart = $zStart; zEnd = $zEnd; dSlope = $dSlope\n");
     my $dz = $zStart - $points->[0]->{ele};
     for my $p ( @$points ) {
       $p->{ele} += $dz + $p->{distance} * $dSlope;
@@ -8118,11 +8259,11 @@ for my $file ( @files ) {
     addDistanceField(points=> $points);
     for (my $n = 0; $n < @uniformGradient; $n += 3) {
       my $start = $uniformGradient[$n];
-      my $stop  = $uniformGradient[$n + 1] if ($n < $#uniformGradient);
+      my $end  = $uniformGradient[$n + 1] if ($n < $#uniformGradient);
       my $bow   = $uniformGradient[$n + 2] if ($n + 1 < $#uniformGradient);
       $bow //= 0;
-      note("applying uniform gradient between points from $start to $stop...\n");
-      $points = applyUniformGradient(points=> $points, start=> $start, stop=> $stop, bow=> $bow, lambda=> $uniformGradientTransition);
+      note("applying uniform gradient between points from $start to $end...\n");
+      $points = applyUniformGradient(points=> $points, start=> $start, end=> $end, bow=> $bow, lambda=> $uniformGradientTransition);
     }
   }
 
@@ -8135,16 +8276,16 @@ for my $file ( @files ) {
     for (my $nf = 0; $nf < @flatten; $nf += 6) {
       my $flattenStart = $flatten[$nf];
       my $zFlatten1    = $flatten[$nf + 1] if ($nf < $#flatten);
-      my $flattenStop  = $flatten[$nf + 2] if ($nf + 1 < $#flatten);
+      my $flattenEnd  = $flatten[$nf + 2] if ($nf + 1 < $#flatten);
       my $zFlatten2    = $flatten[$nf + 3] if ($nf + 2 < $#flatten);
       my $lambda       = $flatten[$nf + 4] if ($nf + 3 < $#flatten);
       my $bow          = $flatten[$nf + 5] if ($nf + 4 < $#flatten);
       $bow //= 0;
       $lambda //= 10 + sqrt($zSmooth ** 2 + $lSmooth ** 2);
-      $flattenStop //= ($points->[-1]->{distance} + 1000 * $lambda + 1000);
+      $flattenEnd //= ($points->[-1]->{distance} + 1000 * $lambda + 1000);
       $zFlatten2   //= $zFlatten1;
-      note("flattening course from $flattenStart ($zFlatten1 meters) to $flattenStop ($zFlatten2 meters)\n");
-      $points = applyUniformGradient(points=> $points, start=> $flattenStart, stop=> $flattenStop, z1=> $zFlatten1, z2=> $zFlatten2, lambda=> $lambda, bow=> $bow);
+      note("flattening course from $flattenStart ($zFlatten1 meters) to $flattenEnd ($zFlatten2 meters)\n");
+      $points = applyUniformGradient(points=> $points, start=> $flattenStart, end=> $flattenEnd, z1=> $zFlatten1, z2=> $zFlatten2, lambda=> $lambda, bow=> $bow);
     }
   }
 
@@ -8599,7 +8740,7 @@ for my $file ( @files ) {
 
             my $u = $s / $sigma{$key};
             #my $w = exp(-$u ** 2 / 2) * (1 - $s / $courseDistance);
-	    my $w = smoothKernel($u) * (1 - $s / $courseDistance);
+            my $w = smoothKernel($u) * (1 - $s / $courseDistance);
             $points->[$i]->{$key} -= $w * $dy0;
 
             $i += $d;
@@ -8760,7 +8901,7 @@ for my $file ( @files ) {
     my $shifts = applySelectiveField(points=> $points, values=> \@selectiveLaneShift, transition=> $shiftDistance, isLoop=> $isLoop, courseDistance=> $courseDistance);
     if ( @$shifts ) {
       for my $i ( 0 .. $#$points ) {
-	$points->[$i]->{shift} += $shifts->[$i];
+        $points->[$i]->{shift} += $shifts->[$i];
       }
     }
   }
@@ -9454,7 +9595,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.65
+0.66
 
 =head1 DESCRIPTION
 
@@ -9581,7 +9722,7 @@ for example with the "cpan" command-line tool:
 
 For processing BikeTerra routes or GPX files directly you need:
 
- HTTP::Tiny   : used for downloading data from the web.
+  HTTP::Tiny  : used for downloading data from the web.
 
 and for BikeTerra route data (as opposed to GPX files) you need:
 
@@ -10173,9 +10314,13 @@ the end of the track.
 
 =item B<C<-closed>>
 
-=item B<C<-closedLoop>>
+=item B<C<-closeLap>>
 
 =item B<C<-closeLoop>>
+
+=item B<C<-closedLap>>
+
+=item B<C<-closedLoop>>
 
 Equivalent to C<-copyPoint> C<-loop>.  Negation negates C<-copyPoint>
 and negates C<-loop> unless it has already been been set.
@@ -10582,19 +10727,82 @@ C<-flatten> is done <i>after</i> C<uniformGradient>, so if both are
 specified and they overlap, the C<-flatten> will replace the
 C<-uniformGradient>.
 
+=item B<C<-gpxz>>
+
+Specifies that GPXZ elevations will be applied to points.  This step
+is done very early, before any other processing.  So if you, for
+example, apply smoothing or use C<-join> or C<-split> or C<-crop> then
+the elevation lookup will be done before any of these operations.
+Additionally, all point smoothing, curve fitting, etc, will happen
+after elevation substitution.
+
+GPXz requires an API key.  There are two ways to provide this.
+One is to use the C<GPXZ_API_KEY> environment variable.  The other is
+to specify an API key with the C<-gpxzAPIKey> option.  Specifying the
+API key does not initiate GPXZ elevation, however.  You still need
+to specify either this or one of the other options.
+
+GPXZ is prone to issues.  For example, it is the terrain elevation, so
+bridges and tunnels will have elevations associated with the terrain,
+not the road.  So proceed with caution.  A recommended process flow is
+to do GPXZ first, then check results in an editor like GPXMagic, then
+do processing with a second processGPX step.  If you are 100%
+confident in the GPXz data for a particular route, then of course you
+can combine smoothing and GPXz in the same step, for example with
+C<-processGPX -gpxz -auto>.
+
+=item B<C<-gpxzAPIKey>>
+
+This specifies a GPXZ API key, for GPXZ elevation substitution.  An
+alternate to using this option is to set the GPXZ_API_KEY environment
+variable.  This option does not initiate GPXZ elevation substitution:
+you still need to specify one of the other options.
+
+=item B<C<-gpxzEnd>> <meters>
+
+This specifies a course distance at which to end GPXZ elevation
+lookup.  It by default automatically applies the C<-gpxz> option, so
+no need to apply both.
+
+Positions are determined from the starting file, before any smoothing,
+splitting, joining, cropping, etc.  Of course positions may differ
+between this and other tools such as GPXMagic due to the use of
+different algorithms
+
+If the end is before the start the region will wrap around from the
+finish to the start.
+
+=item B<C<-gpxzStart>> <meters>
+
+This specifies a course distance at which to begin GPXZ elevation
+lookup.  It by default automatically applies the C<-gpxz> option,
+so no need to apply both.
+
+Positions are determined from the starting file, before any smoothing,
+splitting, joining, cropping, etc.  Of course positions may differ
+between this and other tools such as GPXMagic due to the use of
+different algorithms
+
+If the end is before the start the region will wrap around from the
+finish to the start.
+
+=item B<C<-gpxzStop>> <meters>
+
+This is a synonym for C<-GPXZEnd>.
+
 =item B<C<-gAutoSmooth>>
 
 Synonym for C<-autoSmoothG>
 
-=item B<C<-gSmooth>>
+=item B<C<-gSmooth>> <meters>
 
 Synonym for C<-smoothG>
 
-=item B<C<-gSigma>>
+=item B<C<-gSigma>> <meters>
 
 Synonym for C<-smoothG>
 
-=item B<C<-gradientPower>>
+=item B<C<-gradientPower>> <number>
 
 For gradient signs, how much of a power to apply to gradient in
 determining where signs go.  If 0, then all that matters is altitude:
@@ -10604,7 +10812,7 @@ this number, the more likely a gradient sign is to go on a short steep
 pitch versus a longer, more gradual climb containing the short steep
 pitch.
 
-=item B<C<-gradientThreshold>>
+=item B<C<-gradientThreshold> <meters>>
 
 This determines the threshold at which a gradient sign gets put in.
 The units are meters: a 10% climb needs to gain this much altitude
@@ -10832,7 +11040,7 @@ smoothing, for example C<-smooth 20>.
 This is the same as C<-outAndBack> (read that section as well), except
 also adds a turn-around to create a lappable course.  If you want the
 turnaround and lap loops to be different than the default radius, then
-you can specify these separately with -rTurnaround and/or C<-rLap>.
+you can specify these separately with C<-rTurnaround> and/or C<-rLap>.
 
 This option is not generally needed with BikeTerra which automatically
 forms turn-around loops at each end of a point-to-point course.
@@ -11070,6 +11278,18 @@ This command is RGT-specific.  Since RGT no longer exists it thus
 serves no purpose.  It will be revised if and when another program
 is identified which develops similar functionality.
 
+=item B<C<-selectiveGPXZ>> <meters> ...
+
+This specifies range(s) over which to apply GPXZ elevation substitution.
+As with other range options, it alternates start and end positions.
+Positions are determined from the unprocessed starting file, before
+any smoothing, cropping, joining, splitting, etc.
+
+You specify alternating start and stop positions.  If a stop is before
+a start, then the interval wraps around the start/finish.  If an end
+position is missing, the interval extends to the end of the route.
+There is no way for a start position to be missing.
+
 =item B<C<-selectiveGSmooth>> <meters> ...
 
 This is an alias for C<-selectiveSmoothG>, which provides for
@@ -11167,7 +11387,7 @@ C<-selectiveSmoothZ 15 4000 50 5000 15>
 
 =item B<C<-selectiveZSmooth>> <meters> ...
 
-an alias for -selectiveSmoothZ
+an alias for C<-selectiveSmoothZ>
 
 =item B<C<-selectiveSpacing>> <meters> ...
 
