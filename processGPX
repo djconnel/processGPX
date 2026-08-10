@@ -70,8 +70,9 @@ use Pod::Usage;
 #               reversePoints redone, fixCrossings interpolatePoint bug, maxSlope removed, new BTJSON format replaces old format
 # version 0.66: add GPXZ, added isPointInIntervals, more consistent use of start..end instead of start...stop. Options:
 #               -gpxz, -gpxzAPIKey, -gpxzStart, -gpxzEnd, -gpxzStop, -selectiveGPXZ.  Also added -closeLap and -closedLap aliases
+# version 0.67: GPXZ example added, change GPXZ to post, fixed error when arcFitting across S/F
 
-my $version = "0.66"; # make sure this matches pod value
+my $version = "0.67"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -109,11 +110,11 @@ sub loadURL {
       $command = "$command --header " . $h . ":" . $headers->{$h};
     }
     note("trying $command ...\n");
-    $s = eval { $s = `$command` };
+    eval { $s = `$command` };
     unless ( defined $s ) {
       $command = "wget $url";
       for my $h ( keys(%$headers) ) {
-	$command = "$command --header=" . $h . ":" . $headers->{$h};
+        $command = "$command --header=" . $h . ":" . $headers->{$h};
       }
       note("trying $command ...\n");
       eval { $s = `$command` };
@@ -121,6 +122,7 @@ sub loadURL {
   }
   return $s;
 }
+
 
 #
 # load a file and return a points list
@@ -242,7 +244,6 @@ sub loadBTRoute {
   require JSON;
   note("processing BikeTerra route data for route " . $BTRoute . "\n");
   my $url = "https://biketerra.com/routes/$BTRoute/__data.json";
-  use JSON;
   my $json = JSON->new->allow_nonref();
   my $s = loadURL($url);
   my $data = $json->decode($s);
@@ -323,7 +324,8 @@ sub loadBTJSON {
   close $fp;
 
   # Parse JSON data
-  my $json = JSON::PP->new();
+  require JSON;
+  my $json = JSON->new->allow_nonref();
   my $data = $json->decode($s);
 
   my $version = $data->{version};
@@ -645,7 +647,7 @@ sub isPointInInterval {
   my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
   my $start = $var{start} // $points->[0]->{distance};
   my $end = $var{end} // $courseDistance // $points->[-1]->{distance};
-  
+
   return 0 unless (defined $s);
   if ($isLoop) {
     if (defined $courseDistance) {
@@ -759,7 +761,6 @@ sub deltaxy {
 sub pointsAreClose {
   my $p1 = shift;
   my $p2 = shift;
-
   my $sMax = shift // 0.05;
   my $zMax = shift // 1;
   my $dz = ((defined $p1->{ele}) && (defined $p2->{ele})) ? ($p2->{ele} - $p1->{ele}) : 0;
@@ -888,6 +889,7 @@ sub pointDirection {
 
 #
 # shift a point by a given distance in a given direction
+# uses uses starting latitude only, so linear approximation
 #
 sub shiftPoint {
   my %var = @_;
@@ -906,8 +908,8 @@ sub shiftPoint {
   # lane shift, 90 degrees
   my $dx = $s * $distance;
   my $dy = -$c * $distance;
-  my $dlng = $dx / ($lat2y * cos($deg2rad * $point->{lat}));
   my $dlat = $dy / $lat2y;
+  my $dlng = $dx / ($lat2y * cos($deg2rad * $point->{lat} + $dlat / 2));
   my %pNew = %$point;
   $pNew{lon} += $dlng;
   $pNew{lat} += $dlat;
@@ -950,6 +952,7 @@ sub shiftVertex {
 
 #
 # shift points on a route
+# uses iterative calculation with big shifts (unlike shiftPoint())
 #
 sub shiftRoute {
   my %var = @_;
@@ -1491,8 +1494,6 @@ sub addVectorToLatLng {
 
 
 # add a vector to a point
-# a single iteration will use the average cosine for the path rather than
-# a starting cosine, just for maximal accuracy
 sub addVectorToPoint {
   my $p = shift;
   my $v = shift;
@@ -2213,24 +2214,23 @@ sub addSplines {
       }
 
       my $k = ($i - 1) % @$points;
-      while (pointsAreClose($points->[$i], $points->[$k], 1)) {
+      while (pointsAreClose($points->[$i], $points->[$k], 1, 1e9)) {
         next iLoop if ($k == ($isLoop ? $j : 0));
         $k = ($k - 1) % @$points;
       }
-
+      while (pointsAreClose($points->[$i], $points->[$j], 1, 1e9)) {
+        next iLoop if ($j == ($isLoop ? $i : $#$points));
+        $j = ($j + 1) % @$points;
+      }
       my $l = ($j + 1) % @$points;
-      while (pointsAreClose($points->[$j], $points->[$l], 1)) {
+      while (pointsAreClose($points->[$j], $points->[$l], 1, 1e9)) {
+        next iLoop if ($l == ($isLoop ? $i : $#$points));
         $l = ($l + 1) % @$points;
-        if ($isLoop) {
-          next iLoop if ( ($l <= $i) && ($l >= $k) );
-        } else {
-          next iLoop if ($l <= $j);
-        }
       }
       if ($isLoop) {
         next iLoop if ( ($l <= $j) && ($l >= $k) );
       } else {
-        next iLoop if ($l <= $j);
+        next iLoop if (($k >= $i) || ($i >= $j) || ($j >= $l));
       }
 
       # points are in order: k i j l
@@ -5152,7 +5152,7 @@ sub findArcs {
          ($sigma > abs($mean) / 3)
         )
        ) {
-      note("arc found from points $i to $j\n");
+      note("arc found from points $i to $j of " . scalar(@$points) . "\n");
       my $d = $j - $i;
       $d -= int($d / @$points);
       push @arcs, [$i, $j] if ($d > 1);
@@ -6971,8 +6971,8 @@ GetOptions (
             "circuitToPoint=f{1,30}"       => \@circuitToPosition,
             "circuitsToPoint=f{1,30}"      => \@circuitToPosition,
             "closed!"       => \$closeLoop,
-	    "closedLap!"    => \$closeLoop,
-	    "closeLap!"     => \$closeLoop,
+            "closedLap!"    => \$closeLoop,
+            "closeLap!"     => \$closeLoop,
             "closedLoop!"   => \$closeLoop,
             "closeLoop!"    => \$closeLoop,
             "copyPoint!"    => \$copyPoint,
@@ -7016,9 +7016,9 @@ GetOptions (
             "gAutoSmooth=f" => \$gAutoSmooth,
             "gpxz"          => \$gpxz,
             "gpxzAPIKey=s"  => \$gpxzAPIKey,
-	    "gpxzEnd=f"     => \$gpxzEnd,
-	    "gpxzStart=f"   => \$gpxzStart,
-	    "gpxzStop=f"    => \$gpxzEnd,
+            "gpxzEnd=f"     => \$gpxzEnd,
+            "gpxzStart=f"   => \$gpxzStart,
+            "gpxzStop=f"    => \$gpxzEnd,
             "gSmooth=f"     => \$gSmooth,
             "gSigma=f"      => \$gSmooth,
             "gradientPower=f"   => \$gradientPower,
@@ -7078,7 +7078,7 @@ GetOptions (
             "saveSimplifiedCourse!" => \$saveSimplifiedCourse,
             "segment=s"     =>  \$namedSegments,
             "segments=s"    =>  \$namedSegments,
-	    "selectiveGPXZ=f{0,1000}" => \@selectiveGPXZ,
+            "selectiveGPXZ=f{0,1000}" => \@selectiveGPXZ,
             "selectiveMinRadius=f{0,1000}" => \@selectiveMinRadius,
             "selectiveGSmooth=f{0,1000}" => \@selectiveSmoothG,
             "selectiveLaneShift=f{0,1000}" => \@selectiveLaneShift,
@@ -7804,11 +7804,9 @@ sub gpxzElevations {
   die("ERROR: gpxz elevations requested without an api key.\n")
     unless(defined $apiKey);
 
-  use URI::Escape;
-
   my $N = scalar @$points;
   my $NBatch = 512;
-    
+
   # create intervals
   my @intervals = ();
   for (my $i = 0; $i < @$ranges; $i += 2) {
@@ -7827,44 +7825,75 @@ sub gpxzElevations {
     if (isPointInIntervals(points=> $points, isLoop=> $isLoop, distance=> $s, intervals=> \@intervals)) {
       push @$batch, $i;
       if (@$batch >= $NBatch) {
-	push @batches, $batch;
-	$batch = [];
+        push @batches, $batch;
+        $batch = [];
       }
     }
   }
   push @batches, $batch
     if (@$batch);
 
+  require JSON;
+  my $json = JSON->new->allow_nonref();
+  my $http = HTTP::Tiny->new(timeout => 30);
+
   for my $iBatch ( 0 .. $#batches ) {
     my $batch = $batches[$iBatch];
     my @locations;
     for my $u ( @$batch ) {
       # Build the locations string for the API
-      push @locations, "$points->[$u]->{lat},$points->[$u]->{lon}";
+      push @locations, sprintf("%.7f,%.7f", $points->[$u]->{lat}, $points->[$u]->{lon});
     }
-      
-    my $latLonString = join('|', @locations);
-      
-    # Build URL with query parameters
-    my $url = 'https://api.gpxz.io/v1/elevation/points?latlons=' . uri_escape($latLonString);
-    # my $url = 'https://api.gpxz.io/v1/elevation/points?latlons=' . $latLonString;
-    my $headers = { 'x-api-key' => $apiKey };
-    my $json = loadURL($url, $headers);
 
-    my $data = decode_json($json);
+    my $latLonString = join('|', @locations);
+
+    # Build URL with query parameters
+    my $url = 'https://api.gpxz.io/v1/elevation/points';
+    my $headers =
+      {
+       'Content-Type' => 'application/x-www-form-urlencoded',
+       'X-Api-Key'  => $apiKey
+      };
+
+    my $body =
+      {
+       headers=> $headers,
+       content => 'latlons=' . $latLonString,
+      };
+
+    my $response = $http->post($url, $body);
+
+    my $data;
+
+    if ($response->{success}) {
+      $data = $json->decode($response->{content});
+    }
+    else {
+      warn "GPXZ API request failed ($response->{status} $response->{reason}): "
+        . ($response->{content} // '') . "\n";
+      # try curl
+      my $command = "curl -X POST -H \"Content-Type: application/json\" -H \"X-Api-Key: $apiKey\"  -d '{\"latlons\": \"$latLonString\"}' $url";
+      note("trying $command ...\n");
+      my $s =`$command`;
+      $data = $json->decode($s);
+    }
+
+    unless (ref $data eq 'HASH' && ref $data->{results} eq 'ARRAY') {
+      die "Unexpected GPXZ API response shape: $response->{content}\n";
+    }
 
     # Assign elevations back to the hash
     if ($data->{results}) {
       for my $i ( 0 .. $#$batch ) {
-	my $u = $batch->[$i];
-	if ($data->{results}[$i] && defined $data->{results}[$i]{elevation}) {
-	  $points->[$u]->{ele} = $data->{results}[$i]{elevation};
-	} else {
-	  warn "No elevation data for point: $u\n";
-	}
+        my $u = $batch->[$i];
+        if ($data->{results}[$i] && defined $data->{results}[$i]{elevation}) {
+          $points->[$u]->{ele} = $data->{results}[$i]{elevation};
+        } else {
+          warn "No elevation data for point: $u\n";
+        }
       }
     }
-     
+
     # Be nice to the API - add a small delay between batches
     sleep(1) if ($iBatch < $#batches);
   }
@@ -7935,8 +7964,8 @@ for my $file ( @files ) {
   if ($gpxz) {
     note("processing GPXz elevations...\n");
     gpxzElevations(points=> $points, isLoop=> $isLoop, apiKey=> $gpxzAPIKey, ranges=> \@selectiveGPXZ, start=> $gpxzStart, end=> $gpxzEnd);
-  }    
-  
+  }
+
   # if repeat is specified, then create replicates
   {
     my $r = (($repeat > 0) ? $repeat : 0) + (($repeatedLaps > 1) ? $repeatedLaps - 1 : 0);
@@ -8167,7 +8196,7 @@ for my $file ( @files ) {
   }
 
   # if shiftSF is specified but not loop, that's an error
-  die("ERROR: -shiftSF is only compatible with the -lap (or -loop) option.\n")
+  die("ERROR: -shiftSF is only compatible on loop (lap) courses\n")
     unless ( ($shiftSF == $shiftSFDefault) || $isLoop );
 
   # process RGT2BT options
@@ -9595,7 +9624,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.66
+0.67
 
 =head1 DESCRIPTION
 
@@ -12803,6 +12832,71 @@ This approach uses a I<simplified> form of the Biketerra route,
 not the full resolution version, which would require authentication to
 access.
 
+Better is too download a GPX file from BikeTerra using the "save"
+option in the route editor, then save as a GPX file.  Alternately you
+can save it as a JSON file and use the BTJSON: prefix to the filename.
+
+=head2 using GPXZ digital elevation model
+
+ProcessGPX can replace altitudes of points with the GPXZ digital
+elevation model API.  This requires an API key.  The easiest approach
+is to store the API key in the GPXZ_API_KEY environment variable.  An
+alternative is to provide the API key with the C<-gpxzAPIKey> option.
+
+The digital elevation model provides elevations of specific points.
+Accuracy and precision of point placements thus becomes very
+important.  Additionally, elevations in bridges and tunnels will not
+represent the actual road.  So this needs to be used with extreme
+care.
+
+Points re accessed from GPXZ in batches of 512 points.  To avoid
+delays, and avoid charges, it's best to limit the number of points.
+ProcessGPX tends to put a high density of points in corners, for
+example, to provide sufficient resolution of the trajectory through
+corners.  But such a high density of points may not be necessary for
+realstic gradient determination.  So GPXZ is done using the points of
+the original input file, processing them only to remove duplicate
+points and "zig-zags" first.  But perhaps you want a higher resolution
+of points, for a finer determination of gradients.  If this is the
+case, you will want to run first with processGPX with the C<-spacing>
+option, for example.  Or you might want to add points in a GPX editor
+like GPXMagic.
+
+You will almost certainly want to check the results afterwards.  In
+addition to bridges and tunnels, steep canyons, for example, might
+present a challenge.  These can be repaired using the
+C<-uniformGradient> option in prcessGPX, which allows specification of
+segments which will use interpolated altitude.  Or, again, editing in
+GPXMagic may be a good approach.  This should probably be done before
+point smoothing, so you would run GPXZ in C<processGPX> first, then
+edit the elevations, then run processGPX again for smoothing.
+
+Maybe for a long route you won't want to run GPXZ lookup on the entire
+route.  If so, you can use the C<-gpxzStart> and C<-gpxzEnd> options
+to specify a single portion to check, or you can use C<-selectiveGPXZ>
+to provide pairs of start and finishing distances (all in meters) to
+provide multiple segments to be processed.
+
+If you are sure the GPXZ data are good for the whole route, then you
+can simply do everything in one shot, for example:
+
+C<processGPX -auto -gpxz inputFile.gpx -o outputFile.gpx>
+
+But more typically you might use a multi-step process.  For example:
+
+C<processGPX -spacing 10 inputFile.gpx -o tmp1.gpx>
+
+C<processGPX -gpxz tmp1.gpx -o tmp2.gpx>
+
+C<processGPX -simplify -auto -uniformGradient 1200 1350 5420 5470 tmp2.gpx outputFile.gpx>
+
+In this example, first the number of points was increased to a 10
+meter spacing to provide a minimum gradient resolution.  Then GPXZ was
+done on the entire route.  Then finally, two sections were made
+uniform gradient (after looking up coordinates in a GPX viewer,
+recognizing distances may differ slightly depending on the assumptions
+of the editor and processGPX), and typical smoothing was performed.
+
 =head2 specifying metadata
 
 GPX files have "metadata" which is various tags. You can change values of
@@ -12943,4 +13037,3 @@ modify it under the same terms as Perl itself.
 
 =cut
 # eof
-

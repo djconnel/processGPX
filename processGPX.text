@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.66
+    0.67
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -2881,6 +2881,69 @@ EXAMPLES
 
     This approach uses a *simplified* form of the Biketerra route, not the
     full resolution version, which would require authentication to access.
+
+    Better is too download a GPX file from BikeTerra using the "save" option
+    in the route editor, then save as a GPX file. Alternately you can save
+    it as a JSON file and use the BTJSON: prefix to the filename.
+
+  using GPXZ digital elevation model
+    ProcessGPX can replace altitudes of points with the GPXZ digital
+    elevation model API. This requires an API key. The easiest approach is
+    to store the API key in the GPXZ_API_KEY environment variable. An
+    alternative is to provide the API key with the "-gpxzAPIKey" option.
+
+    The digital elevation model provides elevations of specific points.
+    Accuracy and precision of point placements thus becomes very important.
+    Additionally, elevations in bridges and tunnels will not represent the
+    actual road. So this needs to be used with extreme care.
+
+    Points re accessed from GPXZ in batches of 512 points. To avoid delays,
+    and avoid charges, it's best to limit the number of points. ProcessGPX
+    tends to put a high density of points in corners, for example, to
+    provide sufficient resolution of the trajectory through corners. But
+    such a high density of points may not be necessary for realstic gradient
+    determination. So GPXZ is done using the points of the original input
+    file, processing them only to remove duplicate points and "zig-zags"
+    first. But perhaps you want a higher resolution of points, for a finer
+    determination of gradients. If this is the case, you will want to run
+    first with processGPX with the "-spacing" option, for example. Or you
+    might want to add points in a GPX editor like GPXMagic.
+
+    You will almost certainly want to check the results afterwards. In
+    addition to bridges and tunnels, steep canyons, for example, might
+    present a challenge. These can be repaired using the "-uniformGradient"
+    option in prcessGPX, which allows specification of segments which will
+    use interpolated altitude. Or, again, editing in GPXMagic may be a good
+    approach. This should probably be done before point smoothing, so you
+    would run GPXZ in "processGPX" first, then edit the elevations, then run
+    processGPX again for smoothing.
+
+    Maybe for a long route you won't want to run GPXZ lookup on the entire
+    route. If so, you can use the "-gpxzStart" and "-gpxzEnd" options to
+    specify a single portion to check, or you can use "-selectiveGPXZ" to
+    provide pairs of start and finishing distances (all in meters) to
+    provide multiple segments to be processed.
+
+    If you are sure the GPXZ data are good for the whole route, then you can
+    simply do everything in one shot, for example:
+
+    "processGPX -auto -gpxz inputFile.gpx -o outputFile.gpx"
+
+    But more typically you might use a multi-step process. For example:
+
+    "processGPX -spacing 10 inputFile.gpx -o tmp1.gpx"
+
+    "processGPX -gpxz tmp1.gpx -o tmp2.gpx"
+
+    "processGPX -simplify -auto -uniformGradient 1200 1350 5420 5470
+    tmp2.gpx outputFile.gpx"
+
+    In this example, first the number of points was increased to a 10 meter
+    spacing to provide a minimum gradient resolution. Then GPXZ was done on
+    the entire route. Then finally, two sections were made uniform gradient
+    (after looking up coordinates in a GPX viewer, recognizing distances may
+    differ slightly depending on the assumptions of the editor and
+    processGPX), and typical smoothing was performed.
 
   specifying metadata
     GPX files have "metadata" which is various tags. You can change values

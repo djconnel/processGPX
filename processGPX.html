@@ -36,6 +36,7 @@
       <li><a href="#adding-gradient-signs">adding gradient signs</a></li>
       <li><a href="#processing-a-BikeTerra-route-from-the-original-GPX">processing a BikeTerra route from the original GPX</a></li>
       <li><a href="#processing-a-BikeTerra-route-from-route-data">processing a BikeTerra route from route data</a></li>
+      <li><a href="#using-GPXZ-digital-elevation-model">using GPXZ digital elevation model</a></li>
       <li><a href="#specifying-metadata">specifying metadata</a></li>
       <li><a href="#converting-an-RGT-route-to-BikeTerra">converting an RGT route to BikeTerra</a></li>
     </ul>
@@ -56,7 +57,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.66</p>
+<p>0.67</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -2520,6 +2521,34 @@ Pod::Usage   : for the -help option</code></pre>
 <p><code>processGPX BikeTerraRoute:12426 -out route.gpx</code></p>
 
 <p>This approach uses a <i>simplified</i> form of the Biketerra route, not the full resolution version, which would require authentication to access.</p>
+
+<p>Better is too download a GPX file from BikeTerra using the &quot;save&quot; option in the route editor, then save as a GPX file. Alternately you can save it as a JSON file and use the BTJSON: prefix to the filename.</p>
+
+<h2 id="using-GPXZ-digital-elevation-model">using GPXZ digital elevation model</h2>
+
+<p>ProcessGPX can replace altitudes of points with the GPXZ digital elevation model API. This requires an API key. The easiest approach is to store the API key in the GPXZ_API_KEY environment variable. An alternative is to provide the API key with the <code>-gpxzAPIKey</code> option.</p>
+
+<p>The digital elevation model provides elevations of specific points. Accuracy and precision of point placements thus becomes very important. Additionally, elevations in bridges and tunnels will not represent the actual road. So this needs to be used with extreme care.</p>
+
+<p>Points re accessed from GPXZ in batches of 512 points. To avoid delays, and avoid charges, it&#39;s best to limit the number of points. ProcessGPX tends to put a high density of points in corners, for example, to provide sufficient resolution of the trajectory through corners. But such a high density of points may not be necessary for realstic gradient determination. So GPXZ is done using the points of the original input file, processing them only to remove duplicate points and &quot;zig-zags&quot; first. But perhaps you want a higher resolution of points, for a finer determination of gradients. If this is the case, you will want to run first with processGPX with the <code>-spacing</code> option, for example. Or you might want to add points in a GPX editor like GPXMagic.</p>
+
+<p>You will almost certainly want to check the results afterwards. In addition to bridges and tunnels, steep canyons, for example, might present a challenge. These can be repaired using the <code>-uniformGradient</code> option in prcessGPX, which allows specification of segments which will use interpolated altitude. Or, again, editing in GPXMagic may be a good approach. This should probably be done before point smoothing, so you would run GPXZ in <code>processGPX</code> first, then edit the elevations, then run processGPX again for smoothing.</p>
+
+<p>Maybe for a long route you won&#39;t want to run GPXZ lookup on the entire route. If so, you can use the <code>-gpxzStart</code> and <code>-gpxzEnd</code> options to specify a single portion to check, or you can use <code>-selectiveGPXZ</code> to provide pairs of start and finishing distances (all in meters) to provide multiple segments to be processed.</p>
+
+<p>If you are sure the GPXZ data are good for the whole route, then you can simply do everything in one shot, for example:</p>
+
+<p><code>processGPX -auto -gpxz inputFile.gpx -o outputFile.gpx</code></p>
+
+<p>But more typically you might use a multi-step process. For example:</p>
+
+<p><code>processGPX -spacing 10 inputFile.gpx -o tmp1.gpx</code></p>
+
+<p><code>processGPX -gpxz tmp1.gpx -o tmp2.gpx</code></p>
+
+<p><code>processGPX -simplify -auto -uniformGradient 1200 1350 5420 5470 tmp2.gpx outputFile.gpx</code></p>
+
+<p>In this example, first the number of points was increased to a 10 meter spacing to provide a minimum gradient resolution. Then GPXZ was done on the entire route. Then finally, two sections were made uniform gradient (after looking up coordinates in a GPX viewer, recognizing distances may differ slightly depending on the assumptions of the editor and processGPX), and typical smoothing was performed.</p>
 
 <h2 id="specifying-metadata">specifying metadata</h2>
 
