@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.67
+    0.68
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -985,6 +985,10 @@ OPTIONS
         transition from the flattened profile back to the unaltered profile.
         The side of the flattening is determined by the "-rCrossing" option.
 
+        If a route repeats sections of road (such as would be detected with
+        the "-snap" options) then this option may get false hits. It's best
+        reserved for routes where you know there are level crossings.
+
     "-fixSteps"
         Strava route editor is prone to produce points where proximate
         points have identical altitude, likely because of missing data. This
@@ -1773,20 +1777,23 @@ OPTIONS
         This is if you want to use a modification to the simplification
         algorithm. The maximum deviation allowed as a value for segments in
         the infinite-length limit is the value specified with "-simplifyD".
-        In the short-length limit, "-simplifyMinD" is used. This term
+        In the short-length limit, "-simplifyDMin" is used. This term
         determines the length scale over which the value transitions between
         the two, using an exponential transition.
 
         If it is non-positive then only "-simplifyD" is used. The
-        "-simplifyMinD" parameter must also be specified as a positive value
+        "-simplifyDMin" parameter must also be specified as a positive value
         less than "-simplifyD" for this term to have an effect.
 
-    "-simplifyMinD" <meters>
+    "-simplifyDMin" <meters>
         This is if you want to use a modification to the simplification
         algorithm where the maximum deviation allowed as a value for
         segments in the zero-length limit of this value. It should be less
         than "-simplifyD" or else it is ignored. It is combined with the
         "-simplifyLambda" parameter.
+
+    "-simplifyMinD" <meters>
+        Alias for "-simplifyDMin".
 
     "-simplifyPoints"
         This uses a Ramera-Douglas-Peucker algorithm to recursively simplify
@@ -2172,6 +2179,10 @@ OPTIONS
         files (including those specified with "-join") being stripped before
         processing. This would typically be used if "-autoSegments" is
         specified.
+
+    "-stripWaypoints"
+        If specified, strip all existing waypoints from the GPX file. This
+        has been found to be useful with Komoot files, for example.
 
     "-timeSplits" <string>
         Split the route into portions based on expected ride time. the
@@ -2897,7 +2908,7 @@ EXAMPLES
     Additionally, elevations in bridges and tunnels will not represent the
     actual road. So this needs to be used with extreme care.
 
-    Points re accessed from GPXZ in batches of 512 points. To avoid delays,
+    Points are accessed from GPXZ in batches of 512 points. To avoid delays,
     and avoid charges, it's best to limit the number of points. ProcessGPX
     tends to put a high density of points in corners, for example, to
     provide sufficient resolution of the trajectory through corners. But

@@ -57,7 +57,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.67</p>
+<p>0.68</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -835,6 +835,8 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>If a route contains crossings, for example a true figure 8, then it will flatten the road on either side of the crossing, and create a transition from the flattened profile back to the unaltered profile. The side of the flattening is determined by the <code>-rCrossing</code> option.</p>
 
+<p>If a route repeats sections of road (such as would be detected with the <code>-snap</code> options) then this option may get false hits. It&#39;s best reserved for routes where you know there are level crossings.</p>
+
 </dd>
 <dt id="fixSteps"><b><code>-fixSteps</code></b></dt>
 <dd>
@@ -1523,15 +1525,21 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="simplifyLambda-meters"><b><code>-simplifyLambda</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>This is if you want to use a modification to the simplification algorithm. The maximum deviation allowed as a value for segments in the infinite-length limit is the value specified with <code>-simplifyD</code>. In the short-length limit, <code>-simplifyMinD</code> is used. This term determines the length scale over which the value transitions between the two, using an exponential transition.</p>
+<p>This is if you want to use a modification to the simplification algorithm. The maximum deviation allowed as a value for segments in the infinite-length limit is the value specified with <code>-simplifyD</code>. In the short-length limit, <code>-simplifyDMin</code> is used. This term determines the length scale over which the value transitions between the two, using an exponential transition.</p>
 
-<p>If it is non-positive then only <code>-simplifyD</code> is used. The <code>-simplifyMinD</code> parameter must also be specified as a positive value less than <code>-simplifyD</code> for this term to have an effect.</p>
+<p>If it is non-positive then only <code>-simplifyD</code> is used. The <code>-simplifyDMin</code> parameter must also be specified as a positive value less than <code>-simplifyD</code> for this term to have an effect.</p>
+
+</dd>
+<dt id="simplifyDMin-meters"><b><code>-simplifyDMin</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This is if you want to use a modification to the simplification algorithm where the maximum deviation allowed as a value for segments in the zero-length limit of this value. It should be less than <code>-simplifyD</code> or else it is ignored. It is combined with the <code>-simplifyLambda</code> parameter.</p>
 
 </dd>
 <dt id="simplifyMinD-meters"><b><code>-simplifyMinD</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>This is if you want to use a modification to the simplification algorithm where the maximum deviation allowed as a value for segments in the zero-length limit of this value. It should be less than <code>-simplifyD</code> or else it is ignored. It is combined with the <code>-simplifyLambda</code> parameter.</p>
+<p>Alias for <code>-simplifyDMin</code>.</p>
 
 </dd>
 <dt id="simplifyPoints"><b><code>-simplifyPoints</code></b></dt>
@@ -1812,6 +1820,12 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>if specified, this results in existing segment definitions on input files (including those specified with <code>-join</code>) being stripped before processing. This would typically be used if <code>-autoSegments</code> is specified.</p>
+
+</dd>
+<dt id="stripWaypoints"><b><code>-stripWaypoints</code></b></dt>
+<dd>
+
+<p>If specified, strip all existing waypoints from the GPX file. This has been found to be useful with Komoot files, for example.</p>
 
 </dd>
 <dt id="timeSplits-string"><b><code>-timeSplits</code></b> &lt;string&gt;</dt>
@@ -2530,7 +2544,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>The digital elevation model provides elevations of specific points. Accuracy and precision of point placements thus becomes very important. Additionally, elevations in bridges and tunnels will not represent the actual road. So this needs to be used with extreme care.</p>
 
-<p>Points re accessed from GPXZ in batches of 512 points. To avoid delays, and avoid charges, it&#39;s best to limit the number of points. ProcessGPX tends to put a high density of points in corners, for example, to provide sufficient resolution of the trajectory through corners. But such a high density of points may not be necessary for realstic gradient determination. So GPXZ is done using the points of the original input file, processing them only to remove duplicate points and &quot;zig-zags&quot; first. But perhaps you want a higher resolution of points, for a finer determination of gradients. If this is the case, you will want to run first with processGPX with the <code>-spacing</code> option, for example. Or you might want to add points in a GPX editor like GPXMagic.</p>
+<p>Points are accessed from GPXZ in batches of 512 points. To avoid delays, and avoid charges, it&#39;s best to limit the number of points. ProcessGPX tends to put a high density of points in corners, for example, to provide sufficient resolution of the trajectory through corners. But such a high density of points may not be necessary for realstic gradient determination. So GPXZ is done using the points of the original input file, processing them only to remove duplicate points and &quot;zig-zags&quot; first. But perhaps you want a higher resolution of points, for a finer determination of gradients. If this is the case, you will want to run first with processGPX with the <code>-spacing</code> option, for example. Or you might want to add points in a GPX editor like GPXMagic.</p>
 
 <p>You will almost certainly want to check the results afterwards. In addition to bridges and tunnels, steep canyons, for example, might present a challenge. These can be repaired using the <code>-uniformGradient</code> option in prcessGPX, which allows specification of segments which will use interpolated altitude. Or, again, editing in GPXMagic may be a good approach. This should probably be done before point smoothing, so you would run GPXZ in <code>processGPX</code> first, then edit the elevations, then run processGPX again for smoothing.</p>
 
