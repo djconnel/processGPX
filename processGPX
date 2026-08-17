@@ -71,8 +71,10 @@ use Pod::Usage;
 # version 0.66: add GPXZ, added isPointInIntervals, more consistent use of start..end instead of start...stop. Options:
 #               -gpxz, -gpxzAPIKey, -gpxzStart, -gpxzEnd, -gpxzStop, -selectiveGPXZ.  Also added -closeLap and -closedLap aliases
 # version 0.67: GPXZ example added, change GPXZ to post, fixed error when arcFitting across S/F
+# version 0.68: minor bug fixes, -stripWaypoints, increase resolution on smoothing kernel, removed fixCrossings from auto
+# version 0.69: minor bug in formula for latlng2dxdy (cos(dlat) taken outside ())
 
-my $version = "0.67"; # make sure this matches pod value
+my $version = "0.69"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -133,6 +135,7 @@ sub loadGPX {
   my $GPXFile = $var{GPXFile};
   my $nSegment = $var{nSegment} // 0;
   my $stripSegments = $var{stripSegments} // 0;
+  my $stripWaypoints = $var{stripWaypoints} // 0;
   my $nTrack = $var{track} // 1;
   my $trkIndex = 0;
   my %segmentNames;
@@ -187,7 +190,7 @@ sub loadGPX {
   my $extensions = getExtensions(\$xml, $trkIndex + 1);
 
   # Parse GPX from open file
-  my $waypoints = $gpx->waypoints();
+  my $waypoints = $stripWaypoints ? [] : $gpx->waypoints();
   my $tracks    = $gpx->tracks();
 
   my $track = $tracks->[$trkIndex];
@@ -496,12 +499,14 @@ sub linkedListToPoints {
 
 
 #
-# Gaussian smoothing
+# cosine smoothing kernel
 #
-# this causes problems for some reason
-my @sKernel = map { exp(- $_ ** 2 / 800) } ( 0 .. 70 );
+my @sKernel = map { exp(- $_ ** 2 / 2e6) } ( 0 .. 4000 );
+# my @sKernel = map { (1 + cos($pi * $_ / 276)) / 2 } ( 0 .. 276 );
 sub smoothKernel {
-  my $u = int(abs(shift()) * 20 + 0.5);
+  # my $u = shift();
+  # return exp(-$u ** 2 / 2);
+  my $u = int(abs(shift()) * 1000 + 0.5);
   return (($u < @sKernel) ? $sKernel[$u] : 0);
 }
 
@@ -519,7 +524,7 @@ sub transition {
 }
 
 #
-# smoothWindow: create a smooth weighting functin from 0 to 1
+# smoothWindow: create a smooth weighting function from 0 to 1
 # based on start and stop distances which works with loops
 # if start > end, then window is after start and before end
 # loop course: reference all points to start
@@ -687,7 +692,7 @@ sub setFileNameSuffix {
 }
 
 # find distance between lat, lng points
-my $pi          = atan2(0, -1);
+my $pi = atan2(0, -1);
 my $twopi       = 2 * $pi;
 my $ln2         = log(2);
 my $sqrt2       = sqrt(2);
@@ -1049,7 +1054,7 @@ sub latlng2dxdy {
   my $lng2 = $deg2rad * $p2->{lon};
   my $dlng = deltalngRadians($lng1, $lng2);
 
-  my $u = cos($lat1) * sin($lat2) - sin($lat1) * cos($lat2) * cos($dlng);
+  my $u = (cos($lat1) * sin($lat2) - sin($lat1) * cos($lat2)) * cos($dlng);
   my $v = sin($dlng) * cos($lat2);
   my $uv = sqrt($u ** 2 + $v ** 2);
   my ($dx, $dy);
@@ -2769,7 +2774,7 @@ sub applyLaneShift {
       $points->[$i]->{shift} = -0.75 / $points->[$i]->{curvature};
       # check to make sure lane shift isn't changing too rapidly to nearby points (changed version 0.65)
       for my $dir (-1, 1) {
-        my $j = $i + $dir;
+        my $j = ($i + $dir) % @$points;
         while (1) {
           my $d = pointSeparation($points->[$j], $points->[$i], $courseDistance, $isLoop);
           my $dShift = $points->[$j]->{shift} - $points->[$i]->{shift};
@@ -6842,7 +6847,7 @@ my $shiftSFDefault = 0;
 my $shiftSF = $shiftSFDefault; # amount to shift the S/F if a loop course:
 my $shiftStart;        # where to start lane shifting (default: don't start it)
 my $simplifyPoints;    # whether to run simplification algorithm
-my $simplifyD = 1;   # threshold distance for simplification
+my $simplifyD = 1;     # threshold distance for simplification
 my $simplifyDMin;      # threshold distance for simplification for short segments
 my $simplifyLambda = 50;  # length scale for transition of threshold
 my $simplifyZ = 0.1;   # threshold altitude for simplification
@@ -6866,6 +6871,7 @@ my $startCircuits  = 0;   # number of start circuits
 my $startCircuitDistance; # km of start circuit
 my $startTime;            # start time for activity
 my $stripSegments;        # eliminate all existing segment definitions on input files
+my $stripWaypoints;       # eliminate all existing waypoints
 my $title;                # title, for GPX file
 my $timeSplits = 0;       # number of time-based splits
 my $selectedTrack = 0;    # which track to use
@@ -7106,6 +7112,7 @@ GetOptions (
             "simplifyD|simplifyDistance=f"   => \$simplifyD,
             "simplifyDMin=f"   => \$simplifyDMin,
             "simplifyLambda=f"  => \$simplifyLambda,
+            "simplifyMinD=f"   => \$simplifyDMin,
             "simplifyZ=f"   => \$simplifyZ,
             "smooth=f"      => \$lSmooth,
             "smoothing=f"   => \$lSmooth,
@@ -7128,6 +7135,7 @@ GetOptions (
             "splineInterpolation!"  => \$splineInterpolation,
             "splineMaxAngle=f" => \$splineMaxDegs,
             "splineMaxDegs=f" => \$splineMaxDegs,
+            "splineMaxRatio=f"   => \$splineMaxRatio,
             "splineStart=f"   => \$splineStart,
             "splitAt=f{1,100}" => \@splitDistance,
             "splitNumber=i" => \$splitNumber,
@@ -7140,6 +7148,7 @@ GetOptions (
             "straightEnd=f{1,1000}" => \@straightEnd,
             "straightStop=f{1,1000}" => \@straightEnd,
             "stripSegments!" => \$stripSegments,
+            "stripWaypoints!" => \$stripWaypoints,
             "timeSplits=i"  => \$timeSplits,
             "title=s"       => \$title,
             "track=i"       => \$selectedTrack,
@@ -7801,8 +7810,13 @@ sub gpxzElevations {
     $end //= $courseDistance;
   }
 
+  $apiKey =~ s/^\s+|\s+$//g;
+
   die("ERROR: gpxz elevations requested without an api key.\n")
-    unless(defined $apiKey);
+    unless((defined $apiKey) && (length($apiKey) > 0));
+
+  die("ERROR: gpxz API key contains illegal characters.\n")
+    unless($apiKey =~ /^\w+$/);
 
   my $N = scalar @$points;
   my $NBatch = 512;
@@ -7862,24 +7876,28 @@ sub gpxzElevations {
       };
 
     my $response = $http->post($url, $body);
-
     my $data;
-
     if ($response->{success}) {
       $data = $json->decode($response->{content});
+      die "Unexpected GPXZ API response shape: $response->{content}\n"
+        unless (ref $data eq 'HASH' && ref $data->{results} eq 'ARRAY');
+
     }
     else {
       warn "GPXZ API request failed ($response->{status} $response->{reason}): "
         . ($response->{content} // '') . "\n";
-      # try curl
-      my $command = "curl -X POST -H \"Content-Type: application/json\" -H \"X-Api-Key: $apiKey\"  -d '{\"latlons\": \"$latLonString\"}' $url";
-      note("trying $command ...\n");
-      my $s =`$command`;
-      $data = $json->decode($s);
-    }
 
-    unless (ref $data eq 'HASH' && ref $data->{results} eq 'ARRAY') {
-      die "Unexpected GPXZ API response shape: $response->{content}\n";
+      # try curl
+      my @cmd = ('curl', '-sS', '-X', 'POST',
+                 '-H', 'Content-Type: application/json',
+                 '-H', "X-Api-Key: $apiKey",
+                 '-d', qq({"latlons": "$latLonString"}), $url);
+      note("trying curl POST $url ...\n");
+      open(my $fh, '-|', @cmd) or die "curl failed: $!\n";
+      my $s = do { local $/; <$fh> };
+      close($fh);
+
+      $data = $json->decode($s);
     }
 
     # Assign elevations back to the hash
@@ -7934,7 +7952,7 @@ die("output file name can be specified only if one input file is specified: eith
 for my $file ( @files ) {
 
   my $nSegment = 0;
-  my $GPXResult = loadGPX(GPXFile=> $file, nSegment=> $nSegment, stripSegments=> $stripSegments);
+  my $GPXResult = loadGPX(GPXFile=> $file, nSegment=> $nSegment, stripSegments=> $stripSegments, stripWaypoints=> $stripWaypoints);
   my $points = $GPXResult->{points};
   $nSegment = $GPXResult->{nSegment};
   my $xml = $GPXResult->{xml};
@@ -7985,7 +8003,7 @@ for my $file ( @files ) {
   # if join was specified, join points from a second file
   for my $join ( @join ) {
 
-    my $GPXResult = loadGPX(GPXFile=> $join, nSegment=> $nSegment, stripSegments=> $stripSegments);
+    my $GPXResult = loadGPX(GPXFile=> $join, nSegment=> $nSegment, stripSegments=> $stripSegments, stripWaypoints=> $stripWaypoints);
     my $points2 = $GPXResult->{points};
     $nSegment = $GPXResult->{nSegment};
     for my $ns (keys %{$GPXResult->{segmentNames}}) {
@@ -8066,11 +8084,6 @@ for my $file ( @files ) {
       note("setting altitude smoothing to $zSmooth meters\n");
     }
 
-    if (! defined $fixCrossings) {
-      note("setting -fixCrossings ...\n");
-      $fixCrossings = 1;
-    }
-
     if (! defined  $rUTurn) {
       $rUTurn = 6;
       note("setting -RUTurn $rUTurn (meters) ...\n");
@@ -8130,7 +8143,7 @@ for my $file ( @files ) {
 
   # splice in files
   for my $splice ( @splice ) {
-    my $GPXResult = loadGPX(GPXFile=> $splice, nSegment=> $nSegment, stripSegments=> $stripSegments);
+    my $GPXResult = loadGPX(GPXFile=> $splice, nSegment=> $nSegment, stripSegments=> $stripSegments, stripWaypoints=> $stripWaypoints);
     my $points2 = $GPXResult->{points};
     $nSegment = $GPXResult->{nSegment};
     for my $ns (keys %{$GPXResult->{segmentNames}}) {
@@ -8768,7 +8781,6 @@ for my $file ( @files ) {
             last if ($s > $dsMax );
 
             my $u = $s / $sigma{$key};
-            #my $w = exp(-$u ** 2 / 2) * (1 - $s / $courseDistance);
             my $w = smoothKernel($u) * (1 - $s / $courseDistance);
             $points->[$i]->{$key} -= $w * $dy0;
 
@@ -9624,7 +9636,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.67
+0.69
 
 =head1 DESCRIPTION
 
@@ -10700,6 +10712,10 @@ will flatten the road on either side of the crossing, and create a
 transition from the flattened profile back to the unaltered profile.
 The side of the flattening is determined by the C<-rCrossing> option.
 
+If a route repeats sections of road (such as would be detected with
+the C<-snap> options) then this option may get false hits.  It's best
+reserved for routes where you know there are level crossings.
+
 =item B<C<-fixSteps>>
 
 Strava route editor is prone to produce points where proximate points
@@ -11570,21 +11586,25 @@ Synopnym for B<C<-simplifyD>>
 This is if you want to use a modification to the simplification
 algorithm.  The maximum deviation allowed as a value for segments in
 the infinite-length limit is the value specified with C<-simplifyD>.
-In the short-length limit, C<-simplifyMinD> is used.  This term
+In the short-length limit, C<-simplifyDMin> is used.  This term
 determines the length scale over which the value transitions between
 the two, using an exponential transition.
 
 If it is non-positive then only C<-simplifyD> is used.  The
-C<-simplifyMinD> parameter must also be specified as a positive value
+C<-simplifyDMin> parameter must also be specified as a positive value
 less than C<-simplifyD> for this term to have an effect.
 
-=item B<C<-simplifyMinD>> <meters>
+=item B<C<-simplifyDMin>> <meters>
 
 This is if you want to use a modification to the simplification
 algorithm where the maximum deviation allowed as a value for segments
 in the zero-length limit of this value.  It should be less than
 C<-simplifyD> or else it is ignored.  It is combined with the
 C<-simplifyLambda> parameter.
+
+=item B<C<-simplifyMinD>> <meters>
+
+Alias for C<-simplifyDMin>.
 
 =item B<C<-simplifyPoints>>
 
@@ -11999,6 +12019,11 @@ if specified, this results in existing segment definitions on input
 files (including those specified with C<-join>) being stripped before
 processing.  This would typically be used if C<-autoSegments> is
 specified.
+
+=item B<C<-stripWaypoints>>
+
+If specified, strip all existing waypoints from the GPX file.  This
+has been found to be useful with Komoot files, for example.
 
 =item B<C<-timeSplits>> <string>
 
@@ -12849,7 +12874,7 @@ important.  Additionally, elevations in bridges and tunnels will not
 represent the actual road.  So this needs to be used with extreme
 care.
 
-Points re accessed from GPXZ in batches of 512 points.  To avoid
+Points are accessed from GPXZ in batches of 512 points.  To avoid
 delays, and avoid charges, it's best to limit the number of points.
 ProcessGPX tends to put a high density of points in corners, for
 example, to provide sufficient resolution of the trajectory through
