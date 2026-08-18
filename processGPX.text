@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.69
+    0.70
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -2181,8 +2181,7 @@ OPTIONS
         specified.
 
     "-stripWaypoints"
-        If specified, strip all existing waypoints from the GPX file. This
-        has been found to be useful with Komoot files, for example.
+        If specified, strip all existing waypoints from the GPX file.
 
     "-timeSplits" <string>
         Split the route into portions based on expected ride time. the

@@ -73,8 +73,9 @@ use Pod::Usage;
 # version 0.67: GPXZ example added, change GPXZ to post, fixed error when arcFitting across S/F
 # version 0.68: minor bug fixes, -stripWaypoints, increase resolution on smoothing kernel, removed fixCrossings from auto
 # version 0.69: minor bug in formula for latlng2dxdy (cos(dlat) taken outside ())
+# version 0.70: fixed -stripWaypoints
 
-my $version = "0.69"; # make sure this matches pod value
+my $version = "0.70"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -190,7 +191,9 @@ sub loadGPX {
   my $extensions = getExtensions(\$xml, $trkIndex + 1);
 
   # Parse GPX from open file
-  my $waypoints = $stripWaypoints ? [] : $gpx->waypoints();
+  $gpx->waypoints_delete_all() if ($stripWaypoints);
+  my $waypoints = $gpx->waypoints();
+  
   my $tracks    = $gpx->tracks();
 
   my $track = $tracks->[$trkIndex];
@@ -9462,6 +9465,7 @@ for my $file ( @files ) {
         delete $wp->{name}
           if ((exists $wp->{name}) && (defined $wp->{name}) && ($wp->{name} eq ""));
       }
+      warn("deleting existing waypoints first\n");
       $gpx->waypoints_delete_all();
       $gpx->waypoints_add(@$waypoints);
     }
@@ -9636,7 +9640,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.69
+0.70
 
 =head1 DESCRIPTION
 
@@ -12022,8 +12026,7 @@ specified.
 
 =item B<C<-stripWaypoints>>
 
-If specified, strip all existing waypoints from the GPX file.  This
-has been found to be useful with Komoot files, for example.
+If specified, strip all existing waypoints from the GPX file.
 
 =item B<C<-timeSplits>> <string>
 
