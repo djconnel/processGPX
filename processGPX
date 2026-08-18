@@ -9465,7 +9465,6 @@ for my $file ( @files ) {
         delete $wp->{name}
           if ((exists $wp->{name}) && (defined $wp->{name}) && ($wp->{name} eq ""));
       }
-      warn("deleting existing waypoints first\n");
       $gpx->waypoints_delete_all();
       $gpx->waypoints_add(@$waypoints);
     }
