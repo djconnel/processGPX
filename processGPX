@@ -74,8 +74,9 @@ use Pod::Usage;
 # version 0.68: minor bug fixes, -stripWaypoints, increase resolution on smoothing kernel, removed fixCrossings from auto
 # version 0.69: minor bug in formula for latlng2dxdy (cos(dlat) taken outside ())
 # version 0.70: fixed -stripWaypoints
+# version 0.71: fixed issue with transition in selective smoothing
 
-my $version = "0.70"; # make sure this matches pod value
+my $version = "0.71"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -193,7 +194,7 @@ sub loadGPX {
   # Parse GPX from open file
   $gpx->waypoints_delete_all() if ($stripWaypoints);
   my $waypoints = $gpx->waypoints();
-  
+
   my $tracks    = $gpx->tracks();
 
   my $track = $tracks->[$trkIndex];
@@ -538,7 +539,7 @@ sub smoothWindow {
   my $s = $var{s} // die("smoothWindow called without distance s\n");
   my $start = $var{start};
   my $end = $var{end};
-  my $transition = $var{transition};
+  my $transition = $var{transition} // 20;
   my $transitionStart = $var{transitionStart} // $transition;
   my $transitionEnd = $var{transitionEnd} // $transition // $transitionStart;
   my $isLoop = $var{isLoop} // 0;
@@ -9639,7 +9640,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.70
+0.71
 
 =head1 DESCRIPTION
 

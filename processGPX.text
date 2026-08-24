@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.70
+    0.71
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
