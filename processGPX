@@ -75,9 +75,10 @@ use Pod::Usage;
 # version 0.69: minor bug in formula for latlng2dxdy (cos(dlat) taken outside ())
 # version 0.70: fixed -stripWaypoints
 # version 0.71: fixed issue with transition in selective smoothing
-# version 0.72: fixed issue with -rUTurn combined with -autoSpacing (which makes very fine point spacing)
+# version 0.72: fixed issue with -rUTurn combined with -autoSpacing (which makes very fine point spacing after smoothing)
+# version 0.73: further fixes to turn-around loop
 
-my $version = "0.72"; # make sure this matches pod value
+my $version = "0.73"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -1729,6 +1730,24 @@ sub removeDuplicatePoints {
   return \@pNew;
 }
 
+
+#
+# set minimum spacing between poionts
+#
+sub setMinSpacing {
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $spacing = $var{spacing} // 1;
+  return $points
+    if ($spacing <= 0 || scalar(@$points) < 3);
+  my @newPoints = ($points->[0]);
+  for my $i ( 1 .. $#$points ) {
+    push @newPoints, $points->[$i]
+      if ((latlngDistance($newPoints[-1], $points->[$i]) >= $spacing));
+  }
+  return \@newPoints;
+}
+ 
 sub checkAutoLoop {
   my %var = @_;
   my $points = $var{points} // [];
@@ -9050,6 +9069,9 @@ for my $file ( @files ) {
     my $pointPopped = pointsAreClose($points->[0], $points->[-1]);
     pop @$points if ($pointPopped);
 
+    # set minimum spacing between points (algorithm doesn't like very close points)
+    # $points = setMinSpacing(points=> $points, spacing=> 1);
+    
     # two sweeps: one for 3-point turns, the next for 4-point turns.
     for my $turnType (3, 4) {
       my @pNew = ();
@@ -9065,16 +9087,17 @@ for my $file ( @files ) {
         }
 
         # select points: check for duplicate points
+	my $rMin = 1;
         my $h = ($i - 1) % @$points;
-        $h = ($h - 1) % @$points while (($h != $i) && pointsAreClose($points->[$h], $points->[$i]));
+        $h = ($h - 1) % @$points while (($h != $i) && pointsAreClose($points->[$h], $points->[$i], $rMin));
         my $j = ($i + 1) % @$points;
         my $k = ($j + 1) % @$points;
-        while (($j != $i) && pointsAreClose($points->[$j], $points->[$i])) {
+        while (($j != $i) && pointsAreClose($points->[$j], $points->[$i], $rMin)) {
           $j = ($j + 1) % @$points;
           $k = ($k + 1) % @$points;
         }
         $k = ($k + 1) % @$points
-          while (($k != $i) && pointsAreClose($points->[$j], $points->[$k]));
+          while (($k != $i) && pointsAreClose($points->[$j], $points->[$k], $rMin));
         if (
             ($turnType == 3) &&
             ($isLoop || ($i < $#$points)) &&
@@ -9091,6 +9114,7 @@ for my $file ( @files ) {
           my $loop = makeLoop(points=> [$points->[$i], $points->[$i]], direction=> $dir, radius=> $rUTurn, defaultSign=> $loopSign, segmentNames=> \%segmentName);
           push @pNew, @$loop;
           push @pNew, \%{$points->[$i]}; # put a copy of the turn-around point here
+	  $i = $j;
         } elsif (
                  ($turnType == 4) &&
                  ($isLoop || (($i > 0) && ($i < $#$points - 1))) &&
@@ -9109,11 +9133,6 @@ for my $file ( @files ) {
                "   directions = ", $d1 / $deg2rad, ", ", $d2 / $deg2rad, "\n");
           my $dir = averageAngles($d1, $d2);
           my $loop = makeLoop(points=> [$points->[$i], $points->[$j]], direction=> $dir, radius=> $rUTurn, defaultSign=> $loopSign, segmentNames=> \%segmentName);
-          print("lon lat\n");
-          for my $p ( @$loop ) {
-            print("$p->{lon} $p->{lat}\n");
-          }
-          exit();
 
           push @pNew, @$loop;
         }
@@ -9647,7 +9666,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.72
+0.73
 
 =head1 DESCRIPTION
 
