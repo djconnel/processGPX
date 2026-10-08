@@ -11,12 +11,12 @@ my $pi2 = $pi / 2;
 my $twopi = 2 * $pi;
 
 # Bonneville Salt Flats
-# my $lon0 = -113.5;
-# my $lat0 = 40.789;
+my $lon0 = -113.5;
+my $lat0 = 40.789;
 
 # Iowa corn field
-my $lon0 = -94.482702;
-my $lat0 = 41.979564;
+# my $lon0 = -94.482702;
+# my $lat0 = 41.979564;
 
 sub softMax {
   my $x1 = shift() / 10;
