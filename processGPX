@@ -2203,7 +2203,10 @@ for my $file ( @files ) {
     }
 
     my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
-    note("final number of points = ", scalar(@$points), "\n");
+    # with -simplify the point count changes when the segments are written,
+    # so the final count is reported there
+    note(($simplifyPoints ? "number of points before simplification = " : "final number of points = "),
+         scalar(@$points), "\n");
     note("course distance = ", sprintf("%.4f", $courseDistance / 1000), " kilometers\n");
     my ($score, $scoreD, $scoreZ) = calcQualityScore(points=> $points, isLoop=> $isLoop);
     note("quality score of final course = ", sprintf("%.4f", $score), "\n");
@@ -2361,6 +2364,7 @@ for my $file ( @files ) {
 
     # simplify points, if requested
     if ( $simplifyPoints ) {
+      note("simplifying points...\n");
       my $pNew = simplifyPoints(points=> \@segmentPoints, z0=> $simplifyZ, r0=> $simplifyD, r00=> $simplifyDMin, lambda=> $simplifyLambda);
       @segmentPoints = @$pNew;
     }
@@ -2376,11 +2380,14 @@ for my $file ( @files ) {
     # number of segments
     note("number of segments = ", scalar(@segments), "\n");
     my $n = 0;
+    my $nPoints = 0;
     for my $s ( @segments ) {
       deleteField2(points=> $s->{points}, field=> "segment"); # delete the temporary segment field
       $n ++;
+      $nPoints += scalar(@{$s->{points}});
       note("segment $n : ", scalar(@{$s->{points}}), " points\n");
     }
+    note("final number of points = $nPoints\n") if ( $simplifyPoints );
 
     # replace original segments with smoothed segments
     $track->{segments} = \@segments;
