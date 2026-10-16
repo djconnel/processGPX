@@ -2303,6 +2303,14 @@ for my $file ( @files ) {
       $gpx->waypoints_add(@$waypoints);
     }
 
+    # simplify points, if requested
+    # this is done before the track is split, since simplifyPoints splits at
+    # segment boundaries itself; done after the split, only the last segment was simplified
+    if ( $simplifyPoints ) {
+      note("simplifying points...\n");
+      $points = simplifyPoints(points=> $points, z0=> $simplifyZ, r0=> $simplifyD, r00=> $simplifyDMin, lambda=> $simplifyLambda);
+    }
+
     # create segments for track
     # when a segment ID changes, that means to start a new segment
 
@@ -2360,13 +2368,6 @@ for my $file ( @files ) {
       } elsif ( (! defined $segmentName{$s1}) && (defined $segmentName{$s2}) ) {
         pop @{$segments[-1]->{points}};
       }
-    }
-
-    # simplify points, if requested
-    if ( $simplifyPoints ) {
-      note("simplifying points...\n");
-      my $pNew = simplifyPoints(points=> \@segmentPoints, z0=> $simplifyZ, r0=> $simplifyD, r00=> $simplifyDMin, lambda=> $simplifyLambda);
-      @segmentPoints = @$pNew;
     }
 
     # store the final segment
