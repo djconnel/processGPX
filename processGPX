@@ -86,6 +86,10 @@ use Pod::Usage;
 #               (e.g. hdop) are discarded on loading.  CSV columns are in a fixed order.
 #               increased auto --cornerCrop to match value used in --outAndBackLoop
 #               added -simplify to -auto
+# version 0.76: documentation update, add -simplify to -outandback options,
+#               moved setting of -autoSpacing by -maxAngle before -autoSpacing sets -spacing
+#               add -maxSpacingRatio and -minRefine, fixed how -simplify applies to multiple segments
+#               add minSpacing and add it to -auto, fixed simplify issue causing points to not get pruned
 
 
 # ==========================================================================
@@ -126,7 +130,7 @@ use Pod::Usage;
 #               removeSpikes, isPointPrunable, simplifyPoints
 #        4.10 Point Spacing and Corner Interpolation
 #               doPointInterpolation, doAutoSpacing, applySelectiveSpacing, interpolateCorner,
-#               splineInterpolation, arcFitInterpolation, addSplines
+#               splineInterpolation, arcFitInterpolation, addSplines, applyMaxSpacingRatio
 #        4.11 Corners and Curve Fitting
 #               cropCorners, arcFit, applyMinRadius, circle3PointFit, fitCircle, processCircle,
 #               findArcs, fitArc, fitArcs, findAndFitArcs
@@ -154,7 +158,7 @@ use Pod::Usage;
 # 1. CONSTANTS
 # ==========================================================================
 
-my $version = "0.75"; # make sure this matches pod value
+my $version = "0.76"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -277,10 +281,13 @@ my $loopLeft;             # specify looping to the left
 my $loopRight;            # specify looping to the right
 my $lSmooth;           # general smoothing, applies to positions and all other fields
 my $maxCornerCropDegs; # maximum angle for corner cropping
+my $maxSpacingRatio;   # where to begin applying minimum radius (meters)
 my $minCornerCropDegs; # minimum angle for corner cropping
+my $minSpacing;        # minimum spacing between points
 my $minRadius;         # a minimum radius for corners: correct with lane shift
 my $minRadiusEnd;      # where to end applying minimum radius (meters)
 my $minRadiusStart;    # where to begin applying minimum radius (meters)
+my $minRefine;         # minimum refinement for setMaxSpacinghRatio
 my $namedSegments = ""; # named segments
 my $needHelp = 0;      # print the pod
 my $newKeywords = "";  # new keywords for the GPX file
@@ -519,11 +526,14 @@ GetOptions (
             "loopRight!"                      => \$loopRight,
             "maxCornerCropAngle=f"            => \$maxCornerCropDegs,
             "maxCornerCropDegs=f"             => \$maxCornerCropDegs,
+            "maxSpacingRatio=f"               => \$maxSpacingRatio,
             "minCornerCropAngle=f"            => \$minCornerCropDegs,
             "minCornerCropDegs=f"             => \$minCornerCropDegs,
             "minRadius=f"                     => \$minRadius,
             "minRadiusEnd=f"                  => \$minRadiusEnd,
             "minRadiusStart=f"                => \$minRadiusStart,
+            "minRefine=f"                     => \$minRefine,
+            "minSpacing=f"                    => \$minSpacing,
             "name=s"                          => \$title,
             "newEle|newZ=f"                   => \$newZ,
             "noSave!"                         => \$noSave,
@@ -668,6 +678,12 @@ die("-repeatedLaps limited to range 0 to 100\n")
 die("ERROR: you cannot specify both -loopLeft and -loopRight\n")
   if ($loopLeft && $loopRight);
 
+# check maxSpacingRatio
+$maxSpacingRatio = undef
+  if ((defined $maxSpacingRatio) && ($maxSpacingRatio <= 0));
+die("illegal value of maxSpacingRatio specified: $maxSpacingRatio.  This needs to be at least 1.\n")
+  if ( (defined $maxSpacingRatio) && ($maxSpacingRatio < 1) );
+
 # check gpxz
 $gpxz //= (defined $gpxzStart) || (defined $gpxzEnd) || (@selectiveGPXZ > 0);
 
@@ -679,10 +695,11 @@ if ( $outAndBack || $outAndBackLap ) {
     $rLap //= 0;
   }
   $autoSpacing //= 1;
+  $minSpacing //= 1;
   $lSmooth //= 6;
   $laneShift //= (@selectiveLaneShift ? 0 : 4);
   $minRadius //= 8;
-  $cornerCrop //= 3 + $minRadius + abs($laneShift);
+  $cornerCrop //= 3 + $minRadius + abs($laneShift // 0);
   $prune //= 1;
   $rTurnaround //= 8;
   $rUTurn //= 8;
@@ -690,6 +707,7 @@ if ( $outAndBack || $outAndBackLap ) {
   $closeLoop //= $isLoop;
   $fitArcs //= 1;
   $arcInterpolation //= 1;
+  $simplifyPoints //= 1;
 }
 
 # process -closeLoop
@@ -853,19 +871,11 @@ for my $file ( @files ) {
 
     my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
 
-    # calculate position interpolation
-    if ( ! defined $spacing ) {
-      $spacing = 3 * (1 + $courseDistance / 250) ** (1/4);
-      note("setting spacing to ", sprintf("%.3f", $spacing), " meters (distance = ", sprintf("%.3f", $courseDistance / 1000), " km)\n");
-    }
-
-    # smoothing
     if ( ! defined $lSmooth ) {
       $lSmooth = 5;
       note("setting smoothing to $lSmooth meters\n");
     }
 
-    # other options
     if (! defined $autoSpacing) {
       note("setting -autoSpacing...\n");
       $autoSpacing = 1;
@@ -891,6 +901,11 @@ for my $file ( @files ) {
       $simplifyPoints = 1;
     }
 
+    if (! defined $minSpacing) {
+      note("setting -minSpacing ...\n");
+      $minSpacing = 1;
+    }
+
     if (! defined $zSmooth) {
       $zSmooth = 15;
       note("setting altitude smoothing to $zSmooth meters\n");
@@ -912,7 +927,7 @@ for my $file ( @files ) {
     }
 
     if (! defined $cornerCrop) {
-      $cornerCrop = 3 + $minRadius + $laneShift;
+      $cornerCrop = 3 + $minRadius + ($laneShift // 0);
       note("setting -cornerCrop $cornerCrop meters...\n");
     }
 
@@ -927,6 +942,17 @@ for my $file ( @files ) {
     }
   }
 
+  # autospacing triggered if max angle specified
+  my $smoothRadians;
+  if ((defined $smoothAngle) && ($smoothAngle <= 0)) {
+    $smoothAngle = 10;
+    $autoSpacing //= 1;
+  }
+  if ($autoSpacing) {
+    $smoothAngle //= 15;
+  }
+
+  # autospacing triggers default spacing
   if ( $autoSpacing  && (! defined $spacing) ) {
     my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
     $spacing = 3 * (1 + $courseDistance / 250) ** (1/4);
@@ -982,16 +1008,6 @@ for my $file ( @files ) {
     for my $ns (sort {$a <=> $b} (keys %segmentName)) {
       note("segment $ns: $segmentName{$ns}\n");
     }
-  }
-
-  # autospacing triggered if max angle specified
-  my $smoothRadians;
-  if ((defined $smoothAngle) && ($smoothAngle <= 0)) {
-    $smoothAngle = 10;
-    $autoSpacing //= 1;
-  }
-  if ($autoSpacing) {
-    $smoothAngle //= 15;
   }
 
   my $fitArcsRadians = $fitArcsDegs * $deg2rad if (defined $fitArcsDegs);
@@ -2250,7 +2266,27 @@ for my $file ( @files ) {
       push @$waypoints, @$cornerWaypoints;
     }
 
-    # curvature
+    # simplify segments
+    if ( $simplifyPoints ) {
+      note("simplifying points\n");
+      $points = simplifyPoints(points=> $points, z0=> $simplifyZ, r0=> $simplifyD, r00=> $simplifyDMin, lambda=> $simplifyLambda, minSpacing=> $minSpacing);
+    }
+    elsif ( (defined $minSpacing) && ($minSpacing > 0) ) {
+      note("applying minimum point spacing\n");
+      # call simplification with trivial thresholds so only points within minSpacing are pruned (plus colinear points)
+      $points = simplifyPoints(points=> $points, z0=> 0.001, r0=> 0.01, minSpacing=> $minSpacing);
+    }
+
+    # max spacing ratio
+    warn("number of points before applying max spacing ratio = " . scalar(@$points) . "\n");
+    if ( (defined $maxSpacingRatio) && ($maxSpacingRatio > 0) ) {
+      note("applying max spacing ratio\n");
+      $points = applyMaxSpacingRatio(points=> $points, ratio=> $maxSpacingRatio, minRefine=> $minRefine, isLoop=> $isLoop);
+    }
+    warn("number of points after applying max spacing ratio = " . scalar(@$points) . "\n");
+
+    #
+    # finish up
     #
     if ($addCurvature) {
       note("adding curvature\n");
@@ -2259,10 +2295,6 @@ for my $file ( @files ) {
       deleteField2(points=> $points, field=> "curvature");
     }
 
-
-    #
-    # finish up
-    #
     if ($addGradient) {
       note("adding gradient field\n");
       addGradientField(points=> $points, isLoop=> $isLoop);
@@ -2359,12 +2391,6 @@ for my $file ( @files ) {
       }
     }
 
-    # simplify points, if requested
-    if ( $simplifyPoints ) {
-      my $pNew = simplifyPoints(points=> \@segmentPoints, z0=> $simplifyZ, r0=> $simplifyD, r00=> $simplifyDMin, lambda=> $simplifyLambda);
-      @segmentPoints = @$pNew;
-    }
-
     # store the final segment
     # this just references the segment array rather than copying the data
     if ( @segmentPoints ) {
@@ -2376,13 +2402,16 @@ for my $file ( @files ) {
     # number of segments
     note("number of segments = ", scalar(@segments), "\n");
     my $n = 0;
+    my $total = 0;
     for my $s ( @segments ) {
       deleteField2(points=> $s->{points}, field=> "segment"); # delete the temporary segment field
       $n ++;
       note("segment $n : ", scalar(@{$s->{points}}), " points\n");
+      $total += @{$s->{points}};
     }
+    note("total points = $total\n");
 
-    # replace original segments with smoothed segments
+    # replace original segments with new segments
     $track->{segments} = \@segments;
 
     unless ( $noSave ) {
@@ -5289,74 +5318,86 @@ sub simplifyPoints {
   my $lambda = $var{lambda} // 100;
   my $r00 = $var{r00} // $r0;
   my $points = $var{points} // [];
+  my $minSpacing = $var{minSpacing} // 0;
   return $points if ($r0 <= 0);
   $r00 = $r0 if ($r00 <= 0);
   my $dr = (($lambda > 0) && ($r0 > $r00)) ? $r0 - $r00 : 0;
 
   return $points if (@$points < 3);
 
+  # add distance field if necessary
+  my $s0;
+  my $s1;
+  if ($minSpacing > 0) {
+    addDistanceFieldIfNeeded(points=> $points) if ($minSpacing > 0);
+    $s0 = $points->[0]->{distance};
+    $s1 = $points->[-1]->{distance};
+  }
+
   # search for segment boundaries
   for my $i ( 0 .. $#$points - 1 ) {
     if ($points->[$i]->{segment} != $points->[$i + 1]->{segment}) {
-      my $p1 = simplifyPoints(points=> [@$points[0 .. $i]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda);
-      my $p2 = simplifyPoints(points=> [@$points[$i + 1 .. $#$points]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda);
+      my $p1 = simplifyPoints(points=> [@$points[0 .. $i]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
+      my $p2 = simplifyPoints(points=> [@$points[$i + 1 .. $#$points]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
       return [@$p1, @$p2];
     }
   }
 
   # find the point of maximum deviation and recurse around that point
   # find distance between points and 3D line connecting endpoints
+  # don't go within minSpacing of a boundary (if defined)
   my ($xf, $yf) = latlng2dxdy($points->[0], $points->[-1]);
   # if this point is too close to the first point, then find the furthest point and simplify on that
   if ($xf ** 2 + $yf ** 2 < 10) {
     my $iFurthest;
     my $dFurthest = 0;
     for my $i ( 1 .. $#$points - 1 ) {
-      my $d = latlngDistance($points->[0], $points->[$i]);
-      if ($d > $dFurthest) {
-        $iFurthest = $i;
-        $dFurthest = $d;
+      if (($minSpacing <= 0) || (($points->[$i]->{distance} >= $s0 + $minSpacing) && ($points->[$i]->{distance} <= $s1 - $minSpacing))) {
+        my $d = latlngDistance($points->[0], $points->[$i]);
+        if ($d > $dFurthest) {
+          $iFurthest = $i;
+          $dFurthest = $d;
+        }
       }
     }
-    if ($iFurthest == $#$points) {
-      return [$points->[0], $points->[-1]];
-    }
-    elsif (defined $iFurthest) {
-      my $p1 = simplifyPoints(points=> [@$points[0 .. $iFurthest]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda);
-      my $p2 = simplifyPoints(points=> [@$points[$iFurthest .. $#$points]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda);
-      shift @$p2;
-      return [@$p1, @$p2];
-    } else {
-      return $points;
-    }
+    return [$points->[0], $points->[-1]]
+      unless (defined $iFurthest);
+
+    my $p1 = simplifyPoints(points=> [@$points[0 .. $iFurthest]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
+    my $p2 = simplifyPoints(points=> [@$points[$iFurthest .. $#$points]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
+    shift @$p2;
+    return [@$p1, @$p2];
   }
   my $zi = $points->[0]->{ele};
   my $dzf = $points->[-1]->{ele} - $zi;
   my $iMax;
   my $scoreMax = 1;  # only accept points if score is at least 1
   for my $i ( 1 .. $#$points - 1 ) {
-    my ($x, $y) = latlng2dxdy($points->[0], $points->[$i]);
-    my $r;
-    if ($dr > 0) {
-      my $s = sqrt($x ** 2 + $y ** 2);
-      $r = $r00 + $dr * exp(- $s / $lambda);
-    } else {
-      $r = $r0;
-    }
-    my $dz = $points->[$i]->{ele} - $zi;
-    # find the nearest point on the curve
-    my ($f, $d) = xyPointOnLine([0, 0], [$xf, $yf], [$x, $y]);  # distance of the interpolated point
-    my $ddz = $dzf * $f - $dz;   # interpolated altitude difference
-    my $score = ($d / $r) ** 2 + ($ddz / $z0) ** 2;
-    if ($score > $scoreMax) {
-      $iMax = $i;
-      $scoreMax = $score;
+    if (($minSpacing <= 0) || (($points->[$i]->{distance} >= $s0 + $minSpacing) && ($points->[$i]->{distance} <= $s1 - $minSpacing))) {
+      my ($x, $y) = latlng2dxdy($points->[0], $points->[$i]);
+      my $r;
+      if ($dr > 0) {
+        my $s = sqrt($x ** 2 + $y ** 2);
+        $r = $r00 + $dr * exp(- $s / $lambda);
+      } else {
+        $r = $r0;
+      }
+      my $dz = $points->[$i]->{ele} - $zi;
+      # find the nearest point on the curve
+      my ($f, $d) = xyPointOnLine([0, 0], [$xf, $yf], [$x, $y]);  # distance of the interpolated point
+      my $ddz = $dzf * $f - $dz;   # interpolated altitude difference
+      my $score = ($d / $r) ** 2 + ($ddz / $z0) ** 2;
+      if ($score > $scoreMax) {
+        $iMax = $i;
+        $scoreMax = $score;
+      }
     }
   }
   if (defined $iMax) {
-    my $p1 = simplifyPoints(points=> [@$points[0 .. $iMax]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda);
-    my $p2 = simplifyPoints(points=> [@$points[$iMax .. $#$points]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda);
+    my $p1 = simplifyPoints(points=> [@$points[0 .. $iMax]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
+    my $p2 = simplifyPoints(points=> [@$points[$iMax .. $#$points]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
     return [@$p1, @$p2[1 .. $#$p2]];
+
   } else {
     return [$points->[0], $points->[-1]];
   }
@@ -5907,6 +5948,151 @@ sub addSplines {
   return \@pNew;
 }
 
+
+#
+# set a maximum spacing ratio after simplification
+#
+sub applyMaxSpacingRatio {
+  my %var = @_;
+  my $points  = $var{points};
+  my $ratio   = $var{ratio} // 2;
+  my $reverse = $var{reverse} // 0;
+  my $isLoop  = $var{isLoop} // 0;
+  my $minRefine = $var{minRefine} // 4;
+
+  return $points
+    unless (@$points > 2);
+
+  # set a maximum ratio of spacing between points
+  # algorithm:
+  #   repeat until no further changes:
+  #     points i, j, k, l
+  #     spacings dij, djk, dkl
+  #     if djk) > ratio * min(dij, dkl)
+  #       sl = r * dij
+  #       sr = r * dkl
+  #       dls = [0]
+  #       drs = [0]
+  #       while(dls[-1] + drs[-1]) < djk:
+  #         if sl < sr:
+  #           dls.append(dls[-1] + sl
+  #           sl *= r
+  #         else:
+  #           drs.1ppend(drs[-1] + sr
+  #           sr *= r
+  #       f = (dks[-1] + drs[-1]) / djk
+  #       interpolate points
+
+  die("ERROR: applyMaxSpacingRatio requires ration of at least 1 (value = $ratio)\n")
+    if ($ratio < 1);
+
+  reversePoints(points=> $points, isLoop=> $isLoop)
+    if ($reverse);
+
+  # get course distance
+  my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
+
+  my $N = scalar(@$points);
+
+  my @dds = map { distanceDifference($points->[$_], $points->[($_ + 1) % $N], $courseDistance, $isLoop) } (0 .. $#$points);
+  $dds[-1] = 0 unless ($isLoop);
+
+  # list of points to add after each point
+  my @newPoints = ();
+  my @indexMap = ();   # keeps track of origin of points: not presently used
+
+
+  #
+  # dBack: spacing at start of interval
+  # dForward: spacing at end of interval
+  # ---|---- dBack ----|--------- dd ---------|--dForward--|---
+  #
+  my $dBack;
+  for my $i ( 0 .. $#$points ) {
+    my $dForward;   # this resets every iteration
+    my $p = $points->[$i];     # present point
+    my $dd = $dds[$i];         # distance to next point
+    my $d = $p->{distance};    # position of present point
+    my $pNext = $points->[($i + 1) % $N];  # next point (wrap around)
+    my $dNext = $pNext->{distance};      # position of next point
+    push @newPoints, $p;       # save this point
+    push @indexMap, $i;        # note source of point
+
+
+    # if we don't have a dBack, calculate it
+    my $j = $i;
+    if ((! defined $dBack) && ($isLoop || $i > 1)) {
+      $dBack = 0;
+      # point far enough to qualify for spaing (ignore points which are essentially coincident)
+      while (($dBack < 0.1) && (($isLoop && $i != ($j + 1) % $N) || ((! $isLoop) && ($j > 0)))) {
+        $j = ($j - 1) % $N;
+        $dBack += $dds[$j];
+      }
+    }
+    if ((! defined $dForward) && ($isLoop || ($i < $#$points))) {
+      my $k = $i;
+      $dForward = 0;
+      while (($dForward < 0.1) && (($isLoop && $i != ($k - 1) % $N) || ((! $isLoop) && ($k < $N - 1)))) {
+        $k = ($k + 1) % $N;
+        $dForward += $dds[$k];
+      }
+    }
+
+    # now we have a dBack and a dForward unless it's a point-to-point and we're at the first or last point
+    # set a minimum spacing
+    $dBack = $minRefine if (defined $dBack && $minRefine > $dBack);
+    $dForward = $minRefine if (defined $dForward && $minRefine > $dForward);
+
+    if (((defined $dBack) && ($dBack > 0) && ($dd > $ratio * $dBack)) or (defined $dForward) && ($dForward > 0) && ($dd > $ratio * $dForward)) {
+      # region needs refinement
+      my $sL = $ratio * $dBack if ($dBack > 0);
+      my $sR = $ratio * $dForward if ($dForward > 0);
+      my @dLs = (0);  # points on left of interval
+      my @dRs = (0);  # points on right of interval
+      while ($dLs[-1] + $dRs[0] < $dd) {
+        if ((defined $sL) && ($sL <= $sR)) {
+            push @dLs, $dLs[-1] + $sL;
+            $sL *= $ratio;
+          }
+          else {
+            unshift @dRs, $dRs[0] + $sR;
+            $sR *= $ratio;
+          }
+      }
+      # scale to span interval
+      my $f = $dd / ($dLs[-1] + $dRs[0]);
+      @dLs = map { $f * $_ } @dLs;
+      @dRs = map { $f * $_ } @dRs;
+      my @ds = ();
+      for my $i ( 1 .. $#dLs - 1 ) {
+        my $fi = $dLs[$i] / $dd;
+        push @newPoints, interpolatePoint($p, $pNext, $fi);
+        push @indexMap, undef;
+      }
+
+      for my $i ( 1 .. $#dRs - 1 ) {
+        my $fi = 1 - $dRs[$i] / $dd;
+        push @newPoints, interpolatePoint($p, $pNext, $fi);
+        push @indexMap, undef;
+      }
+
+      if (@dRs > 1) {
+        $dBack = $dRs[-2];
+      } elsif (@dLs > 2) {
+        $dBack = $dd - $dLs[-2];
+      } else {
+        $dBack = undef;
+      }
+    } else {
+      $dBack = undef;
+    }
+  }
+
+  reversePoints(points=> \@newPoints, isLoop=> $isLoop)
+    if ($reverse);
+
+  return \@newPoints;
+}
 
 # ==========================================================================
 # 4.11 CORNERS AND CURVE FITTING
@@ -10211,7 +10397,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.75
+0.76
 
 =head1 DESCRIPTION
 
@@ -10239,9 +10425,11 @@ out and back are perfectly aligned (with the C<-snap> option, for
 example), or by allowing them to be separated (with the
 C<-selectiveLaneShift> option, for example).  The latter is an example
 of where specification of options is needed.  But for most cases, the
-C<-auto> option will take care of all of the details, with the
-C<-simplify> option reducing the number of points in the final file,
-which is important for both BikeTerra and Training Peaks Virtual.
+C<-auto> option will take care of all of the details.  This option
+implicity specifies the C<-simplify> option reducing the number of
+points in the final file, which is important for both BikeTerra and
+Training Peaks Virtual.  But if you don't want this, add
+C<-nosimplify>.
 
 These are just some examples of the sort of processing which can be
 done to improve the quality and functionality of BikeTerra and
@@ -10304,19 +10492,20 @@ It also reports the length of the course, calculated treating the
 earth as a sphere of a given radius.  The calculation in BikeTerra may
 differ slightly, so distances may differ by a few meters.
 
-There are a number of options, but the two most important are C<-auto>
-and C<-simplify>.  These are designed to generate a decent result in a
-large fraction of the cases.  If you only use these two options, you
-should still be happy with results.  Other options, however, allow for
-fine-tuning of the amount of route processing.  They can be used in
-conjunction with C<-auto> to override those settings.
+There are a number of options, but the two most important is C<-auto>.
+This is designed to generate a decent result in a large fraction of
+the cases.  If you only use this two option, you should still be happy
+with results.  Other options, however, allow for fine-tuning of the
+amount of route processing.  They can be used in conjunction with
+C<-auto> to override those settings.  C<-auto> adds the C<-simplify>
+option so if you don't want this, add C<-nosimplify>.
 
 One important difference is how point-to-point routes and lappable
 routes are treated.  You can specify a loop course as C<-lap>.  IF you
 want the code to automatically determine whether a course is a
-point-to-point or lappable, use C<-autoLap>.  This option is implied
-with the C<-auto> option, and is the general default.  To negate it,
-you can specify C<-noautoLap>.
+point-to-point or lappable, use C<-autoLap> or C<-autoLoop>.  This
+option is implied with the C<-auto> option, and is the general
+default.  To negate it, you can specify C<-noautoLap>.
 
 There are a number of options to create "out-and-back" routes.  These
 were required by RGT.  However, BikeTerra automatically puts
@@ -10663,6 +10852,10 @@ and to skip auto-loop detection normally done with C<-auto>, you can
 do:
 
 C<-processGPX -noloop -auto>
+
+It also adds C<-simplify>.  If you don't want that, you can turn it off:
+
+C<-processGPX -nosimplify -auto>
 
 =item B<C<-autoLap>>
 
@@ -11539,6 +11732,15 @@ lane shift, else positive).
 The maximum angle at which corner cropping should be done, for example
 120 degrees.
 
+=item B<C<-maxSpacingRatio>> <ratio > 1>
+
+This sets a maximum ratio for spacing between points.  It is inspired
+by Biketerra, which uses splines to interpolate between points.
+Splines can bow out if the spacing ratio between points is too large.
+So a value of 2 or 3, for example, will reduce this effect.  The
+number should be at least 1 if you want to set a value.  Setting it to
+0 will do no adjustments.
+
 =item B<C<-minCornerCropAngle>> <degrees>
 
 =item B<C<-minCornerCropDegs>> <degrees>
@@ -11584,6 +11786,34 @@ the region before the end.  To apply multiple radii in different
 regions of the course, this can be used for one region, but then the
 code should be re-run on the resulting GPX file to apply a subsequent
 region.
+
+=item B<C<-minRefine>> <meters>
+
+This sets a minimum point spacing for C<-setMaxRefinementRatio>.  If
+points are spaced extremely close, and if the max refinement ratio is
+close to 1, then that fine spacing could result in an excessively
+small spacing of points along an extended interval.  This value sets a
+minimum of what the extracted point spacing is at the edge of an
+interval.  The default is 4 meters, which should be sufficient for the
+application which inspired this feature, which is spline fitting of
+roads through control points in BikeTerra.
+
+The key to this parameter is you allow for a smooth transition away
+from corners but if the value is too small, you may get points
+interpolated between corner points, which would cause a smooth corner
+to become multi-segmented.  So it should be at least as large as a
+typical spacing between corner points.
+
+=item B<C<-minSpacing>> <meters>
+
+Some games do not deal well with points which are closely spaced.
+C<-simplify> is designed to reduce the number of points.  But in some
+circumstances, for example tight corners, there may still be closely
+spaced points after using C<-simplify>.  This algorithm enforces a
+minimum spacing between points at the same time as simplifying, if
+any, or at the same point simplifying would be done.  It does this by
+removing selected points.  A good value for BikeTerra is 1 meter.
+This is part of C<-auto> and C<-outAndBack> and C<-outAndBackLap>.
 
 =item B<C<-name>> <string>
 
@@ -12812,19 +13042,73 @@ smoothing.
 
 C<processGPX -auto -smoothZ 0 -smoothG 15 GPXData.gpx>
 
-For routes on BikeTerra or Training Peaks Virtual, you would also want
-to add the C<-simplify> option.
+C<processGPX -auto BikeTerraRoute.gpx>
 
-C<processGPX -auto -simplify BikeTerraRoute.gpx>
+C<-auto> includes the C<minSpacing 1> option.  If you want to change
+this, you can add C<-minSpacing> with a different number.  For example:
+
+C<processGPX -auto -minSpacing 0 GPXData.gpx>
+
+would turn off minimum spacing checking.
 
 If the data come from Strava Route Editor, you may want to add the
 C<-fixSteps> option.
 
+=head2 C<-simplify>, C<-prune>, and C<-minSpacing>
+
+These options are automatically called by C<-auto>.  You can turn them
+off in turn with C<-nosimplify> and C<-noprune>.
+
+C<-prune> applies a less aggressive point reducton algorithm which
+removes points which fall near a 3d line connecting neighboring
+points.  It was designed for applications like RGT, where it was
+assumed points are connected with line segments of constant gradient,
+so these points are redundant in this context. Also when looking at a
+route on a map with an elevation profile, this step has minimal impact
+other than reducing the number of points.
+
+C<-simplify> further reduces the number of points using a more
+aggressive Ramera-Douglas-Peucker algorithm.  With this approach,
+points are significantly reduced in corners, so on a map instead of
+appearing as a smooth corner, you will see a series of connected line
+segments.  On BikeTerra, for example, splines will connect these
+points, so the corner will still be smooth.  Training Peaks Virtual is
+similar.  Each of these programs can have issues if points in corners
+are too closely spaced: it creates challenges for the spline
+interpolation.
+
+It may seem redundent to add C<-prune> to C<-simplify>, but if both
+are specified then C<-prune> is done first, and the recursive C<-spline>
+algorithm may run better.
+
+To futher assure that points are not too close, particularly in
+corners, add C<-minSpacing 1>.  The number is the minimum spacing
+between points, in meters.  It is applied during final simplification,
+if any, or on its own at that time, to assure that there are no issues
+with closely-spaced points.
+
+So the following are various examples of the options:
+
+C<processGPX -prune RGTRoute.gpx>
+
+C<processGPX -prune -simplify BikeTerraRoute.gpx>
+
+C<processGPX -prune -simplify -minSpacing 1 BikeTerraRoute.gpx>
+
+C<processGPX -auto BikeTerraRoute.gpx>
+
+C<processGPX -auto -nosimplify RGTRoute.gpx>
+
+C<processGPX -auto -noprune -nosimplify testRoute.gpx>
+
+Here this last example turns off both options to see the result
+of C<-autoSpacing>, for example.
+
 =head2 criterium course
 
-The following example was from a criterium course:
+The following example was from a criterium course.  You probably wouldn't do it like this: you'd probably use C<-auto> for many of the options.  But this example covers the options explicitly:
 
-C<processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx>
+C<processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -simplify -maxSpacingRatio 2 -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx>
 
 The course has an out-and-back section ending in a loop.  In the
 actual race, the out-and-back is separated by cones.  But Biketerra
@@ -12844,7 +13128,7 @@ practice, especially on criterium-type courses.
 =item B<C<-laneShift -3>>
 
 Riders remain to the left left on the out-and-back portion, so each
-direction is shifted 4 meters to the left.  The negative number
+direction is shifted 3 meters to the left.  The negative number
 implies left, a positive number implies right.
 
 =item B<C<-shiftStart 740 -shiftEnd 1390>>
@@ -12891,6 +13175,17 @@ reduce this down to 5, but lower and corners will get irregular.
 
 Remove useless points which don't affect either the shape of the
 route, or the altitude profile.  This should probably be the default.
+
+=item B<C<-simplify>>
+
+Reduces the number of points, which is preferred for BikeTerra or
+Training Peaks Virtual
+
+=item B<C<-maxSpacingRatio 2>>
+
+Adds points to the transitions between turns and straights, which
+reduces the tendency of roads to bow when loaded into BikeTerra.
+
 
 =item B<C<-smooth 7>>
 
@@ -13068,7 +13363,7 @@ If a corner turns out sharper than 6 meters, RGT will try to increase
 the radius of the turn by extending the road outward, with a smooth
 transition into and out of the correction.
 
-=item B<NoonRide.gpx>
+=item B<C<NoonRide.gpx>>
 
 This is the name of the original file.  The processed file will be
 F<NoonRide_processed.gpx>.  If the result is good, it's best to rename
@@ -13081,18 +13376,13 @@ doesn't get over-written.
 
 This example applies the automatic settings but then "simplifies" the points.
 
-C<processGPX -auto -simplify original.gpx -out processed.gpx>
+C<processGPX -auto original.gpx -out processed.gpx>
 
 =over
 
 =item B<C<-auto>>
 
 Apply the automatic set of options for general smoothing.
-
-=item B<C<-simplify>>
-
-Apply an algorithm reducing the number of points based on a match to interpolated positions
-and altitudes.  This is generally more aggressive than C<-prune>,
 
 =item B<C<original.gpx>>
 
@@ -13103,6 +13393,9 @@ This is the name of the original GPX file
 This specifies the name of the file to which the result is written
 
 =back
+
+Consider adding C<-minSpacing 1> to C<-simplify>.  This will guarantee
+that close points are avoided.
 
 =head2 selective smoothing
 
@@ -13218,6 +13511,8 @@ here to include effects from processing in both steps.
 
 =item B<C<-out processed.gpx>>
 
+The last stage of the pipeline writes the result to a file.
+
 =back
 
 =head2 adjusting gradient for bridges or tunnels
@@ -13229,7 +13524,7 @@ you might want to set the gradient to uniform over certain sections.
 
 Here the C<-uniformGradient> option can be useful, for example:
 
-C<processGPX -auto -simplify -uniformGradient 1000 1500 input.gpx -out output.gpx>
+C<processGPX -auto -uniformGradient 1000 1500 input.gpx -out output.gpx>
 
 Options here include:
 
@@ -13237,13 +13532,7 @@ Options here include:
 
 =item B<C<-auto>>
 
-This specifies a reasonable set of smoothing parameters, as well as
-C<-simplify>.
-
-=item B<C<-simplify>>
-
-Reduce the number of points after processing beyond that which
-C<-prune> would produce.
+This specifies a reasonable set of smoothing parameters.
 
 =item B<C<-uniformGradient 1000 1500>>
 
@@ -13257,7 +13546,7 @@ For suspension bridges, for example, a uniform gradient might not be appropriate
 These may have a smoothly varying gradient, producing a parabolic shape.  In this case, you
 would provide a third parameter to C<-uniformGradient>.  For example:
 
-C<processGPX -auto -simplify -uniformGradient 2000 2400 3 input.gpx -out output.gpx>
+C<processGPX -auto -uniformGradient 2000 2400 3 input.gpx -out output.gpx>
 
 =over
 
@@ -13466,6 +13755,49 @@ Better is too download a GPX file from BikeTerra using the "save"
 option in the route editor, then save as a GPX file.  Alternately you
 can save it as a JSON file and use the BTJSON: prefix to the filename.
 
+=head2 BikeTerra best practices
+
+A principal application for this code is preparing routes for
+BikeTerra.  There's a few issues with Biketerra courses:
+
+1. always use C<-simplify> if doing any sort of spacing option.
+Biketerra doesn't handle fine point spacing well.  C<-simplify>
+is automatically invoked if you use C<-auto>.
+
+2. set C<-minSpacing> to at least 1 meter.  This is done as part of
+C<-auto>.
+
+3. BikeTerra has a different algorithm for determining loop courses
+than is used here.  So if you rely on C<-autoLoop> (which is the
+default) to process the course as a loop, then this code may conclude
+a route is a point-to-point when Biketerra treats it as a loop.  This
+can cause a poor alignment of points between the end and start of the
+loop.  So if consider doing an explicity C<-loop> or C<-lap> in these
+cases.  If you want to guarantee it's treated as a point-to-point,
+use C<-noloop>.
+
+4. consider using C<-maxSpacingRatio 2> or C<-maxSpacingRatio 3>.
+This will transition the point spacings out of corners and into
+straight sections.  This is useful because Biketerra uses splines
+between trackpoints to form the actual road, and splines don't behave
+well when there is a large difference between point spacings: you can
+get a lot of "bow".  If this results in unwanted points being added to
+corners, which would cause them from being smooth curves to segmented,
+then increase C<-minRefine> from the default of 4 to something larger.
+
+=head2 Training Peaks Virtual best practices
+
+Training Peaks Virtual processes routes in many ways similar to the
+way BikeTerra does, so consider the section on BikeTerra.
+
+Training Peaks Virtual uses a different source of elevation data for
+terrain, so the C<-gpxz> option provided here may not result in as
+good alignment between the road and the underlying terrain.  So
+consider doing elevation adjustments if needed to improve the
+alignment, for example with C<-shiftZ>.
+
+This author has limited experience with Training Peaks Virtual.
+
 =head2 using GPXZ digital elevation model
 
 ProcessGPX can replace altitudes of points with the GPXZ digital
@@ -13518,7 +13850,7 @@ C<processGPX -spacing 10 inputFile.gpx -o tmp1.gpx>
 
 C<processGPX -gpxz tmp1.gpx -o tmp2.gpx>
 
-C<processGPX -simplify -auto -uniformGradient 1200 1350 5420 5470 tmp2.gpx outputFile.gpx>
+C<processGPX -auto -uniformGradient 1200 1350 5420 5470 tmp2.gpx outputFile.gpx>
 
 In this example, first the number of points was increased to a 10
 meter spacing to provide a minimum gradient resolution.  Then GPXZ was
@@ -13664,6 +13996,6 @@ unimportant for Biketerra, which ignores segments.
 
 This application is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
-
 =cut
 # eof
+  

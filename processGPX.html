@@ -22,6 +22,7 @@
   <li><a href="#EXAMPLES">EXAMPLES</a>
     <ul>
       <li><a href="#auto-option">-auto option</a></li>
+      <li><a href="#simplify--prune-and--minSpacing">-simplify, -prune, and -minSpacing</a></li>
       <li><a href="#criterium-course">criterium course</a></li>
       <li><a href="#out-and-back-course">out-and-back course</a></li>
       <li><a href="#out-and-back-circuit">out-and-back circuit</a></li>
@@ -36,6 +37,8 @@
       <li><a href="#adding-gradient-signs">adding gradient signs</a></li>
       <li><a href="#processing-a-BikeTerra-route-from-the-original-GPX">processing a BikeTerra route from the original GPX</a></li>
       <li><a href="#processing-a-BikeTerra-route-from-route-data">processing a BikeTerra route from route data</a></li>
+      <li><a href="#BikeTerra-best-practices">BikeTerra best practices</a></li>
+      <li><a href="#Training-Peaks-Virtual-best-practices">Training Peaks Virtual best practices</a></li>
       <li><a href="#using-GPXZ-digital-elevation-model">using GPXZ digital elevation model</a></li>
       <li><a href="#specifying-metadata">specifying metadata</a></li>
       <li><a href="#converting-an-RGT-route-to-BikeTerra">converting an RGT route to BikeTerra</a></li>
@@ -57,7 +60,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.75</p>
+<p>0.76</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -65,7 +68,7 @@
 
 <p>At the time of this writing, BikeTerra allows for the creation of custom routes whereby a GPX file can be submitted for conversion into a virtual environment. The GPX file can be initially generate by on-line mapping tools, among which one excellent option is Strava Route Editor, which exports GPX (consider using the <code>-fixSteps</code> option with Strava). However, these tools tend to produce GPX files with too low resolution in position, and small errors in altitude, so that corners are not sufficiently round, and the gradient between points can have anomalously large magnitude.</p>
 
-<p>The route must be linear: progressing from start to finish without any formal reuse of sections. So for example, if there is a &quot;lollipop&quot; route, heading out, around a loop, then back again, then the out and back portions need to be treated as separate portions of roadway. This code can help with this sort of situation, either making sure the out and back are perfectly aligned (with the <code>-snap</code> option, for example), or by allowing them to be separated (with the <code>-selectiveLaneShift</code> option, for example). The latter is an example of where specification of options is needed. But for most cases, the <code>-auto</code> option will take care of all of the details, with the <code>-simplify</code> option reducing the number of points in the final file, which is important for both BikeTerra and Training Peaks Virtual.</p>
+<p>The route must be linear: progressing from start to finish without any formal reuse of sections. So for example, if there is a &quot;lollipop&quot; route, heading out, around a loop, then back again, then the out and back portions need to be treated as separate portions of roadway. This code can help with this sort of situation, either making sure the out and back are perfectly aligned (with the <code>-snap</code> option, for example), or by allowing them to be separated (with the <code>-selectiveLaneShift</code> option, for example). The latter is an example of where specification of options is needed. But for most cases, the <code>-auto</code> option will take care of all of the details. This option implicity specifies the <code>-simplify</code> option reducing the number of points in the final file, which is important for both BikeTerra and Training Peaks Virtual. But if you don&#39;t want this, add <code>-nosimplify</code>.</p>
 
 <p>These are just some examples of the sort of processing which can be done to improve the quality and functionality of BikeTerra and presumibly other cycling emulators as well. There exist online tools such as GPXMagic, which is excellent, but requires extensive user interaction, and a command-line tool able to process an entire file at once has benefit. A nice approach is to general route editing with GPXMagic, then use <code>processGPX</code> to process the result.</p>
 
@@ -91,9 +94,9 @@
 
 <p>It also reports the length of the course, calculated treating the earth as a sphere of a given radius. The calculation in BikeTerra may differ slightly, so distances may differ by a few meters.</p>
 
-<p>There are a number of options, but the two most important are <code>-auto</code> and <code>-simplify</code>. These are designed to generate a decent result in a large fraction of the cases. If you only use these two options, you should still be happy with results. Other options, however, allow for fine-tuning of the amount of route processing. They can be used in conjunction with <code>-auto</code> to override those settings.</p>
+<p>There are a number of options, but the two most important is <code>-auto</code>. This is designed to generate a decent result in a large fraction of the cases. If you only use this two option, you should still be happy with results. Other options, however, allow for fine-tuning of the amount of route processing. They can be used in conjunction with <code>-auto</code> to override those settings. <code>-auto</code> adds the <code>-simplify</code> option so if you don&#39;t want this, add <code>-nosimplify</code>.</p>
 
-<p>One important difference is how point-to-point routes and lappable routes are treated. You can specify a loop course as <code>-lap</code>. IF you want the code to automatically determine whether a course is a point-to-point or lappable, use <code>-autoLap</code>. This option is implied with the <code>-auto</code> option, and is the general default. To negate it, you can specify <code>-noautoLap</code>.</p>
+<p>One important difference is how point-to-point routes and lappable routes are treated. You can specify a loop course as <code>-lap</code>. IF you want the code to automatically determine whether a course is a point-to-point or lappable, use <code>-autoLap</code> or <code>-autoLoop</code>. This option is implied with the <code>-auto</code> option, and is the general default. To negate it, you can specify <code>-noautoLap</code>.</p>
 
 <p>There are a number of options to create &quot;out-and-back&quot; routes. These were required by RGT. However, BikeTerra automatically puts turn-around loops at each end of a point-to-point course. So you do not usually need use these options with BikeTerra, or with Training Peaks Virtual.</p>
 
@@ -364,6 +367,10 @@ Pod::Usage   : for the -help option</code></pre>
 <p>This option automatically turns on options based on &quot;best practices&quot;. It will not turn anything off, so can be used in conjunction with other options. Options specifically listed over-ride the -auto option. So for example, to specify that a course is point-to-point and to skip auto-loop detection normally done with <code>-auto</code>, you can do:</p>
 
 <p><code>-processGPX -noloop -auto</code></p>
+
+<p>It also adds <code>-simplify</code>. If you don&#39;t want that, you can turn it off:</p>
+
+<p><code>-processGPX -nosimplify -auto</code></p>
 
 </dd>
 <dt id="autoLap"><b><code>-autoLap</code></b></dt>
@@ -1050,6 +1057,12 @@ Pod::Usage   : for the -help option</code></pre>
 <p>The maximum angle at which corner cropping should be done, for example 120 degrees.</p>
 
 </dd>
+<dt id="maxSpacingRatio-ratio-1"><b><code>-maxSpacingRatio</code></b> &lt;ratio &gt; 1&gt;</dt>
+<dd>
+
+<p>This sets a maximum ratio for spacing between points. It is inspired by Biketerra, which uses splines to interpolate between points. Splines can bow out if the spacing ratio between points is too large. So a value of 2 or 3, for example, will reduce this effect. The number should be at least 1 if you want to set a value. Setting it to 0 will do no adjustments.</p>
+
+</dd>
 <dt id="minCornerCropAngle-degrees"><b><code>-minCornerCropAngle</code></b> &lt;degrees&gt;</dt>
 <dd>
 
@@ -1080,6 +1093,20 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>If specified, where to start applying minimum radius (-minRadius). If both <code>-minRadiusStart</code> and <code>-minRadiusEnd</code> are specified, and if the end is before the beginning, then the region between the points is excluded, and it is applied to the region after the start and the region before the end. To apply multiple radii in different regions of the course, this can be used for one region, but then the code should be re-run on the resulting GPX file to apply a subsequent region.</p>
+
+</dd>
+<dt id="minRefine-meters"><b><code>-minRefine</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>This sets a minimum point spacing for <code>-setMaxRefinementRatio</code>. If points are spaced extremely close, and if the max refinement ratio is close to 1, then that fine spacing could result in an excessively small spacing of points along an extended interval. This value sets a minimum of what the extracted point spacing is at the edge of an interval. The default is 4 meters, which should be sufficient for the application which inspired this feature, which is spline fitting of roads through control points in BikeTerra.</p>
+
+<p>The key to this parameter is you allow for a smooth transition away from corners but if the value is too small, you may get points interpolated between corner points, which would cause a smooth corner to become multi-segmented. So it should be at least as large as a typical spacing between corner points.</p>
+
+</dd>
+<dt id="minSpacing-meters"><b><code>-minSpacing</code></b> &lt;meters&gt;</dt>
+<dd>
+
+<p>Some games do not deal well with points which are closely spaced. <code>-simplify</code> is designed to reduce the number of points. But in some circumstances, for example tight corners, there may still be closely spaced points after using <code>-simplify</code>. This algorithm enforces a minimum spacing between points at the same time as simplifying, if any, or at the same point simplifying would be done. It does this by removing selected points. A good value for BikeTerra is 1 meter. This is part of <code>-auto</code> and <code>-outAndBack</code> and <code>-outAndBackLap</code>.</p>
 
 </dd>
 <dt id="name-string"><b><code>-name</code></b> &lt;string&gt;</dt>
@@ -2014,17 +2041,43 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p><code>processGPX -auto -smoothZ 0 -smoothG 15 GPXData.gpx</code></p>
 
-<p>For routes on BikeTerra or Training Peaks Virtual, you would also want to add the <code>-simplify</code> option.</p>
-
-<p><code>processGPX -auto -simplify BikeTerraRoute.gpx</code></p>
+<p><code>processGPX -auto BikeTerraRoute.gpx</code></p>
 
 <p>If the data come from Strava Route Editor, you may want to add the <code>-fixSteps</code> option.</p>
 
+<h2 id="simplify--prune-and--minSpacing"><code>-simplify</code>, <code>-prune</code>, and <code>-minSpacing</code></h2>
+
+<p>These options are automatically called by <code>-auto</code>. You can turn them off in turn with <code>-nosimplify</code> and <code>-noprune</code>.</p>
+
+<p><code>-prune</code> applies a less aggressive point reducton algorithm which removes points which fall near a 3d line connecting neighboring points. It was designed for applications like RGT, where it was assumed points are connected with line segments of constant gradient, so these points are redundant in this context. Also when looking at a route on a map with an elevation profile, this step has minimal impact other than reducing the number of points.</p>
+
+<p><code>-simplify</code> further reduces the number of points using a more aggressive Ramera-Douglas-Peucker algorithm. With this approach, points are significantly reduced in corners, so on a map instead of appearing as a smooth corner, you will see a series of connected line segments. On BikeTerra, for example, splines will connect these points, so the corner will still be smooth. Training Peaks Virtual is similar. Each of these programs can have issues if points in corners are too closely spaced: it creates challenges for the spline interpolation.</p>
+
+<p>It may seem redundent to add <code>-prune</code> to <code>-simplify</code>, but if both are specified then <code>-prune</code> is done first, and the recursive <code>-spline</code> algorithm may run better.</p>
+
+<p>To futher assure that points are not too close, particularly in corners, add <code>-minSpacing 1</code>. The number is the minimum spacing between points, in meters. It is applied during final simplification, if any, or on its own at that time, to assure that there are no issues with closely-spaced points.</p>
+
+<p>So the following are various examples of the options:</p>
+
+<p><code>processGPX -prune RGTRoute.gpx</code></p>
+
+<p><code>processGPX -prune -simplify BikeTerraRoute.gpx</code></p>
+
+<p><code>processGPX -prune -simplify -minSpacing 1 BikeTerraRoute.gpx</code></p>
+
+<p><code>processGPX -auto BikeTerraRoute.gpx</code></p>
+
+<p><code>processGPX -auto -nosimplify RGTRoute.gpx</code></p>
+
+<p><code>processGPX -auto -noprune -nosimplify testRoute.gpx</code></p>
+
+<p>Here this last example turns off both options to see the result of <code>-autoSpacing</code>, for example.</p>
+
 <h2 id="criterium-course">criterium course</h2>
 
-<p>The following example was from a criterium course:</p>
+<p>The following example was from a criterium course. You probably wouldn&#39;t do it like this: you&#39;d probably use <code>-auto</code> for many of the options. But this example covers the options explicitly:</p>
 
-<p><code>processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx</code></p>
+<p><code>processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -simplify -maxSpacingRatio 2 -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx</code></p>
 
 <p>The course has an out-and-back section ending in a loop. In the actual race, the out-and-back is separated by cones. But Biketerra does not have a way to specify riders have riders go out and back on the same road except for full out-and-back courses. So here a separate road out and back are used. This creates four lanes.</p>
 
@@ -2041,7 +2094,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="laneShift--3"><b><code>-laneShift -3</code></b></dt>
 <dd>
 
-<p>Riders remain to the left left on the out-and-back portion, so each direction is shifted 4 meters to the left. The negative number implies left, a positive number implies right.</p>
+<p>Riders remain to the left left on the out-and-back portion, so each direction is shifted 3 meters to the left. The negative number implies left, a positive number implies right.</p>
 
 </dd>
 <dt id="shiftStart-740--shiftEnd-1390"><b><code>-shiftStart 740 -shiftEnd 1390</code></b></dt>
@@ -2080,6 +2133,18 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>Remove useless points which don&#39;t affect either the shape of the route, or the altitude profile. This should probably be the default.</p>
+
+</dd>
+<dt id="simplify1"><b><code>-simplify</code></b></dt>
+<dd>
+
+<p>Reduces the number of points, which is preferred for BikeTerra or Training Peaks Virtual</p>
+
+</dd>
+<dt id="maxSpacingRatio-2"><b><code>-maxSpacingRatio 2</code></b></dt>
+<dd>
+
+<p>Adds points to the transitions between turns and straights, which reduces the tendency of roads to bow when loaded into BikeTerra.</p>
 
 </dd>
 <dt id="smooth-7"><b><code>-smooth 7</code></b></dt>
@@ -2236,7 +2301,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>This example applies the automatic settings but then &quot;simplifies&quot; the points.</p>
 
-<p><code>processGPX -auto -simplify original.gpx -out processed.gpx</code></p>
+<p><code>processGPX -auto original.gpx -out processed.gpx</code></p>
 
 <dl>
 
@@ -2244,12 +2309,6 @@ Pod::Usage   : for the -help option</code></pre>
 <dd>
 
 <p>Apply the automatic set of options for general smoothing.</p>
-
-</dd>
-<dt id="simplify1"><b><code>-simplify</code></b></dt>
-<dd>
-
-<p>Apply an algorithm reducing the number of points based on a match to interpolated positions and altitudes. This is generally more aggressive than <code>-prune</code>,</p>
 
 </dd>
 <dt id="original.gpx"><b><code>original.gpx</code></b></dt>
@@ -2265,6 +2324,8 @@ Pod::Usage   : for the -help option</code></pre>
 
 </dd>
 </dl>
+
+<p>Consider adding <code>-minSpacing 1</code> to <code>-simplify</code>. This will guarantee that close points are avoided.</p>
 
 <h2 id="selective-smoothing">selective smoothing</h2>
 
@@ -2380,7 +2441,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>Here the <code>-uniformGradient</code> option can be useful, for example:</p>
 
-<p><code>processGPX -auto -simplify -uniformGradient 1000 1500 input.gpx -out output.gpx</code></p>
+<p><code>processGPX -auto -uniformGradient 1000 1500 input.gpx -out output.gpx</code></p>
 
 <p>Options here include:</p>
 
@@ -2389,13 +2450,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="auto2"><b><code>-auto</code></b></dt>
 <dd>
 
-<p>This specifies a reasonable set of smoothing parameters, as well as <code>-simplify</code>.</p>
-
-</dd>
-<dt id="simplify2"><b><code>-simplify</code></b></dt>
-<dd>
-
-<p>Reduce the number of points after processing beyond that which <code>-prune</code> would produce.</p>
+<p>This specifies a reasonable set of smoothing parameters.</p>
 
 </dd>
 <dt id="uniformGradient-1000-1500"><b><code>-uniformGradient 1000 1500</code></b></dt>
@@ -2408,7 +2463,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>For suspension bridges, for example, a uniform gradient might not be appropriate. These may have a smoothly varying gradient, producing a parabolic shape. In this case, you would provide a third parameter to <code>-uniformGradient</code>. For example:</p>
 
-<p><code>processGPX -auto -simplify -uniformGradient 2000 2400 3 input.gpx -out output.gpx</code></p>
+<p><code>processGPX -auto -uniformGradient 2000 2400 3 input.gpx -out output.gpx</code></p>
 
 <dl>
 
@@ -2568,6 +2623,26 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>Better is too download a GPX file from BikeTerra using the &quot;save&quot; option in the route editor, then save as a GPX file. Alternately you can save it as a JSON file and use the BTJSON: prefix to the filename.</p>
 
+<h2 id="BikeTerra-best-practices">BikeTerra best practices</h2>
+
+<p>A principal application for this code is preparing routes for BikeTerra. There&#39;s a few issues with Biketerra courses:</p>
+
+<p>1. always use <code>-simplify</code> if doing any sort of spacing option. Biketerra doesn&#39;t handle fine point spacing well. <code>-simplify</code> is automatically invoked if you use <code>-auto</code>.</p>
+
+<p>2. set <code>-minSpacing</code> to at least 1 meter. This is done as part of <code>-auto</code>.</p>
+
+<p>3. BikeTerra has a different algorithm for determining loop courses than is used here. So if you rely on <code>-autoLoop</code> (which is the default) to process the course as a loop, then this code may conclude a route is a point-to-point when Biketerra treats it as a loop. This can cause a poor alignment of points between the end and start of the loop. So if consider doing an explicity <code>-loop</code> or <code>-lap</code> in these cases. If you want to guarantee it&#39;s treated as a point-to-point, use <code>-noloop</code>.</p>
+
+<p>4. consider using <code>-maxSpacingRatio 2</code> or <code>-maxSpacingRatio 3</code>. This will transition the point spacings out of corners and into straight sections. This is useful because Biketerra uses splines between trackpoints to form the actual road, and splines don&#39;t behave well when there is a large difference between point spacings: you can get a lot of &quot;bow&quot;. If this results in unwanted points being added to corners, which would cause them from being smooth curves to segmented, then increase <code>-minRefine</code> from the default of 4 to something larger.</p>
+
+<h2 id="Training-Peaks-Virtual-best-practices">Training Peaks Virtual best practices</h2>
+
+<p>Training Peaks Virtual processes routes in many ways similar to the way BikeTerra does, so consider the section on BikeTerra.</p>
+
+<p>Training Peaks Virtual uses a different source of elevation data for terrain, so the <code>-gpxz</code> option provided here may not result in as good alignment between the road and the underlying terrain. So consider doing elevation adjustments if needed to improve the alignment, for example with <code>-shiftZ</code>.</p>
+
+<p>This author has limited experience with Training Peaks Virtual.</p>
+
 <h2 id="using-GPXZ-digital-elevation-model">using GPXZ digital elevation model</h2>
 
 <p>ProcessGPX can replace altitudes of points with the GPXZ digital elevation model API. This requires an API key. The easiest approach is to store the API key in the GPXZ_API_KEY environment variable. An alternative is to provide the API key with the <code>-gpxzAPIKey</code> option.</p>
@@ -2590,7 +2665,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p><code>processGPX -gpxz tmp1.gpx -o tmp2.gpx</code></p>
 
-<p><code>processGPX -simplify -auto -uniformGradient 1200 1350 5420 5470 tmp2.gpx outputFile.gpx</code></p>
+<p><code>processGPX -auto -uniformGradient 1200 1350 5420 5470 tmp2.gpx outputFile.gpx</code></p>
 
 <p>In this example, first the number of points was increased to a 10 meter spacing to provide a minimum gradient resolution. Then GPXZ was done on the entire route. Then finally, two sections were made uniform gradient (after looking up coordinates in a GPX viewer, recognizing distances may differ slightly depending on the assumptions of the editor and processGPX), and typical smoothing was performed.</p>
 

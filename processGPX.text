@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.75
+    0.76
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -32,9 +32,10 @@ DESCRIPTION
     or by allowing them to be separated (with the "-selectiveLaneShift"
     option, for example). The latter is an example of where specification of
     options is needed. But for most cases, the "-auto" option will take care
-    of all of the details, with the "-simplify" option reducing the number
-    of points in the final file, which is important for both BikeTerra and
-    Training Peaks Virtual.
+    of all of the details. This option implicity specifies the "-simplify"
+    option reducing the number of points in the final file, which is
+    important for both BikeTerra and Training Peaks Virtual. But if you
+    don't want this, add "-nosimplify".
 
     These are just some examples of the sort of processing which can be done
     to improve the quality and functionality of BikeTerra and presumibly
@@ -94,19 +95,20 @@ DESCRIPTION
     as a sphere of a given radius. The calculation in BikeTerra may differ
     slightly, so distances may differ by a few meters.
 
-    There are a number of options, but the two most important are "-auto"
-    and "-simplify". These are designed to generate a decent result in a
-    large fraction of the cases. If you only use these two options, you
-    should still be happy with results. Other options, however, allow for
-    fine-tuning of the amount of route processing. They can be used in
-    conjunction with "-auto" to override those settings.
+    There are a number of options, but the two most important is "-auto".
+    This is designed to generate a decent result in a large fraction of the
+    cases. If you only use this two option, you should still be happy with
+    results. Other options, however, allow for fine-tuning of the amount of
+    route processing. They can be used in conjunction with "-auto" to
+    override those settings. "-auto" adds the "-simplify" option so if you
+    don't want this, add "-nosimplify".
 
     One important difference is how point-to-point routes and lappable
     routes are treated. You can specify a loop course as "-lap". IF you want
     the code to automatically determine whether a course is a point-to-point
-    or lappable, use "-autoLap". This option is implied with the "-auto"
-    option, and is the general default. To negate it, you can specify
-    "-noautoLap".
+    or lappable, use "-autoLap" or "-autoLoop". This option is implied with
+    the "-auto" option, and is the general default. To negate it, you can
+    specify "-noautoLap".
 
     There are a number of options to create "out-and-back" routes. These
     were required by RGT. However, BikeTerra automatically puts turn-around
@@ -412,6 +414,11 @@ OPTIONS
         "-auto", you can do:
 
         "-processGPX -noloop -auto"
+
+        It also adds "-simplify". If you don't want that, you can turn it
+        off:
+
+        "-processGPX -nosimplify -auto"
 
     "-autoLap"
         Synonym for "-autoLoop"
@@ -1207,6 +1214,14 @@ OPTIONS
         The maximum angle at which corner cropping should be done, for
         example 120 degrees.
 
+    "-maxSpacingRatio" <ratio > 1>
+        This sets a maximum ratio for spacing between points. It is inspired
+        by Biketerra, which uses splines to interpolate between points.
+        Splines can bow out if the spacing ratio between points is too
+        large. So a value of 2 or 3, for example, will reduce this effect.
+        The number should be at least 1 if you want to set a value. Setting
+        it to 0 will do no adjustments.
+
     "-minCornerCropAngle" <degrees>
     "-minCornerCropDegs" <degrees>
         The minimum angle at which corner cropping should be done, for
@@ -1247,6 +1262,32 @@ OPTIONS
         of the course, this can be used for one region, but then the code
         should be re-run on the resulting GPX file to apply a subsequent
         region.
+
+    "-minRefine" <meters>
+        This sets a minimum point spacing for "-setMaxRefinementRatio". If
+        points are spaced extremely close, and if the max refinement ratio
+        is close to 1, then that fine spacing could result in an excessively
+        small spacing of points along an extended interval. This value sets
+        a minimum of what the extracted point spacing is at the edge of an
+        interval. The default is 4 meters, which should be sufficient for
+        the application which inspired this feature, which is spline fitting
+        of roads through control points in BikeTerra.
+
+        The key to this parameter is you allow for a smooth transition away
+        from corners but if the value is too small, you may get points
+        interpolated between corner points, which would cause a smooth
+        corner to become multi-segmented. So it should be at least as large
+        as a typical spacing between corner points.
+
+    "-minSpacing" <meters>
+        Some games do not deal well with points which are closely spaced.
+        "-simplify" is designed to reduce the number of points. But in some
+        circumstances, for example tight corners, there may still be closely
+        spaced points after using "-simplify". This algorithm enforces a
+        minimum spacing between points at the same time as simplifying, if
+        any, or at the same point simplifying would be done. It does this by
+        removing selected points. A good value for BikeTerra is 1 meter.
+        This is part of "-auto" and "-outAndBack" and "-outAndBackLap".
 
     "-name" <string>
         Specify the name of the GPX route. The default is the name listed in
@@ -2369,20 +2410,68 @@ EXAMPLES
 
     "processGPX -auto -smoothZ 0 -smoothG 15 GPXData.gpx"
 
-    For routes on BikeTerra or Training Peaks Virtual, you would also want
-    to add the "-simplify" option.
-
-    "processGPX -auto -simplify BikeTerraRoute.gpx"
+    "processGPX -auto BikeTerraRoute.gpx"
 
     If the data come from Strava Route Editor, you may want to add the
     "-fixSteps" option.
 
+  "-simplify", "-prune", and "-minSpacing"
+    These options are automatically called by "-auto". You can turn them off
+    in turn with "-nosimplify" and "-noprune".
+
+    "-prune" applies a less aggressive point reducton algorithm which
+    removes points which fall near a 3d line connecting neighboring points.
+    It was designed for applications like RGT, where it was assumed points
+    are connected with line segments of constant gradient, so these points
+    are redundant in this context. Also when looking at a route on a map
+    with an elevation profile, this step has minimal impact other than
+    reducing the number of points.
+
+    "-simplify" further reduces the number of points using a more aggressive
+    Ramera-Douglas-Peucker algorithm. With this approach, points are
+    significantly reduced in corners, so on a map instead of appearing as a
+    smooth corner, you will see a series of connected line segments. On
+    BikeTerra, for example, splines will connect these points, so the corner
+    will still be smooth. Training Peaks Virtual is similar. Each of these
+    programs can have issues if points in corners are too closely spaced: it
+    creates challenges for the spline interpolation.
+
+    It may seem redundent to add "-prune" to "-simplify", but if both are
+    specified then "-prune" is done first, and the recursive "-spline"
+    algorithm may run better.
+
+    To futher assure that points are not too close, particularly in corners,
+    add "-minSpacing 1". The number is the minimum spacing between points,
+    in meters. It is applied during final simplification, if any, or on its
+    own at that time, to assure that there are no issues with closely-spaced
+    points.
+
+    So the following are various examples of the options:
+
+    "processGPX -prune RGTRoute.gpx"
+
+    "processGPX -prune -simplify BikeTerraRoute.gpx"
+
+    "processGPX -prune -simplify -minSpacing 1 BikeTerraRoute.gpx"
+
+    "processGPX -auto BikeTerraRoute.gpx"
+
+    "processGPX -auto -nosimplify RGTRoute.gpx"
+
+    "processGPX -auto -noprune -nosimplify testRoute.gpx"
+
+    Here this last example turns off both options to see the result of
+    "-autoSpacing", for example.
+
   criterium course
-    The following example was from a criterium course:
+    The following example was from a criterium course. You probably wouldn't
+    do it like this: you'd probably use "-auto" for many of the options. But
+    this example covers the options explicitly:
 
     "processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390
-    -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -smooth 7
-    -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx"
+    -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -simplify
+    -maxSpacingRatio 2 -smooth 7 -snapDistance 2 -snap 1 -closeLoop
+    CherryPieCritRGT.gpx"
 
     The course has an out-and-back section ending in a loop. In the actual
     race, the out-and-back is separated by cones. But Biketerra does not
@@ -2398,7 +2487,7 @@ EXAMPLES
 
     "-laneShift -3"
         Riders remain to the left left on the out-and-back portion, so each
-        direction is shifted 4 meters to the left. The negative number
+        direction is shifted 3 meters to the left. The negative number
         implies left, a positive number implies right.
 
     "-shiftStart 740 -shiftEnd 1390"
@@ -2440,6 +2529,14 @@ EXAMPLES
     "-prune"
         Remove useless points which don't affect either the shape of the
         route, or the altitude profile. This should probably be the default.
+
+    "-simplify"
+        Reduces the number of points, which is preferred for BikeTerra or
+        Training Peaks Virtual
+
+    "-maxSpacingRatio 2"
+        Adds points to the transitions between turns and straights, which
+        reduces the tendency of roads to bow when loaded into BikeTerra.
 
     "-smooth 7"
         Position is smoothed with a Gaussin with sigma = 7 meters. This was
@@ -2597,21 +2694,19 @@ EXAMPLES
     This example applies the automatic settings but then "simplifies" the
     points.
 
-    "processGPX -auto -simplify original.gpx -out processed.gpx"
+    "processGPX -auto original.gpx -out processed.gpx"
 
     "-auto"
         Apply the automatic set of options for general smoothing.
-
-    "-simplify"
-        Apply an algorithm reducing the number of points based on a match to
-        interpolated positions and altitudes. This is generally more
-        aggressive than "-prune",
 
     "original.gpx"
         This is the name of the original GPX file
 
     "-out processed.gpx"
         This specifies the name of the file to which the result is written
+
+    Consider adding "-minSpacing 1" to "-simplify". This will guarantee that
+    close points are avoided.
 
   selective smoothing
     Here is an example where an urban route with reasonably sharp corners,
@@ -2719,18 +2814,12 @@ EXAMPLES
 
     Here the "-uniformGradient" option can be useful, for example:
 
-    "processGPX -auto -simplify -uniformGradient 1000 1500 input.gpx -out
-    output.gpx"
+    "processGPX -auto -uniformGradient 1000 1500 input.gpx -out output.gpx"
 
     Options here include:
 
     "-auto"
-        This specifies a reasonable set of smoothing parameters, as well as
-        "-simplify".
-
-    "-simplify"
-        Reduce the number of points after processing beyond that which
-        "-prune" would produce.
+        This specifies a reasonable set of smoothing parameters.
 
     "-uniformGradient 1000 1500"
         This specifies that the gradient from 1000 meters to 1500 meters is
@@ -2743,7 +2832,7 @@ EXAMPLES
     parabolic shape. In this case, you would provide a third parameter to
     "-uniformGradient". For example:
 
-    "processGPX -auto -simplify -uniformGradient 2000 2400 3 input.gpx -out
+    "processGPX -auto -uniformGradient 2000 2400 3 input.gpx -out
     output.gpx"
 
     "-uniformGradient 2000 2400 3"
@@ -2923,6 +3012,46 @@ EXAMPLES
     in the route editor, then save as a GPX file. Alternately you can save
     it as a JSON file and use the BTJSON: prefix to the filename.
 
+  BikeTerra best practices
+    A principal application for this code is preparing routes for BikeTerra.
+    There's a few issues with Biketerra courses:
+
+    1. always use "-simplify" if doing any sort of spacing option. Biketerra
+    doesn't handle fine point spacing well. "-simplify" is automatically
+    invoked if you use "-auto".
+
+    2. set "-minSpacing" to at least 1 meter. This is done as part of
+    "-auto".
+
+    3. BikeTerra has a different algorithm for determining loop courses than
+    is used here. So if you rely on "-autoLoop" (which is the default) to
+    process the course as a loop, then this code may conclude a route is a
+    point-to-point when Biketerra treats it as a loop. This can cause a poor
+    alignment of points between the end and start of the loop. So if
+    consider doing an explicity "-loop" or "-lap" in these cases. If you
+    want to guarantee it's treated as a point-to-point, use "-noloop".
+
+    4. consider using "-maxSpacingRatio 2" or "-maxSpacingRatio 3". This
+    will transition the point spacings out of corners and into straight
+    sections. This is useful because Biketerra uses splines between
+    trackpoints to form the actual road, and splines don't behave well when
+    there is a large difference between point spacings: you can get a lot of
+    "bow". If this results in unwanted points being added to corners, which
+    would cause them from being smooth curves to segmented, then increase
+    "-minRefine" from the default of 4 to something larger.
+
+  Training Peaks Virtual best practices
+    Training Peaks Virtual processes routes in many ways similar to the way
+    BikeTerra does, so consider the section on BikeTerra.
+
+    Training Peaks Virtual uses a different source of elevation data for
+    terrain, so the "-gpxz" option provided here may not result in as good
+    alignment between the road and the underlying terrain. So consider doing
+    elevation adjustments if needed to improve the alignment, for example
+    with "-shiftZ".
+
+    This author has limited experience with Training Peaks Virtual.
+
   using GPXZ digital elevation model
     ProcessGPX can replace altitudes of points with the GPXZ digital
     elevation model API. This requires an API key. The easiest approach is
@@ -2972,8 +3101,8 @@ EXAMPLES
 
     "processGPX -gpxz tmp1.gpx -o tmp2.gpx"
 
-    "processGPX -simplify -auto -uniformGradient 1200 1350 5420 5470
-    tmp2.gpx outputFile.gpx"
+    "processGPX -auto -uniformGradient 1200 1350 5420 5470 tmp2.gpx
+    outputFile.gpx"
 
     In this example, first the number of points was increased to a 10 meter
     spacing to provide a minimum gradient resolution. Then GPXZ was done on
