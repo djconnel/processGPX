@@ -5,7 +5,7 @@ SYNOPSIS
     "processGPX" [options] <input files>
 
 VERSION
-    0.76
+    0.77
 
 DESCRIPTION
     processGPX is a series of algorithms to improve and create GPX files, in
@@ -1220,7 +1220,8 @@ OPTIONS
         Splines can bow out if the spacing ratio between points is too
         large. So a value of 2 or 3, for example, will reduce this effect.
         The number should be at least 1 if you want to set a value. Setting
-        it to 0 will do no adjustments.
+        it to 0 will do no adjustments. It is part of "-auto" so set to 0 if
+        you don't want it.
 
     "-minCornerCropAngle" <degrees>
     "-minCornerCropDegs" <degrees>
@@ -1825,7 +1826,7 @@ OPTIONS
         simplification. So simplifying a segment would result in a point
         deviating further from this in x, y coordinates, then the point will
         be retained. The default is 1 meter, which works well with
-        BikeTerra.
+        BikeTerra. Zero disables simplification.
 
     "-simplifyDistance" <meters>
         Synopnym for "-simplifyD"
@@ -1867,7 +1868,8 @@ OPTIONS
         for simplification. So simplifying a segment would result in a point
         at least this amount higher or lower than for a course without the
         point present, then the point will be retained. The default is 0.1
-        meters, which works well with BikeTerra.
+        meters, which works well with BikeTerra. Specifying 0 ignores
+        gradient (equivalent to infinite).
 
     "-smooth" <meters>
         Provide a Gaussian sigma value for smoothing of position and
@@ -2412,6 +2414,13 @@ EXAMPLES
 
     "processGPX -auto BikeTerraRoute.gpx"
 
+    "-auto" includes the "minSpacing 1" option. If you want to change this,
+    you can add "-minSpacing" with a different number. For example:
+
+    "processGPX -auto -minSpacing 0 GPXData.gpx"
+
+    would turn off minimum spacing checking.
+
     If the data come from Strava Route Editor, you may want to add the
     "-fixSteps" option.
 
@@ -2470,7 +2479,7 @@ EXAMPLES
 
     "processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390
     -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -simplify
-    -maxSpacingRatio 2 -smooth 7 -snapDistance 2 -snap 1 -closeLoop
+    -maxSpacingRatio 3 -smooth 7 -snapDistance 2 -snap 1 -closeLoop
     CherryPieCritRGT.gpx"
 
     The course has an out-and-back section ending in a loop. In the actual
@@ -2534,7 +2543,7 @@ EXAMPLES
         Reduces the number of points, which is preferred for BikeTerra or
         Training Peaks Virtual
 
-    "-maxSpacingRatio 2"
+    "-maxSpacingRatio 3"
         Adds points to the transitions between turns and straights, which
         reduces the tendency of roads to bow when loaded into BikeTerra.
 
@@ -2684,7 +2693,7 @@ EXAMPLES
         increase the radius of the turn by extending the road outward, with
         a smooth transition into and out of the correction.
 
-    NoonRide.gpx
+    "NoonRide.gpx"
         This is the name of the original file. The processed file will be
         NoonRide_processed.gpx. If the result is good, it's best to rename
         this to something different, so if you rerun the "smoothGPX", it
@@ -2805,6 +2814,7 @@ EXAMPLES
         steps.
 
     "-out processed.gpx"
+        The last stage of the pipeline writes the result to a file.
 
   adjusting gradient for bridges or tunnels
     Typically tunnels are built with a constant gradient. Route editors may
@@ -3031,14 +3041,14 @@ EXAMPLES
     consider doing an explicity "-loop" or "-lap" in these cases. If you
     want to guarantee it's treated as a point-to-point, use "-noloop".
 
-    4. consider using "-maxSpacingRatio 2" or "-maxSpacingRatio 3". This
-    will transition the point spacings out of corners and into straight
-    sections. This is useful because Biketerra uses splines between
-    trackpoints to form the actual road, and splines don't behave well when
-    there is a large difference between point spacings: you can get a lot of
-    "bow". If this results in unwanted points being added to corners, which
-    would cause them from being smooth curves to segmented, then increase
-    "-minRefine" from the default of 4 to something larger.
+    4. consider using "-maxSpacingRatio 3" This will transition the point
+    spacings out of corners and into straight sections. This is useful
+    because Biketerra uses splines between trackpoints to form the actual
+    road, and splines don't behave well when there is a large difference
+    between point spacings: you can get a lot of "bow". If this results in
+    unwanted points being added to corners, which would cause them from
+    being smooth curves to segmented, then increase "-minRefine" from the
+    default of 4 to something larger. This is part of "-auto".
 
   Training Peaks Virtual best practices
     Training Peaks Virtual processes routes in many ways similar to the way
@@ -3232,5 +3242,5 @@ AUTHORS
 
 LICENSE
     This application is free software; you can redistribute it and/or modify
-    it under the same terms as Perl itself.
+    it under the same terms as Perl itself.=
 

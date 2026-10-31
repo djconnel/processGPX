@@ -60,7 +60,7 @@
 
 <h1 id="VERSION">VERSION</h1>
 
-<p>0.76</p>
+<p>0.77</p>
 
 <h1 id="DESCRIPTION">DESCRIPTION</h1>
 
@@ -1060,7 +1060,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="maxSpacingRatio-ratio-1"><b><code>-maxSpacingRatio</code></b> &lt;ratio &gt; 1&gt;</dt>
 <dd>
 
-<p>This sets a maximum ratio for spacing between points. It is inspired by Biketerra, which uses splines to interpolate between points. Splines can bow out if the spacing ratio between points is too large. So a value of 2 or 3, for example, will reduce this effect. The number should be at least 1 if you want to set a value. Setting it to 0 will do no adjustments.</p>
+<p>This sets a maximum ratio for spacing between points. It is inspired by Biketerra, which uses splines to interpolate between points. Splines can bow out if the spacing ratio between points is too large. So a value of 2 or 3, for example, will reduce this effect. The number should be at least 1 if you want to set a value. Setting it to 0 will do no adjustments. It is part of <code>-auto</code> so set to 0 if you don&#39;t want it.</p>
 
 </dd>
 <dt id="minCornerCropAngle-degrees"><b><code>-minCornerCropAngle</code></b> &lt;degrees&gt;</dt>
@@ -1558,7 +1558,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="simplifyD-meters"><b><code>-simplifyD</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>The maximum deviation of a point from a straight line for simplification. So simplifying a segment would result in a point deviating further from this in x, y coordinates, then the point will be retained. The default is 1 meter, which works well with BikeTerra.</p>
+<p>The maximum deviation of a point from a straight line for simplification. So simplifying a segment would result in a point deviating further from this in x, y coordinates, then the point will be retained. The default is 1 meter, which works well with BikeTerra. Zero disables simplification.</p>
 
 </dd>
 <dt id="simplifyDistance-meters"><b><code>-simplifyDistance</code></b> &lt;meters&gt;</dt>
@@ -1598,7 +1598,7 @@ Pod::Usage   : for the -help option</code></pre>
 <dt id="simplifyZ-meters"><b><code>-simplifyZ</code></b> &lt;meters&gt;</dt>
 <dd>
 
-<p>The maximum deviation of a point&#39;s altitude from a uniform gradient for simplification. So simplifying a segment would result in a point at least this amount higher or lower than for a course without the point present, then the point will be retained. The default is 0.1 meters, which works well with BikeTerra.</p>
+<p>The maximum deviation of a point&#39;s altitude from a uniform gradient for simplification. So simplifying a segment would result in a point at least this amount higher or lower than for a course without the point present, then the point will be retained. The default is 0.1 meters, which works well with BikeTerra. Specifying 0 ignores gradient (equivalent to infinite).</p>
 
 </dd>
 <dt id="smooth-meters"><b><code>-smooth</code></b> &lt;meters&gt;</dt>
@@ -2043,6 +2043,12 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p><code>processGPX -auto BikeTerraRoute.gpx</code></p>
 
+<p><code>-auto</code> includes the <code>minSpacing 1</code> option. If you want to change this, you can add <code>-minSpacing</code> with a different number. For example:</p>
+
+<p><code>processGPX -auto -minSpacing 0 GPXData.gpx</code></p>
+
+<p>would turn off minimum spacing checking.</p>
+
 <p>If the data come from Strava Route Editor, you may want to add the <code>-fixSteps</code> option.</p>
 
 <h2 id="simplify--prune-and--minSpacing"><code>-simplify</code>, <code>-prune</code>, and <code>-minSpacing</code></h2>
@@ -2077,7 +2083,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>The following example was from a criterium course. You probably wouldn&#39;t do it like this: you&#39;d probably use <code>-auto</code> for many of the options. But this example covers the options explicitly:</p>
 
-<p><code>processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -simplify -maxSpacingRatio 2 -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx</code></p>
+<p><code>processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -simplify -maxSpacingRatio 3 -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx</code></p>
 
 <p>The course has an out-and-back section ending in a loop. In the actual race, the out-and-back is separated by cones. But Biketerra does not have a way to specify riders have riders go out and back on the same road except for full out-and-back courses. So here a separate road out and back are used. This creates four lanes.</p>
 
@@ -2141,7 +2147,7 @@ Pod::Usage   : for the -help option</code></pre>
 <p>Reduces the number of points, which is preferred for BikeTerra or Training Peaks Virtual</p>
 
 </dd>
-<dt id="maxSpacingRatio-2"><b><code>-maxSpacingRatio 2</code></b></dt>
+<dt id="maxSpacingRatio-3"><b><code>-maxSpacingRatio 3</code></b></dt>
 <dd>
 
 <p>Adds points to the transitions between turns and straights, which reduces the tendency of roads to bow when loaded into BikeTerra.</p>
@@ -2289,7 +2295,7 @@ Pod::Usage   : for the -help option</code></pre>
 <p>If a corner turns out sharper than 6 meters, RGT will try to increase the radius of the turn by extending the road outward, with a smooth transition into and out of the correction.</p>
 
 </dd>
-<dt id="NoonRide.gpx"><b>NoonRide.gpx</b></dt>
+<dt id="NoonRide.gpx"><b><code>NoonRide.gpx</code></b></dt>
 <dd>
 
 <p>This is the name of the original file. The processed file will be <i>NoonRide_processed.gpx</i>. If the result is good, it&#39;s best to rename this to something different, so if you rerun the <code>smoothGPX</code>, it doesn&#39;t get over-written.</p>
@@ -2431,6 +2437,8 @@ Pod::Usage   : for the -help option</code></pre>
 </dd>
 <dt id="out-processed.gpx1"><b><code>-out processed.gpx</code></b></dt>
 <dd>
+
+<p>The last stage of the pipeline writes the result to a file.</p>
 
 </dd>
 </dl>
@@ -2633,7 +2641,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <p>3. BikeTerra has a different algorithm for determining loop courses than is used here. So if you rely on <code>-autoLoop</code> (which is the default) to process the course as a loop, then this code may conclude a route is a point-to-point when Biketerra treats it as a loop. This can cause a poor alignment of points between the end and start of the loop. So if consider doing an explicity <code>-loop</code> or <code>-lap</code> in these cases. If you want to guarantee it&#39;s treated as a point-to-point, use <code>-noloop</code>.</p>
 
-<p>4. consider using <code>-maxSpacingRatio 2</code> or <code>-maxSpacingRatio 3</code>. This will transition the point spacings out of corners and into straight sections. This is useful because Biketerra uses splines between trackpoints to form the actual road, and splines don&#39;t behave well when there is a large difference between point spacings: you can get a lot of &quot;bow&quot;. If this results in unwanted points being added to corners, which would cause them from being smooth curves to segmented, then increase <code>-minRefine</code> from the default of 4 to something larger.</p>
+<p>4. consider using <code>-maxSpacingRatio 3</code> This will transition the point spacings out of corners and into straight sections. This is useful because Biketerra uses splines between trackpoints to form the actual road, and splines don&#39;t behave well when there is a large difference between point spacings: you can get a lot of &quot;bow&quot;. If this results in unwanted points being added to corners, which would cause them from being smooth curves to segmented, then increase <code>-minRefine</code> from the default of 4 to something larger. This is part of <code>-auto</code>.</p>
 
 <h2 id="Training-Peaks-Virtual-best-practices">Training Peaks Virtual best practices</h2>
 
@@ -2735,7 +2743,7 @@ Pod::Usage   : for the -help option</code></pre>
 
 <h1 id="LICENSE">LICENSE</h1>
 
-<p>This application is free software; you can redistribute it and/or modify it under the same terms as Perl itself.</p>
+<p>This application is free software; you can redistribute it and/or modify it under the same terms as Perl itself.=</p>
 
 
 </body>

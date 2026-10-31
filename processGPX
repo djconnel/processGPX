@@ -90,7 +90,11 @@ use Pod::Usage;
 #               moved setting of -autoSpacing by -maxAngle before -autoSpacing sets -spacing
 #               add -maxSpacingRatio and -minRefine, fixed how -simplify applies to multiple segments
 #               add minSpacing and add it to -auto, fixed simplify issue causing points to not get pruned
-
+# version 0.77: change recommended maxSpacingRatio to 3 from 2, change final quality score to post-simplification
+#               add elapsed times, improve messages, add maxSpacingRatio 3 to auto, bug in maxSpacingRatio, removed
+#               unused parameters from cropCorners, changed simplifyPoints to handle dr = 0, z0 = 0;
+#               added formatDistance, removed RGT margin from climb detection, added timer to various steps
+#               removed 2 debugging messages
 
 # ==========================================================================
 # FILE LAYOUT
@@ -101,7 +105,7 @@ use Pod::Usage;
 #   4. Subroutines, grouped by purpose:
 #        4.1  Messages and General Utilities
 #               note, setFileNameSuffix, copyPoint, copyField, createLinks, linkedListToPoints,
-#               isPointInInterval, isPointInIntervals, checkRange
+#               isPointInInterval, isPointInIntervals, checkRange, formatDistance
 #        4.2  Input and Output
 #               loadURL, loadGPX, loadBTRoute, loadBTJSON, getExtensions, addExtensions,
 #               addPointExtensions, flattenPointExtensions
@@ -158,7 +162,7 @@ use Pod::Usage;
 # 1. CONSTANTS
 # ==========================================================================
 
-my $version = "0.76"; # make sure this matches pod value
+my $version = "0.77"; # make sure this matches pod value
 
 my $number_regexp =
   '[+-]?\d*(?:\d|(?:\.\d+))(?:[eE][-+]?\d+)?';
@@ -696,6 +700,7 @@ if ( $outAndBack || $outAndBackLap ) {
   }
   $autoSpacing //= 1;
   $minSpacing //= 1;
+  $maxSpacingRatio //= 3;
   $lSmooth //= 6;
   $laneShift //= (@selectiveLaneShift ? 0 : 4);
   $minRadius //= 8;
@@ -760,12 +765,16 @@ $append  += $extend;
 # ==========================================================================
 
 my @files = @ARGV;
+
 @files = ("-") unless (@files);
 
 die("output file name can be specified only if one input file is specified: either use default output file name, or run files one at a time.\n")
   if ((@files > 1) && ($outFile ne ""));
 
 for my $file ( @files ) {
+  warn("processing file $file\n");
+
+  my $timerStart = time();
 
   my $nSegment = 0;
   my $GPXResult = loadGPX(GPXFile=> $file, nSegment=> $nSegment, stripSegments=> $stripSegments, stripWaypoints=> $stripWaypoints);
@@ -785,10 +794,10 @@ for my $file ( @files ) {
   }
 
   note("points in original GPX track = ", scalar(@$points), "\n");
-  my ($score, $scoreD, $scoreZ) = calcQualityScore(points=> $points, isLoop=> $isLoop);
-  note("quality score of original course = ", sprintf("%.4f", $score), "\n");
-  note("direction score of original course = ", sprintf("%.4f", $scoreD), "\n");
-  note("altitude score of original course = ", sprintf("%.4f", $scoreZ), "\n");
+  my ($score0, $scoreD0, $scoreZ0) = calcQualityScore(points=> $points, isLoop=> $isLoop);
+  note("quality score of original course = ", sprintf("%.4f", $score0), "\n");
+  note("direction score of original course = ", sprintf("%.4f", $scoreD0), "\n");
+  note("altitude score of original course = ", sprintf("%.4f", $scoreZ0), "\n");
 
   # eliminate duplicate x,y points
   $points = removeDuplicatePoints(points=> $points, isLoop=> $isLoop);
@@ -883,7 +892,7 @@ for my $file ( @files ) {
 
     if (! defined $smoothAngle) {
       $smoothAngle = 10;
-      note("setting -smoothAngle $smoothAngle ...\n");
+      note("setting -smoothAngle $smoothAngle degrees...\n");
     }
 
     if (! defined $minRadius) {
@@ -902,8 +911,13 @@ for my $file ( @files ) {
     }
 
     if (! defined $minSpacing) {
-      note("setting -minSpacing ...\n");
       $minSpacing = 1;
+      note("setting -minSpacing to $minSpacing meters...\n");
+    }
+
+    if (! defined $maxSpacingRatio) {
+      $maxSpacingRatio = 3;
+      note("setting -maxSpacingRatio to $maxSpacingRatio ...\n");
     }
 
     if (! defined $zSmooth) {
@@ -918,7 +932,7 @@ for my $file ( @files ) {
 
     if (! defined $snap) {
       $snap = 1;
-      note("setting -snap 1 ...\n");
+      note("setting -snap $snap ...\n");
 
     }
     if (! defined $snapTransition) {
@@ -1962,7 +1976,7 @@ for my $file ( @files ) {
       $points = \@pNew;
     }
 
-    push @$points, \%{$points->[0]} if ($pointPopped);
+    copyPoint($points) if ($pointPopped);
   }
 
   #
@@ -2218,20 +2232,12 @@ for my $file ( @files ) {
       }
     }
 
-    my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
-    note("final number of points = ", scalar(@$points), "\n");
-    note("course distance = ", sprintf("%.4f", $courseDistance / 1000), " kilometers\n");
-    my ($score, $scoreD, $scoreZ) = calcQualityScore(points=> $points, isLoop=> $isLoop);
-    note("quality score of final course = ", sprintf("%.4f", $score), "\n");
-    note("direction score of final course = ", sprintf("%.4f", $scoreD), "\n");
-    note("altitude score of final course = ", sprintf("%.4f", $scoreZ), "\n");
-    note("distance from last point to first point = ", sprintf("%.3f", latlngDistance($points->[-1], $points->[0])), " meters\n");
-
     #
     #
     # generate gradient signs
     #
     if ( $addGradientSigns || $addGradientWaypoints ) {
+      my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
       # calculate course distance
       $waypoints //= [];
       my $gradientWaypoints =
@@ -2243,7 +2249,7 @@ for my $file ( @files ) {
                            threshold=> $gradientThreshold,
                            isLoop=> $isLoop
                           );
-      note(scalar(@$gradientWaypoints) . " gradients identified\n.");
+      note(scalar(@$gradientWaypoints) . " gradients identified.\n");
       push @$waypoints, @$gradientWaypoints;
     }
 
@@ -2252,7 +2258,7 @@ for my $file ( @files ) {
     # generate corner waypoints
     #
     if ( $addCornerWaypoints ) {
-      # calculate course distance
+      my $courseDistance = calcCourseDistance(points=> $points, isLoop=> $isLoop);
       $waypoints //= [];
       my $cornerWaypoints =
         addCornerWaypoints(
@@ -2274,16 +2280,31 @@ for my $file ( @files ) {
     elsif ( (defined $minSpacing) && ($minSpacing > 0) ) {
       note("applying minimum point spacing\n");
       # call simplification with trivial thresholds so only points within minSpacing are pruned (plus colinear points)
-      $points = simplifyPoints(points=> $points, z0=> 0.001, r0=> 0.01, minSpacing=> $minSpacing);
+      deleteDerivedFields($points);
+      $points = simplifyPoints(points=> $points, z0=> 0, r0=> 0, minSpacing=> $minSpacing);
     }
 
     # max spacing ratio
-    warn("number of points before applying max spacing ratio = " . scalar(@$points) . "\n");
     if ( (defined $maxSpacingRatio) && ($maxSpacingRatio > 0) ) {
       note("applying max spacing ratio\n");
+      my $n0 = @$points;
       $points = applyMaxSpacingRatio(points=> $points, ratio=> $maxSpacingRatio, minRefine=> $minRefine, isLoop=> $isLoop);
+      my $n1 = @$points;
+      my $delta = ($n0 == 0) ? "" : sprintf(" (+%.2f%%)", 100 * ($n1 - $n0) / $n0);
+      note("maxSpacingRatio = $maxSpacingRatio changed point count from $n0 to $n1", $delta, "\n");
     }
-    warn("number of points after applying max spacing ratio = " . scalar(@$points) . "\n");
+
+    # editing is done
+    note("final number of points = ", scalar(@$points), "\n");
+    note("course distance = ", formatDistance($courseDistance), "\n");
+    my ($score, $scoreD, $scoreZ) = calcQualityScore(points=> $points, isLoop=> $isLoop);
+    my $fScore  = ($score0 == 0)  ? "" : sprintf(" (ratio = %.3f)", $score / $score0);
+    my $fScoreD = ($scoreD0 == 0) ? "" : sprintf(" (ratio = %.3f)", $scoreD / $scoreD0);
+    my $fScoreZ = ($scoreZ0 == 0) ? "" : sprintf(" (ratio = %.3f)", $scoreZ / $scoreZ0);
+    note("quality score of final course = ", sprintf("%.4f", $score), $fScore, "\n");
+    note("direction score of final course = ", sprintf("%.4f", $scoreD), $fScoreD, "\n");
+    note("altitude score of final course = ", sprintf("%.4f", $scoreZ), $fScoreZ, "\n");
+    note("distance from last point to first point = ", formatDistance(latlngDistance($points->[-1], $points->[0])), "\n");
 
     #
     # finish up
@@ -2485,6 +2506,9 @@ for my $file ( @files ) {
     }
   }
   note("done with file $file.\n");
+
+  my $timerElapsed = time() - $timerStart;
+  note("elapsed time for file $file = " . $timerElapsed . " seconds\n");
 }
 
 
@@ -2635,6 +2659,19 @@ sub checkRange {
   } else {
     return (((! defined $start) || ($points->[$i]->{distance} >= $start)) && ((! defined $end) || ($points->[$i]->{distance} <= $end)));
   }
+}
+
+# format a distance for screen (meters or km)
+sub formatDistance {
+  my $d = shift();
+  my $rm  = shift() // 0.1;   # resolution for meters
+  my $rkm = shift() // 0.001;  # resolution for km
+
+  # number of digits
+  my $fm  = sprintf("%%.%df", int(0.5 + log(1 / $rm) / log(10)));
+  my $fkm = sprintf("%%.%df", int(0.5 + log(1 / $rkm) / log(10)));
+
+  return(($d > 1000) ? sprintf("$fkm km", $d / 1000) : sprintf("$fm meters", $d));
 }
 
 
@@ -3926,6 +3963,7 @@ sub pointAtPosition {
   my $points = $var{points} // [];
   my $isLoop = $var{isLoop} // 0;
   my $close = $var{close} // 0.01;
+  my $interpolate = $var{interpolate} // 1;  # whether to interpolate
 
   my @pNew = ();
 
@@ -3946,9 +3984,13 @@ sub pointAtPosition {
     $d10 = $s0 - $s1;
   }
   my $f = $d10 / $d12;
-  my $pNew = interpolatePoint($points->[$i1], $points->[$i2], $f, $courseDistance, $isLoop);
-  my @newPoints = (@$points[0 .. $i1], $pNew, @$points[$i2 .. $#$points]);
-  return (\@newPoints, $i2);
+  if ($interpolate) {
+    my $pNew = interpolatePoint($points->[$i1], $points->[$i2], $f, $courseDistance, $isLoop);
+    my @newPoints = (@$points[0 .. $i1], $pNew, @$points[$i2 .. $#$points]);
+    return (\@newPoints, $i2);
+  } else {
+    return ($points, ($d12 > $d10) ? $i1 : $i2);
+  }
 }
 
 #
@@ -4591,6 +4633,7 @@ sub smoothing {
   my $sigma02 = $sigma0 ** 2;
 
   note("smoothing @$fields with σ = $sigma0\n");
+  my $timerStart = time();
 
   return $points unless ( (@$fields > 0) && (( $sigma0 > 0) || ((defined $sigmaField) && ($sigmaField ne "") && ($sigmaFactor > 0))) );
 
@@ -4738,6 +4781,7 @@ sub smoothing {
     deleteDerivedFields(\@pNew, \@GEOMETRY_FIELDS);
   }
 
+  note("smoothing @$fields elapsed time = ", time() - $timerStart, " seconds\n");
   return \@pNew;
 }
 
@@ -4784,12 +4828,12 @@ sub removeDuplicatePoints {
 
     if ($i1 == $i) {
       push @pNew, $p;
-    }
+     }
     else {
       # if this is the first point removed, then clean out derived fields
       if ($removedCount == 0) {
-        deleteDerivedFields( $points );
-        deleteDerivedFields( \@pNew );
+        deleteDerivedFields($points);
+        deleteDerivedFields(\@pNew);
       }
       $removedCount += ($i1 - $i);
 
@@ -5319,17 +5363,17 @@ sub simplifyPoints {
   my $r00 = $var{r00} // $r0;
   my $points = $var{points} // [];
   my $minSpacing = $var{minSpacing} // 0;
-  return $points if ($r0 <= 0);
   $r00 = $r0 if ($r00 <= 0);
   my $dr = (($lambda > 0) && ($r0 > $r00)) ? $r0 - $r00 : 0;
+  $minSpacing = 0 if ($minSpacing < 0);
 
-  return $points if (@$points < 3);
+  # return if route is small or there's nothing to do
+  return $points if (@$points < 3 || ($r0 <= 0 && $minSpacing <= 0));
 
-  # add distance field if necessary
   my $s0;
   my $s1;
   if ($minSpacing > 0) {
-    addDistanceFieldIfNeeded(points=> $points) if ($minSpacing > 0);
+    addDistanceFieldIfNeeded(points=> $points);   # will only be called on full route
     $s0 = $points->[0]->{distance};
     $s1 = $points->[-1]->{distance};
   }
@@ -5343,17 +5387,39 @@ sub simplifyPoints {
     }
   }
 
+  my ($xf, $yf) = latlng2dxdy($points->[0], $points->[-1]);
+
   # find the point of maximum deviation and recurse around that point
   # find distance between points and 3D line connecting endpoints
   # don't go within minSpacing of a boundary (if defined)
-  my ($xf, $yf) = latlng2dxdy($points->[0], $points->[-1]);
-  # if this point is too close to the first point, then find the furthest point and simplify on that
+
+
+  # special case for processing minSpacing only
+  if ($r0 <= 0) {
+    # find point closest to half way
+    my $s1 = $points->[0]->{distance};
+    my $s2 = $points->[-1]->{distance};
+    return [$points->[0], $points->[-1]]
+      if ($s2 - $s1 < 2 * $minSpacing);
+    my $sMid = ($s1 + $s2) / 2;
+    my (undef, $iMid) = pointAtPosition(points=> $points, distance=> $sMid, interpolate=> 0);
+    return [$points->[0], $points->[-1]] unless defined ($iMid);
+    $iMid = 1 if ($iMid == 0);
+    $iMid = $#$points - 1 if ($iMid == $#$points);
+    my $p1 = simplifyPoints(points=> [@$points[0 .. $iMid]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
+    my $p2 = simplifyPoints(points=> [@$points[$iMid .. $#$points]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
+    shift @$p2;
+    return [@$p1, @$p2];
+  }
+
+  # first check if the points are close.  If so we want to simplify using point furthest from endpoints
+  # this is intended for loop courses
   if ($xf ** 2 + $yf ** 2 < 10) {
     my $iFurthest;
     my $dFurthest = 0;
     for my $i ( 1 .. $#$points - 1 ) {
       if (($minSpacing <= 0) || (($points->[$i]->{distance} >= $s0 + $minSpacing) && ($points->[$i]->{distance} <= $s1 - $minSpacing))) {
-        my $d = latlngDistance($points->[0], $points->[$i]);
+        my $d = latlngDistance($points->[0], $points->[$i]) + latlngDistance($points->[-1], $points->[$i]);
         if ($d > $dFurthest) {
           $iFurthest = $i;
           $dFurthest = $d;
@@ -5386,7 +5452,8 @@ sub simplifyPoints {
       # find the nearest point on the curve
       my ($f, $d) = xyPointOnLine([0, 0], [$xf, $yf], [$x, $y]);  # distance of the interpolated point
       my $ddz = $dzf * $f - $dz;   # interpolated altitude difference
-      my $score = ($d / $r) ** 2 + ($ddz / $z0) ** 2;
+      my $score = ($d / $r) ** 2;
+      $score += ($ddz / $z0) ** 2 if ($z0 > 0);
       if ($score > $scoreMax) {
         $iMax = $i;
         $scoreMax = $score;
@@ -5435,7 +5502,7 @@ sub doPointInterpolation {
     }
   }
   push @pNew, $points->[-1] unless ($isLoop);
-  note("interpolation increased course from ", scalar @$points, " to ", scalar @pNew, " points\n");
+  note("interpolation changed course from ", scalar @$points, " to ", scalar @pNew, " points\n");
   $points = \@pNew;
   return $points;
 }
@@ -6045,8 +6112,8 @@ sub applyMaxSpacingRatio {
 
     if (((defined $dBack) && ($dBack > 0) && ($dd > $ratio * $dBack)) or (defined $dForward) && ($dForward > 0) && ($dd > $ratio * $dForward)) {
       # region needs refinement
-      my $sL = $ratio * $dBack if ($dBack > 0);
-      my $sR = $ratio * $dForward if ($dForward > 0);
+      my $sL = $ratio * $dBack if (defined $dBack && $dBack > 0);
+      my $sR = $ratio * $dForward if (defined $dForward && $dForward > 0);
       my @dLs = (0);  # points on left of interval
       my @dRs = (0);  # points on right of interval
       while ($dLs[-1] + $dRs[0] < $dd) {
@@ -6111,8 +6178,6 @@ sub cropCorners {
   my $cornerCropArcFit = $var{cornerCropArcFit} // 1;
   my $start      = $var{start};
   my $end        = $var{end};
-  my $spacing    = $var{spacing} // 0;
-  my $autoSpacing = $var{autoSpacing} // 0;
   my $isLoop     = $var{isLoop} // 0;
   my $minRadius  = $var{minRadius} // 0;
 
@@ -6121,7 +6186,7 @@ sub cropCorners {
 
   # if arguments exclude any points or angles
   return $points
-    if (((defined $maxRadians) && (defined $minRadians) && ($maxRadians < $minRadians)) || ((! $isLoop) && (defined $start) && (defined $end) && ($start > $end)));
+    if (($cornerCrop <= 0) || ((defined $maxRadians) && (defined $minRadians) && ($maxRadians < $minRadians)) || ((! $isLoop) && (defined $start) && (defined $end) && ($start > $end)));
 
   #
   # create a direction field
@@ -6865,6 +6930,8 @@ sub findArcs {
   my $curvatureSmoothing = $var{curvatureSmoothing};
   note("findArcs called...\n");
 
+  my $timerStart = time();
+
   return [] unless ($isLoop || (! defined $start) || (! defined $end) || $end > $start);
 
   $courseDistance //= calcCourseDistance(points=> $points, isLoop=> $isLoop) if ($isLoop);
@@ -6991,7 +7058,7 @@ sub findArcs {
   }
 
   push @$points, $pLast if (defined $pLast);
-  note("number of arcs found = " . scalar(@arcs) . "\n");
+  note("number of arcs found = ", scalar(@arcs), " in ", time() - $timerStart, " seconds.\n");
   return \@arcs;
 }
 
@@ -7173,7 +7240,7 @@ sub fitArcs {
 #
 # findAndFitArcs:
 #
-sub findAndFitArcs{
+sub findAndFitArcs {
   my %var = @_;
   my $points = $var{points};
   my $isLoop = $var{isLoop} // 0;
@@ -7184,8 +7251,10 @@ sub findAndFitArcs{
   my $uniformGradient = $var{fitArcsUniformGradient};
   my $curvatureSmoothing = $var{curvatureSmoothing};
 
+  my $timerStart = time();
   my $arcs = findArcs(points=> $points, isLoop=> $isLoop, start=> $start, end=> $end, curvatureSmoothing=> $curvatureSmoothing);
   my $pNew = fitArcs(points=> $points, isLoop=> $isLoop, dTheta => $dTheta, dMax=> $dMax, arcs=> $arcs, uniformGradient=> $uniformGradient);
+  note("arc fitting completed in ", time() - $timerStart, " seconds\n");
   return $pNew;
 }
 
@@ -7664,6 +7733,8 @@ sub snapPoints {
   my $snapAltitude    = $var{snapAltitude} // 1;
   my $spacing         = $var{spacing} // 0;
   my $isLoop          = $var{isLoop} // 0;
+
+  my $timerStart = time();
 
   addDistanceField(points=> $points);
 
@@ -8251,6 +8322,8 @@ sub snapPoints {
   }
 
   deleteDerivedFields($points);
+
+  note("snapping completed in ", time() - $timerStart, " seconds.\n");
 
   return $points;
 }
@@ -9809,7 +9882,9 @@ sub findClimbs {
   my $isLoop = $var{isLoop};
   my $sign = $var{sign} // 1; # sign: 1 for climbs, -1 for descents, 0 for both
 
-  # minimum rating... units are meters ( @ 10% gradient)
+  addDistanceFieldIfNeeded(points=> $points);
+
+  #  minimum rating... units are meters ( @ 10% gradient)
   # this is normalized to 10% gradient,
   my $rating0 = $threshold;
 
@@ -9823,7 +9898,7 @@ sub findClimbs {
 
   # for circuits, we want to shift the points to the altitude minimum
   # no gradient signs will cross the altitude minimum on a loop
-  if ($shiftCircuit) {
+  if ($isLoop && $shiftCircuit) {
     # shift the points to the altitude minimum
     my $zMin = $points->[0]->{ele};
     my $izMin = 0;
@@ -9902,13 +9977,14 @@ sub findClimbs {
 
 #
 # add automatic segments
+# this needs to be fixed for BikeTerra when BikeTerra supports timing
 #
 sub addAutoSegments {
   my %var = @_;
   my $courseDistance = $var{courseDistance};
   my $gradientPower = ($var{gradientPower} // 2);
   my $isLoop = $var{isLoop};
-  my $margin = $var{margin} // 400;
+  my $margin = $var{margin} // 0;
   my $finishMargin = $var{finishMargin} // 0;
   my $startMargin = $var{startMargin} // 0;
   my $names = $var{names};
@@ -9918,6 +9994,7 @@ sub addAutoSegments {
   my $simplifyPoints = $var{simplifyPoints} // 1;
   my $stretch = $var{stretch};
   my $threshold = $var{threshold} // 100;
+  my $timerStart = time();
   note("creating auto-segments...\n");
 
   addDistanceField(points=> $points);
@@ -9947,7 +10024,7 @@ sub addAutoSegments {
     # doesn't reduce the climb length too much
     my $d1 = $points->[$c->[0]]->{distance};
     my $d2 = $points->[$c->[1]]->{distance};
-    my $L  = $d2 - $d1;
+    my $L = $d2 - $d1;
 
     if (($d1 < $dMin) && (($dMin - $d1) < 0.02 * $L)) {
       $c->[0] ++
@@ -9958,7 +10035,7 @@ sub addAutoSegments {
               );
       note(sprintf("shifted start of climb from %.3f meters to %.3f meters to accomodate start margin\n", $d1, $points->[$c->[0]]->{distance}))
         if ($points->[$c->[0]]->{distance} > $d1);
-      # add interpolation code here
+      # add interpolation code here?
     }
 
     if (($d2 > $dMax) && (($d2 - $dMax) < 0.02 * $L)) {
@@ -9970,18 +10047,20 @@ sub addAutoSegments {
               );
       note(sprintf("shifted end of climb from %.3f meters to %.3f meters to accomodate finish margin\n", $d2, $points->[$c->[1]]->{distance}))
         if ($points->[$c->[1]]->{distance} < $d2);
-      # add interpolation code here
+      # add interpolation code here?
     }
 
+    # if climbs overlap, set the interface
     if (
-        ( $points->[$c->[0]]->{distance} >= $dMin ) &&
-        ( $points->[$c->[1]]->{distance} <= $dMax )
+        ( $points->[$c->[0]]->{distance} > $dMin ) &&
+        ( $points->[$c->[1]]->{distance} < $dMax )
        ) {
-      if ( (@climbs == 0) || ($points->[$c->[0]]->{distance} > $points->[$climbs[-1]->[1]]->{distance} + $m) ) {
+      if ( (@climbs == 0) || ($points->[$c->[0]]->{distance} >= $points->[$climbs[-1]->[1]]->{distance} + $m) ) {
         note(sprintf("autoSegments: identified climb from %.3f to %.3f km\n", $points->[$c->[0]]->{distance} / 1000, $points->[$c->[1]]->{distance} / 1000));
         push @climbs, $c;
       } else {
-        warn("autoSegments: removing detected lower-rated climb due to inadequate margin to higher-rated adjacent climb.\n");
+        warn(sprintf("autoSegments: removing detected climb from indices $c->[0] to $c->[1] (%.3f to %.3f km) due to insufficient margin = %g\n", $points->[$c->[0]]->{distance} / 1000, $points->[$c->[1]]->{distance} / 1000, $margin));
+
         # climb is too close to preceding climb: take the one with the higher rating
         my $r1 = climbRating(
                              points=> [$points->[$climbs[-1]->[0]], $points->[$climbs[-1]->[1]]],
@@ -10101,6 +10180,7 @@ sub addAutoSegments {
   # points following the last climb
   push @pNew, @$points[$i0 .. $#$points];
 
+  note("autosegment generation completed in ", time() - $timerStart, " seconds\n");
   return \@pNew;
 }
 
@@ -10119,6 +10199,8 @@ sub findCorners {
   my $sigma = $var{sigma} // 10;
   my $courseDistance = $var{courseDistance};
   my $d0 = 20 + 3 * $sigma;  # threshold for points to be separated to be considered distinct
+
+  my $timerStart = time();
 
   addDistanceFieldIfNeeded(points=> $points);
   $courseDistance //= calcCourseDistance(points=> $points, isLoop=> $isLoop) if ($isLoop);
@@ -10186,6 +10268,7 @@ sub findCorners {
 
   deleteField(points=> $points0, field=> "smoothedCurvature");
 
+  note("corner search completed in ", time() - $timerStart, "secs\n");
   return @corners;
 }
 
@@ -10230,7 +10313,7 @@ sub placeGradientSigns {
     my $ds = distanceDifference($points->[$climb->[0]], $points->[$climb->[1]], $courseDistance, $isLoop);
     my $dz = $points->[$climb->[1]]->{ele} - $points->[$climb->[0]]->{ele};
     my $g = $dz / $ds;
-    my $text = sprintf("%.2f", 100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", $dz) . " m)";
+    my $text = sprintf("%.2f", 100 * $g) . "% for " . formatDistance($ds, 1, 0.1) . " (" . sprintf("%.0f", $dz) . " m)";
 
     my $waypoint =
       {
@@ -10255,13 +10338,13 @@ sub placeGradientSigns {
       }
     }
     unless ($reject) {
-      note("forward gradient sign @ ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), "km to ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), " km: $text\n");
+      note("forward gradient sign @ ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), " km to ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), " km: $text\n");
       # forward direction sign:
       push @forwardSigns, $waypoint;
     }
 
     # reverse direction sign:
-    $text = sprintf("%.2f", -100 * $g) . "% for " . (($ds > 1000) ? sprintf("%.2f km", $ds / 1000) : sprintf("%d meters", $ds)) . " (" . sprintf("%.1f", -$dz) . " m)";
+    $text = sprintf("%.2f", -100 * $g) . "% for " . formatDistance($ds, 1, 0.1) . " (" . sprintf("%.0f", -$dz) . " m)";
     $waypoint =
       {
        lat   => $points->[$climb->[1]]->{lat},
@@ -10285,7 +10368,7 @@ sub placeGradientSigns {
       }
     }
     unless ($reject) {
-      note("reverse gradient sign @ ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), "km to ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), " km: $text\n");
+      note("reverse gradient sign @ ", sprintf("%.2f", $points->[$climb->[1]]->{distance} / 1000), " km to ", sprintf("%.2f", $points->[$climb->[0]]->{distance} / 1000), " km: $text\n");
       # reverse direction sign:
       push @reverseSigns, $waypoint;
     }
@@ -10397,7 +10480,7 @@ B<C<processGPX>> [options] <input files>
 
 =head1 VERSION
 
-0.76
+0.77
 
 =head1 DESCRIPTION
 
@@ -11739,7 +11822,8 @@ by Biketerra, which uses splines to interpolate between points.
 Splines can bow out if the spacing ratio between points is too large.
 So a value of 2 or 3, for example, will reduce this effect.  The
 number should be at least 1 if you want to set a value.  Setting it to
-0 will do no adjustments.
+0 will do no adjustments.  It is part of C<-auto> so set to 0 if you
+don't want it.
 
 =item B<C<-minCornerCropAngle>> <degrees>
 
@@ -12398,7 +12482,8 @@ Synopnym for B<C<-simplifyZ>>
 The maximum deviation of a point from a straight line for simplification.
 So simplifying a segment would result in a point deviating further
 from this in x, y coordinates, then the point will be retained.
-The default is 1 meter, which works well with BikeTerra.
+The default is 1 meter, which works well with BikeTerra.  Zero
+disables simplification.
 
 =item B<C<-simplifyDistance>> <meters>
 
@@ -12446,7 +12531,8 @@ The maximum deviation of a point's altitude from a uniform gradient
 for simplification.  So simplifying a segment would result in a point
 at least this amount higher or lower than for a course without the
 point present, then the point will be retained.  The default is 0.1
-meters, which works well with BikeTerra.
+meters, which works well with BikeTerra.  Specifying 0 ignores
+gradient (equivalent to infinite).
 
 =item B<C<-smooth>> <meters>
 
@@ -13108,7 +13194,7 @@ of C<-autoSpacing>, for example.
 
 The following example was from a criterium course.  You probably wouldn't do it like this: you'd probably use C<-auto> for many of the options.  But this example covers the options explicitly:
 
-C<processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -simplify -maxSpacingRatio 2 -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx>
+C<processGPX -fitArcs -laneShift -3 -shiftStart 740 -shiftEnd 1390 -spacing 3 -autoSpacing -cornerCrop 6 -minRadius 6 -prune -simplify -maxSpacingRatio 3 -smooth 7 -snapDistance 2 -snap 1 -closeLoop CherryPieCritRGT.gpx>
 
 The course has an out-and-back section ending in a loop.  In the
 actual race, the out-and-back is separated by cones.  But Biketerra
@@ -13181,7 +13267,7 @@ route, or the altitude profile.  This should probably be the default.
 Reduces the number of points, which is preferred for BikeTerra or
 Training Peaks Virtual
 
-=item B<C<-maxSpacingRatio 2>>
+=item B<C<-maxSpacingRatio 3>>
 
 Adds points to the transitions between turns and straights, which
 reduces the tendency of roads to bow when loaded into BikeTerra.
@@ -13776,7 +13862,7 @@ loop.  So if consider doing an explicity C<-loop> or C<-lap> in these
 cases.  If you want to guarantee it's treated as a point-to-point,
 use C<-noloop>.
 
-4. consider using C<-maxSpacingRatio 2> or C<-maxSpacingRatio 3>.
+4. consider using C<-maxSpacingRatio 3>
 This will transition the point spacings out of corners and into
 straight sections.  This is useful because Biketerra uses splines
 between trackpoints to form the actual road, and splines don't behave
@@ -13784,6 +13870,7 @@ well when there is a large difference between point spacings: you can
 get a lot of "bow".  If this results in unwanted points being added to
 corners, which would cause them from being smooth curves to segmented,
 then increase C<-minRefine> from the default of 4 to something larger.
+This is part of C<-auto>.
 
 =head2 Training Peaks Virtual best practices
 
@@ -13995,7 +14082,6 @@ unimportant for Biketerra, which ignores segments.
 =head1 LICENSE
 
 This application is free software; you can redistribute it and/or
-modify it under the same terms as Perl itself.
+modify it under the same terms as Perl itself.=
 =cut
 # eof
-  
