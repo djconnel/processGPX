@@ -181,6 +181,16 @@ my $deg2rad     = $pi / 180;
 my $lat2y       = $rEarth * $deg2rad;
 my $pi2         = atan2(1, 0);          # pi / 2, used by transition()
 
+# BikeTerra: distances are haversine on a sphere of this radius; terrain
+# comes from its z14 elevation tiles (512 px WebP, Mapbox terrain-RGB)
+my $BT_EARTH_RADIUS = 6378137;
+my $BT_TILE_URL     = "https://tiles.biketerra.com/elevations/%s/%d/%d/%d";
+my $BT_TILE_ZOOM    = 14;
+my $BT_TILE_PX      = 512;
+my $BT_ANCHOR_SNAP  = 1;     # annotation ends snap to a point within this (meters), as the editor does
+my $BT_LOOP_CLOSE   = 1;     # ends closer than this (meters) make a BikeTerra loop
+my $BT_STRUCTURE_EDGE = 0.5; # BikeTerra drops a bridge or tunnel at a route end: keep it this far inside
+
 # point fields: each point is a hash reference with these keys (all optional
 # except lat, lon and ele).  Other keys read from the GPX file are dropped.
 my @POINT_FIELDS = qw(
@@ -240,6 +250,10 @@ my $autoSpacing;       # whether to do auto-spacing
 my $autoSplits = 0;    # number of splits to put into the road based on distance
 my $autoStraightenDeviation;  # maximum deviation for auto-straightening
 my $autoStraightenLength;  # minimum length for auto-straightening
+my $btJSON;            # whether to write BikeTerra JSON (default: if input is BikeTerra JSON or -out is *.json)
+my $btTerrain = "tiles"; # terrain elevation for BikeTerra JSON: "tiles" or "road"
+my $btTileCache;       # directory to cache BikeTerra elevation tiles in
+my $btTileVersion = "z-2025.1"; # BikeTerra elevation tile set
 my $closeLoop;         # sets -loop and -copyPoint
 my $copyPoint;         # whether to make sure first point and last point in data coincide
 my $copyright;         # copyright field, for GPX
@@ -445,6 +459,10 @@ GetOptions (
             "autoStraighten=f{0,2}"           => \@autoStraighten,
             "autoStraightenDeviation=f"       => \$autoStraightenDeviation,
             "autoStraightenLength=f"          => \$autoStraightenLength,
+            "btJSON!"                         => \$btJSON,
+            "btTerrain=s"                     => \$btTerrain,
+            "btTileCache=s"                   => \$btTileCache,
+            "btTileVersion=s"                 => \$btTileVersion,
             "circle=f{1,1000}"                => \@circle,
             "circleEnd=f{1,1000}"             => \@circleEnd,
             "circleStart=f{1,1000}"           => \@circleStart,
@@ -752,7 +770,16 @@ die("Crop window minimum exceeds crop window maximum\n")
 if (defined $outFile) {
   $csv = 1 if ($outFile =~ /csv$/i);
   $csv = 0 if ($outFile =~ /gpx$/i);
+  $btJSON //= 0 if ($outFile =~ /(?:csv|gpx)$/i);
+  if ($outFile =~ /json$/i) {
+    $btJSON //= 1;
+    $csv = 0;
+  }
 }
+
+$btTerrain = lc($btTerrain);
+die("-btTerrain must be \"tiles\" or \"road\", not \"$btTerrain\"\n")
+  unless ($btTerrain eq "tiles" || $btTerrain eq "road");
 
 # apply extend
 $prepend += $extend;
@@ -791,6 +818,20 @@ for my $file ( @files ) {
   for my $ns (keys %{$GPXResult->{segmentNames}}) {
     $segmentName{$ns} = $GPXResult->{segmentNames}->{$ns};
     $segmentDefined{$ns} ++;
+  }
+
+  # BikeTerra JSON: put each annotation end on a point and tag the points
+  # each annotation covers, so the annotations follow the road through processing
+  my $BT = $GPXResult->{BT};
+  my $writeBTJSON = $btJSON // (defined $BT ? 1 : 0);
+  my $btScale = $BT_EARTH_RADIUS / $rEarth;   # processGPX to BikeTerra distances
+  my $btAnnotationKinds = [];
+  if (defined $BT) {
+    if ((! defined $isLoop) && (defined $BT->{isLoop})) {
+      $isLoop = $BT->{isLoop} ? 1 : 0;
+      note("BikeTerra JSON isLoop = ", ($isLoop ? "true" : "false"), ": setting -", ($isLoop ? "" : "no"), "loop\n");
+    }
+    ($points, $btAnnotationKinds) = anchorAnnotations(points=> $points, annotations=> $BT->{annotations}, scale=> $BT->{scale}, btDistances=> $BT->{distances});
   }
 
   note("points in original GPX track = ", scalar(@$points), "\n");
@@ -1739,7 +1780,7 @@ for my $file ( @files ) {
         my $p1 = $pNew[-1];
         my $p2 = $points->[$i + 1];
         my $p3 = $points->[$i];
-        if ( isPointPrunable( points=> [$p1, $p2, $p3], distance=> $pruneD, X=> $pruneX, dg=> $prunedg)  ) {
+        if ( (! isSpanBoundary($points->[$i - 1], $p3, $p2)) && isPointPrunable( points=> [$p1, $p2, $p3], distance=> $pruneD, X=> $pruneX, dg=> $prunedg)  ) {
           $pruneCount ++;
         } else {
           push @pNew, $p3;
@@ -2462,6 +2503,25 @@ for my $file ( @files ) {
         }
         close $fcsv;
 
+      } elsif ($writeBTJSON) {
+        my $fNew = ($outFile eq "") ? ($file eq "-") ? "-" : setFileNameSuffix($file =~ s/^B(?:ike)?T(?:erra)?JSON://ir, "_processed.json") : $outFile;
+        $fNew = setFileNameSuffix($fNew, sprintf("_split%d.json", $nSplit + 1)) // "-"
+          if (scalar(@$splits) > 1);
+        my $trackName = (ref $track eq "HASH") ? $track->{name} : undef;
+        writeBTJSON(
+                    file=> $fNew,
+                    points=> $points,
+                    kinds=> $btAnnotationKinds,
+                    scale=> $btScale,
+                    title=> $title // ((defined $BT) ? $BT->{title} : undef) // $trackName // ($gpx->name() // "processGPX route"),
+                    defaultSurface=> ((defined $BT) ? $BT->{defaultSurface} : undef) // "asphalt",
+                    version=> ((defined $BT) ? $BT->{version} : undef) // "2.0.0",
+                    isLoop=> $isLoop,
+                    terrain=> $btTerrain,
+                    tileCache=> $btTileCache,
+                    tileVersion=> $btTileVersion,
+                   );
+
       } else {
         my $k = "processGPX";
         my @newKeywords = split('\s*,\s*', $newKeywords);
@@ -2486,6 +2546,7 @@ for my $file ( @files ) {
         }
         # create point extension fields
         for my $segment ( @{$track->{segments}} ) {
+          delete $_->{spans} for (@{$segment->{points}});   # BikeTerra annotations: JSON only
           addPointExtensions(points => $segment->{points});
         }
         my $fNew = ($outFile eq "") ? ($file eq "-") ? "-" : setFileNameSuffix($file, "_processed.gpx") : $outFile;
@@ -2746,6 +2807,8 @@ sub loadGPX {
   if (($BTRoute) = ($GPXFile =~ /^B(?:ike)?T(?:erra)?JSON:(.+)/i)) {
     return loadBTJSON($BTRoute);
   }
+  # a file named *.json is taken to be a BikeTerra JSON file
+  return loadBTJSON($GPXFile) if (($GPXFile =~ /\.json$/i) && (-f $GPXFile));
 
   # BT GPX data
   my $xml;
@@ -2929,56 +2992,92 @@ sub loadBTRoute {
 sub loadBTJSON {
   my $BTJSON = shift;
 
-  $/ = undef;
-  open my $fp, "<$BTJSON" or die("ERROR opening file $BTJSON\n");
-  my $s = <$fp>;
-  close $fp;
+  my $s;
+  {
+    local $/ = undef;
+    open my $fp, "<$BTJSON" or die("ERROR opening file $BTJSON\n");
+    $s = <$fp>;
+    close $fp;
+  }
 
   # Parse JSON data
   require JSON;
   my $json = JSON->new->allow_nonref();
+  $json->utf8();
   my $data = $json->decode($s);
 
   my $version = $data->{version};
-  my $title = $data->{title} // "BikeTerra route",
+  my $title = $data->{title} // "BikeTerra route";
   my $isLoop = $data->{isLoop};
   my $defaultSurface = $data->{defaultSurface};
   my $pList = $data->{points};
-  my $annotations = $data->{annotations};
+  my $annotations = $data->{annotations} // [];
   my @points;
 
+  # points are [lat, lon, road elevation, distance, terrain elevation];
+  # terrain is null on routes Biketerra has not sampled
   my @dzs = ();
-  my @ds = ();
-  my $dzSum = 0;
+  my $dBT;
+  my @btDistances = ();
   for my $p ( @$pList ) {
     my ($lat, $lon, $z, $d, $z0) = @$p;
-    push @points, {lat=> $lat, lon=> $lon, ele=> $z};
-    my $dz = $z0 - $z;
-    $dzSum  += $dz;
-    push @dzs, $dz;
+    push @points, {lat=> $lat, lon=> $lon, ele=> $z, segment=> 1};
+    $dBT = $d if (defined $d);
+    push @btDistances, $d;
+    push @dzs, $z0 - $z if (defined $z0);
   }
+  # annotation stations are measured on the file's own distances: keep them if
+  # they are complete and never decrease
+  for my $i ( 0 .. $#btDistances ) {
+    unless ((defined $btDistances[$i]) && (($i == 0) || ($btDistances[$i] >= $btDistances[$i - 1]))) {
+      @btDistances = ();
+      last;
+    }
+  }
+
+  die("no data found in BikeTerra JSON file $BTJSON\n") unless (@points);
 
   # report on annotations
   for my $a ( @$annotations ) {
     note("annotation found: $a->[0] from $a->[1] to $a->[2]\n");
   }
 
-  die("no data found in BikeTerra JSON file $BTJSON\n") unless (@points);
+  # scale factor from processGPX distances to the file's distances: both
+  # are haversine distances, but on spheres of slightly different radius
+  # (older BikeTerra routes can be measured differently: up to ~1e-4)
+  my $dPGPX = 0;
+  for my $i ( 1 .. $#points ) {
+    $dPGPX += latlngDistance($points[$i - 1], $points[$i]);
+  }
+  my $scale = $BT_EARTH_RADIUS / $rEarth;
+  if ((defined $dBT) && ($dBT > 0) && ($dPGPX > 0) && (abs($dBT / $dPGPX - 1) < 0.01)) {
+    $scale = $dBT / $dPGPX;
+  } else {
+    note("BikeTerra JSON distances missing or inconsistent: using sphere radius ratio for distance scale\n");
+  }
+  note("distance scale factor BikeTerra / processGPX = ", sprintf("%.7f", $scale), "\n");
 
   # report on terrain alignment
-  my $dzAvg = $dzSum / scalar(@points);
-  my @dzsSorted = sort( {$dzs[$a] <=> $dzs[$b]} (0 .. $#dzs) );
-  my $sumw = 0;
-  my $sumwdz = 0;
-  for my $i ( @dzsSorted ) {
-    my $f = $i / $#dzs;
-    my $w = 218790 * $f ** 8 * (1 - $f) ** 8;
-    $sumw += $w;
-    $sumwdz += $w * $dzs[$i];
+  if (@dzs > 1) {
+    my $dzSum = 0;
+    $dzSum += $_ for (@dzs);
+    my $dzAvg = $dzSum / scalar(@dzs);
+    # weighted by rank: a soft trimmed mean
+    my @dzsSorted = sort { $a <=> $b } @dzs;
+    my $sumw = 0;
+    my $sumwdz = 0;
+    for my $r ( 0 .. $#dzsSorted ) {
+      my $f = $r / $#dzsSorted;
+      my $w = 218790 * $f ** 8 * (1 - $f) ** 8;
+      $sumw += $w;
+      $sumwdz += $w * $dzsSorted[$r];
+    }
+    note("average height of terrain over route elevation = " . sprintf('%.4f', $dzAvg) . " meters\n");
+    note("typical height of terrain over route elevation = " . sprintf('%.4f', $sumwdz / $sumw) . " meters\n")
+      if ($sumw > 0);
+  } else {
+    note("no terrain elevations in BikeTerra JSON file\n");
   }
-  my $dz = $sumwdz / $sumw;
-  note("average height of terrain over route elevation = " . sprintf('%.4f', $dzAvg) . " meters\n");
-  note("typical height of terrain over route elevation = " . sprintf('%.4f', $dz) . " meters\n");
 
   # Parse GPX from open file
   my $gpx = Geo::Gpx->new();
@@ -2999,7 +3098,457 @@ sub loadBTJSON {
           nSegment=> 1,
           segmentNames=> {},
           extensions=> {},
+          BT=> {
+                version=> $version,
+                title=> $title,
+                isLoop=> $isLoop,
+                defaultSurface=> $defaultSurface,
+                annotations=> $annotations,
+                scale=> $scale,
+                distances=> (@btDistances ? \@btDistances : undef),
+               },
          };
+}
+
+#
+# BikeTerra annotations (bridges, tunnels, surfaces) are carried through
+# processing on the points themselves: each point's "spans" field lists the
+# annotations covering it, as comma-separated indices ("" for none).  An
+# annotation runs from the first point carrying it to the last, so its ends
+# are always points.  New points between two others carry only the spans
+# both share, so an annotation never grows into a gap, and simplification
+# and pruning keep every point where the spans change.
+#
+
+# spans shared by two spans fields
+sub spanIntersect {
+  my ($s1, $s2) = @_;
+  return "" unless ((defined $s1) && (defined $s2) && ($s1 ne "") && ($s2 ne ""));
+  return $s1 if ($s1 eq $s2);
+  my %in = map { $_ => 1 } split(/,/, $s2);
+  return join(",", grep { $in{$_} } split(/,/, $s1));
+}
+
+# spans in any of a list of spans fields
+sub spanUnion {
+  my %in = map { $_ => 1 } grep { $_ ne "" } map { split(/,/, $_ // "") } @_;
+  return join(",", sort { $a <=> $b } keys %in);
+}
+
+# whether a point's spans differ from those of either neighbour
+sub isSpanBoundary {
+  my ($p0, $p, $p1) = @_;
+  my $s = $p->{spans} // "";
+  return (((defined $p0) && (($p0->{spans} // "") ne $s)) || ((defined $p1) && (($p1->{spans} // "") ne $s))) ? 1 : 0;
+}
+
+#
+# put each BikeTerra annotation end on a point and set the spans field of
+# every point.  Annotation distances are the file's distances (btDistances,
+# one per point), converted to processGPX distances by interpolating along
+# them, or without them by dividing by scale.  The rule is the BikeTerra
+# editor's own when it loads a route: an end snaps to an existing point
+# within $BT_ANCHOR_SNAP meters, else a point is interpolated there.  A
+# bridge or tunnel end snaps only outward, so a structure never shrinks.
+# Returns the points and the kind of each annotation, by index.
+#
+sub anchorAnnotations {
+  my %var = @_;
+  my $points = $var{points} // [];
+  my $annotations = $var{annotations} // [];
+  my $scale = $var{scale} // 1;
+  my $btDs = $var{btDistances};
+
+  my @kinds = map { $_->[0] } @$annotations;
+  if ((@$annotations == 0) || (@$points < 2)) {
+    $_->{spans} = "" for (@$points);
+    return ($points, \@kinds);
+  }
+
+  my @pts = @$points;
+  my @ds = (0);
+  push @ds, $ds[-1] + latlngDistance($pts[$_ - 1], $pts[$_]) for (1 .. $#pts);
+
+  # index of the last element of a sorted list at or before a value
+  my $bracketIn = sub {
+    my ($list, $d) = @_;
+    my ($lo, $hi) = (0, scalar(@$list));
+    while ($lo < $hi) {
+      my $mid = int(($lo + $hi) / 2);
+      if ($list->[$mid] <= $d) {
+        $lo = $mid + 1;
+      } else {
+        $hi = $mid;
+      }
+    }
+    return ($lo > 0) ? $lo - 1 : 0;
+  };
+  my $bracket = sub { $bracketIn->(\@ds, $_[0]) };
+
+  # processGPX distance of each annotation station, before any point is inserted
+  $btDs = undef unless ((defined $btDs) && (@$btDs == @pts));
+  my %pgpxDistance;
+  for my $ann ( @$annotations ) {
+    for my $s ( @$ann[1, 2] ) {
+      next unless ((defined $s) && ($s =~ /^$number_regexp$/o));
+      my $d = $s / $scale;
+      if (defined $btDs) {
+        my $j = $bracketIn->($btDs, $s);
+        if ($j >= $#pts) {
+          $d = $ds[-1] + ($s - $btDs->[-1]) / $scale;
+        } elsif ($btDs->[$j + 1] > $btDs->[$j]) {
+          $d = $ds[$j] + ($s - $btDs->[$j]) / ($btDs->[$j + 1] - $btDs->[$j]) * ($ds[$j + 1] - $ds[$j]);
+        } else {
+          $d = $ds[$j];
+        }
+      }
+      $pgpxDistance{$s} = $d;
+    }
+  }
+
+  # side -1 snaps only backward (a structure's start), +1 only forward (its end), 0 either way
+  my $inserted = 0;
+  my $anchorAt = sub {
+    my ($d, $side) = @_;
+    my $i = $bracket->($d);
+    my @cands = grep {
+      ($_ <= $#pts)
+        # 5 cm the wrong way is rounding of the BikeTerra distances
+        && (($side == 0) || (($ds[$_] - $d) * $side >= -0.05))
+        # BikeTerra drops a structure which starts or ends on a route end
+        && (($side == 0) || (($_ > 0) && ($_ < $#pts)))
+      } ($i, $i + 1);
+    if (@cands) {
+      my ($j) = sort { abs($ds[$a] - $d) <=> abs($ds[$b] - $d) } @cands;
+      return $pts[$j] if (abs($ds[$j] - $d) < $BT_ANCHOR_SNAP);
+    }
+    return $pts[$i] if (($i >= $#pts) || ($d <= $ds[$i]));
+    my $p = interpolatePoint($pts[$i], $pts[$i + 1], ($d - $ds[$i]) / ($ds[$i + 1] - $ds[$i]));
+    splice(@pts, $i + 1, 0, $p);
+    splice(@ds, $i + 1, 0, $d);
+    $inserted ++;
+    return $p;
+  };
+
+  # structures first, so a station shared with a surface boundary keeps the outward-only rule
+  my $isStructure = sub { ($_[0] // "") =~ /^(?:bridge|tunnel)$/ ? 1 : 0 };
+  my @order = sort { ($isStructure->($kinds[$b]) <=> $isStructure->($kinds[$a])) || ($a <=> $b) } (0 .. $#$annotations);
+  my %anchors;   # BikeTerra station => point
+  my @ends;      # by annotation: [start point, end point]
+  for my $k ( @order ) {
+    my ($kind, $s1, $s2) = @{$annotations->[$k]};
+    unless ((defined $kind) && (defined $s1) && (defined $s2) && ($s1 =~ /^$number_regexp$/o) && ($s2 =~ /^$number_regexp$/o)) {
+      warn("skipping malformed BikeTerra annotation #$k\n");
+      next;
+    }
+    ($s1, $s2) = ($s2, $s1) if ($s2 < $s1);
+    my $structure = $isStructure->($kind);
+    for my $e ( [$s1, -1], [$s2, 1] ) {
+      my ($s, $side) = @$e;
+      $anchors{sprintf("%.3f", $s)} //= $anchorAt->($pgpxDistance{$s}, $structure ? $side : 0);
+    }
+    $ends[$k] = [ $anchors{sprintf("%.3f", $s1)}, $anchors{sprintf("%.3f", $s2)} ];
+  }
+
+  # tag the points each annotation covers
+  my %index;
+  $index{$pts[$_]} = $_ for (0 .. $#pts);
+  my @spans = map { [] } @pts;
+  for my $k ( 0 .. $#$annotations ) {
+    next unless (defined $ends[$k]);
+    my ($i1, $i2) = ($index{$ends[$k]->[0]}, $index{$ends[$k]->[1]});
+    push @{$spans[$_]}, $k for ($i1 .. $i2);
+  }
+  $pts[$_]->{spans} = join(",", @{$spans[$_]}) for (0 .. $#pts);
+
+  note("anchored ", scalar(@$annotations), " BikeTerra annotations on points: $inserted points inserted at annotation ends\n");
+  return (\@pts, \@kinds);
+}
+
+# cumulative BikeTerra distance of each point
+sub btDistances {
+  my $points = shift;
+  my $scale = shift;
+  my @ds = (0);
+  push @ds, $ds[-1] + $scale * latlngDistance($points->[$_ - 1], $points->[$_]) for (1 .. $#$points);
+  return \@ds;
+}
+
+#
+# load one BikeTerra elevation tile.  Returns its RGB pixels, decoded, as a
+# string of 3 bytes a pixel in rows of $BT_TILE_PX; "" for a tile BikeTerra
+# does not have (HTTP 404); dies if the tile cannot be fetched or decoded.
+# Decoding the WebP needs dwebp (libwebp).  With a cache directory, tiles are
+# kept there as {zoom}_{x}_{y}.webp, an empty file for a missing tile.
+#
+sub loadBTTile {
+  my %var = @_;
+  my ($x, $y, $zoom) = @var{qw(x y zoom)};
+  my $tileVersion = $var{tileVersion};
+  my $cacheDir = $var{cacheDir};
+  require File::Temp;
+
+  my $blob;
+  my $cacheFile = (defined $cacheDir) ? "$cacheDir/${zoom}_${x}_${y}.webp" : undef;
+  if ((defined $cacheFile) && (-f $cacheFile)) {
+    open my $fh, "<:raw", $cacheFile or die("ERROR opening tile cache file $cacheFile\n");
+    local $/ = undef;
+    $blob = <$fh> // "";
+    close $fh;
+  } else {
+    my $url = sprintf($BT_TILE_URL, $tileVersion, $zoom, $x, $y);
+    require HTTP::Tiny;
+    my $http = HTTP::Tiny->new(agent=> "processGPX/$version", timeout=> 60);
+    my $status = 0;
+    for my $try ( 1 .. 3 ) {
+      if ($http->can_ssl()) {
+        my $res = $http->get($url);
+        ($status, $blob) = ($res->{status}, $res->{content});
+      } else {
+        # HTTP::Tiny needs IO::Socket::SSL for https: use curl instead
+        my $tmp = File::Temp->new();
+        close $tmp;
+        open(my $c, "-|", "curl", "-s", "-o", $tmp->filename, "-w", "%{http_code}", $url)
+          or die("cannot fetch BikeTerra elevation tiles: install IO::Socket::SSL or curl\n");
+        $status = <$c> // 0;
+        close $c;
+        open my $fh, "<:raw", $tmp->filename or die("ERROR reading downloaded tile $url\n");
+        local $/ = undef;
+        $blob = <$fh> // "";
+        close $fh;
+      }
+      last if (($status == 200) || ($status == 404));
+      warn("BikeTerra elevation tile $url: HTTP $status; retrying\n") if ($try < 3);
+    }
+    die("BikeTerra elevation tile request failed (HTTP $status): $url\n")
+      unless (($status == 200) || ($status == 404));
+    $blob = "" if ($status == 404);
+    if (defined $cacheFile) {
+      mkdir($cacheDir) unless (-d $cacheDir);
+      if (open my $fh, ">:raw", $cacheFile) {
+        print $fh $blob;
+        close $fh;
+      } else {
+        warn("unable to write tile cache file $cacheFile\n");
+      }
+    }
+  }
+  return "" if ($blob eq "");
+
+  # decode to a binary PPM
+  my $tmp = File::Temp->new(SUFFIX=> ".webp");
+  binmode $tmp;
+  print $tmp $blob;
+  close $tmp;
+  my $fh;
+  open($fh, "-|", "dwebp", "-quiet", $tmp->filename, "-ppm", "-o", "-")
+    or die("cannot run dwebp (part of libwebp), needed to decode BikeTerra elevation tiles: $!\n");
+  binmode $fh;
+  my $ppm = do { local $/ = undef; <$fh> } // "";
+  close $fh;
+  my ($w, $h, $pixels) = ($ppm =~ /^P6\s+(\d+)\s+(\d+)\s+255\s(.*)$/s);
+  die("dwebp could not decode BikeTerra elevation tile $zoom/$x/$y\n")
+    unless ((defined $pixels) && ($w == $BT_TILE_PX) && ($h == $BT_TILE_PX) && (length($pixels) == 3 * $w * $h));
+  return $pixels;
+}
+
+# height of one pixel of a decoded BikeTerra elevation tile (terrain-RGB)
+sub btTileHeight {
+  my ($pixels, $x, $y) = @_;
+  my ($r, $g, $b) = unpack("C3", substr($pixels, 3 * ($y * $BT_TILE_PX + $x), 3));
+  return -10000 + 0.1 * ($r * 65536 + $g * 256 + $b);
+}
+
+#
+# terrain elevation at each point, from BikeTerra's elevation tiles, sampled
+# the way the BikeTerra route editor fills in terrain when it imports a route
+# (which differs slightly from how the renderer samples them): the position
+# within a tile is scaled by (tile size - 1), interpolation is bilinear, a
+# missing tile reads as 0, and a point rising more than 20 meters per meter
+# from the one before takes the mean of its neighbours.
+#
+sub sampleBTTerrain {
+  my %var = @_;
+  my $points = $var{points};
+  my $ds = $var{distances};
+  my $n = 2 ** $BT_TILE_ZOOM;
+  my $last = $BT_TILE_PX - 1;
+
+  my %tiles;
+  my @zs;
+  for my $p ( @$points ) {
+    # Web Mercator tile coordinates
+    my $fx = ($p->{lon} + 180) / 360 * $n;
+    my $fy = (180 - log(tan($deg2rad * (90 + $p->{lat}) / 2)) / $deg2rad) / 360 * $n;
+    my ($tx, $ty) = (floor($fx), floor($fy));
+    my $t = $tiles{"$tx/$ty"} //= loadBTTile(x=> $tx, y=> $ty, zoom=> $BT_TILE_ZOOM, tileVersion=> $var{tileVersion}, cacheDir=> $var{cacheDir});
+    if ($t eq "") {
+      push @zs, 0;
+      next;
+    }
+    my ($px, $py) = (($fx - $tx) * $last, ($fy - $ty) * $last);
+    my $x0 = floor($px);
+    my $y0 = floor($py);
+    $x0 = $last if ($x0 > $last);
+    $y0 = $last if ($y0 > $last);
+    my ($sx, $sy) = ($px - $x0, $py - $y0);
+    my $x1 = ($x0 < $last) ? $x0 + 1 : $last;
+    my $y1 = ($y0 < $last) ? $y0 + 1 : $last;
+    my $top = btTileHeight($t, $x0, $y0) * (1 - $sx) + btTileHeight($t, $x1, $y0) * $sx;
+    my $bot = btTileHeight($t, $x0, $y1) * (1 - $sx) + btTileHeight($t, $x1, $y1) * $sx;
+    push @zs, $top * (1 - $sy) + $bot * $sy;
+  }
+  note("sampled ", scalar(keys %tiles), " BikeTerra elevation tiles\n");
+
+  for my $i ( 1 .. $#zs - 1 ) {
+    my $run = $ds->[$i] - $ds->[$i - 1];
+    $zs[$i] = ($zs[$i - 1] + $zs[$i + 1]) / 2
+      if (($run > 0) && (abs($zs[$i] - $zs[$i - 1]) / $run > 20));
+  }
+  return \@zs;
+}
+
+# a number rounded to n decimal places, for JSON
+sub btRound {
+  my ($x, $n) = @_;
+  my $v = 0 + sprintf("%.${n}f", $x);
+  return ($v == 0) ? 0 : $v;
+}
+
+#
+# write a BikeTerra JSON route: points are [lat, lon, elevation, distance,
+# terrain elevation], distances on BikeTerra's sphere; each annotation is
+# rebuilt from the runs of points carrying it
+#
+sub writeBTJSON {
+  my %var = @_;
+  my $file = $var{file} // "-";
+  my $kinds = $var{kinds} // [];
+  my $scale = $var{scale} // $BT_EARTH_RADIUS / $rEarth;
+  my @pts = map { { %$_ } } @{$var{points} // []};
+  die("no points to write to BikeTerra JSON file $file\n") unless (@pts);
+  require JSON;
+
+  # a BikeTerra loop ends on its first point
+  my $closed = (@pts > 1) && ($scale * latlngDistance($pts[0], $pts[-1]) < $BT_LOOP_CLOSE);
+  if ($closed) {
+    $pts[-1]->{$_} = $pts[0]->{$_} for (qw(lat lon ele));
+  } elsif ($var{isLoop}) {
+    warn("BikeTerra JSON: loop course whose ends are ", formatDistance($scale * latlngDistance($pts[0], $pts[-1])), " apart: writing isLoop = false (-closeLoop closes it)\n");
+  }
+
+  # runs of points carrying each annotation
+  my %runs;   # annotation index => [[first, last], ...]
+  for my $i ( 0 .. $#pts ) {
+    for my $k ( split(/,/, $pts[$i]->{spans} // "") ) {
+      if ((exists $runs{$k}) && ($runs{$k}->[-1]->[1] == $i - 1)) {
+        $runs{$k}->[-1]->[1] = $i;
+      } else {
+        push @{$runs{$k}}, [$i, $i];
+      }
+    }
+  }
+  # merge overlapping runs of the same kind
+  my %byKind;
+  for my $k ( keys %runs ) {
+    my $kind = $kinds->[$k] // next;
+    push @{$byKind{$kind}}, grep { $_->[1] > $_->[0] } @{$runs{$k}};
+  }
+
+  # the editor drops any other point within $BT_ANCHOR_SNAP of an annotation
+  # end when it loads a route: drop them here, so the route loads unchanged
+  my %isEnd = map { $_ => 1 } map { @$_ } map { @$_ } values %byKind;
+  if (%isEnd) {
+    my $ds0 = btDistances(\@pts, $scale);
+    my @ends = sort { $a <=> $b } keys %isEnd;
+    my %drop;
+    for my $e ( @ends ) {
+      for my $dir ( -1, 1 ) {
+        for (my $i = $e + $dir; ($i > 0) && ($i < $#pts) && (abs($ds0->[$i] - $ds0->[$e]) < $BT_ANCHOR_SNAP); $i += $dir) {
+          $drop{$i} = 1 unless ($isEnd{$i});
+        }
+      }
+    }
+    if (%drop) {
+      my @newIndex;
+      my $n = 0;
+      for my $i ( 0 .. $#pts ) {
+        $newIndex[$i] = $n;
+        $n ++ unless ($drop{$i});
+      }
+      @pts = @pts[grep { ! $drop{$_} } (0 .. $#pts)];
+      for my $kind ( keys %byKind ) {
+        $_ = [ $newIndex[$_->[0]], $newIndex[$_->[1]] ] for (@{$byKind{$kind}});
+      }
+      note("dropped ", scalar(keys %drop), " points within $BT_ANCHOR_SNAP m of an annotation end, as the BikeTerra editor would\n");
+    }
+  }
+
+  my $ds = btDistances(\@pts, $scale);
+  my $routeLength = $ds->[-1];
+
+  # terrain elevation
+  my $zs;
+  if (($var{terrain} // "tiles") eq "tiles") {
+    note("sampling BikeTerra elevation tiles for terrain elevation...\n");
+    $zs = eval { sampleBTTerrain(points=> \@pts, distances=> $ds, tileVersion=> $var{tileVersion}, cacheDir=> $var{tileCache}) };
+    warn("unable to sample BikeTerra elevation tiles: ${@}using road elevation for terrain elevation\n")
+      unless (defined $zs);
+  }
+  $zs //= [ map { $_->{ele} } @pts ];
+  my @annotations;
+  for my $kind ( sort keys %byKind ) {
+    my @merged;
+    for my $r ( sort { $a->[0] <=> $b->[0] } @{$byKind{$kind}} ) {
+      if (@merged && ($r->[0] <= $merged[-1]->[1])) {
+        $merged[-1]->[1] = $r->[1] if ($r->[1] > $merged[-1]->[1]);
+      } else {
+        push @merged, [ @$r ];
+      }
+    }
+    for my $r ( @merged ) {
+      my ($s1, $s2) = ($ds->[$r->[0]], $ds->[$r->[1]]);
+      if ($kind =~ /^(?:bridge|tunnel)$/) {
+        my ($lo, $hi) = ($BT_STRUCTURE_EDGE, $routeLength - $BT_STRUCTURE_EDGE);
+        if (($s1 < $lo) || ($s2 > $hi)) {
+          note(sprintf("%s from %.2f to %.2f m touches a route end, which BikeTerra drops: kept %g m inside\n", $kind, $s1, $s2, $BT_STRUCTURE_EDGE));
+          $s1 = $lo if ($s1 < $lo);
+          $s2 = $hi if ($s2 > $hi);
+          next if ($s2 <= $s1);
+        }
+      }
+      push @annotations, [ $kind, btRound($s1, 2), btRound($s2, 2) ];
+    }
+  }
+  @annotations = sort { ($a->[1] <=> $b->[1]) || ($a->[0] cmp $b->[0]) } @annotations;
+
+  my @rows = map {
+    [ btRound($pts[$_]->{lat}, 7), btRound($pts[$_]->{lon}, 7), btRound($pts[$_]->{ele}, 3), btRound($ds->[$_], 2), btRound($zs->[$_], 2) ]
+  } (0 .. $#pts);
+
+  my $json = JSON->new->allow_nonref->canonical(1);
+  my @fields = (
+                [ version => $var{version} // "2.0.0" ],
+                [ title => $var{title} // "processGPX route" ],
+                [ isLoop => ($closed ? JSON::true() : JSON::false()) ],
+                [ defaultSurface => $var{defaultSurface} // "asphalt" ],
+                [ points => \@rows ],
+                [ annotations => \@annotations ],
+               );
+  my $s = "{" . join(",", map { $json->encode($_->[0]) . ":" . $json->encode($_->[1]) } @fields) . "}";
+
+  note("BikeTerra JSON: ", scalar(@rows), " points, ", formatDistance($routeLength), ", isLoop = ", ($closed ? "true" : "false"), ", ", scalar(@annotations), " annotations\n");
+  note("annotation: $_->[0] from $_->[1] to $_->[2]\n") for (@annotations);
+  note("saving BikeTerra JSON in file $file...\n");
+  my $fout;
+  if ($file eq "-") {
+    $fout = \*STDOUT;
+  } else {
+    open($fout, ">", $file) or die("ERROR opening file $file\n");
+  }
+  binmode($fout, ":utf8");
+  print $fout $s, "\n";
+  close $fout unless ($file eq "-");
 }
 
 #
@@ -3841,6 +4390,9 @@ sub interpolateFields {
           } else {
             $p->{$k} = 0;
           }
+        } elsif ($k eq "spans") {
+          # annotations cover new points between two points both carry, not the end point
+          $p->{$k} = spanIntersect($p1->{$k}, $p2->{$k}) if ($i < $#points);
         } elsif (($p1->{$k} =~ /^$number_regexp$/o) && ($p2->{$k} =~ /^$number_regexp$/o)) {
           $p->{$k} = $p1->{$k} * (1 - $f) + $p2->{$k} * $f;
         } else {
@@ -3888,6 +4440,10 @@ sub interpolatePoint {
         } else {
           $p->{$k} = 0;
         }
+      } elsif ($k eq "spans") {
+        # an annotation covers a new point only if it covers both neighbours;
+        # a point at either end is that point (fitArc regenerates the nodes of an arc this way)
+        $p->{$k} = ($f <= 0) ? $p1->{$k} : ($f >= 1) ? $p2->{$k} : spanIntersect($p1->{$k}, $p2->{$k});
       } elsif (($k eq "distance") && ($courseDistance > 0))  {
         # distance must be treated specially on courses
         my $d = $p1->{distance} + distanceDifference($p1, $p2, $courseDistance, $isLoop) * $f;
@@ -4842,10 +5398,12 @@ sub removeDuplicatePoints {
       my %sum1;
       my %sum0;
       my %newPoint = %$p;
+      my @spans;
       for( my $j = $i; $j != ($i1 + 1) % @$points; $j = ($j + 1) % @$points ) {
+        push @spans, $points->[$j]->{spans} if (defined $points->[$j]->{spans});
         for my $key ( keys %{$points->[$j]} ) {
           # average fields of combined points
-          if ( ($key ne "segment") && (ref $points->[$j]->{$key} eq "") && ($points->[$j]->{$key}  =~ /^$number_regexp$/o) ) {
+          if ( ($key ne "segment") && ($key ne "spans") && (ref $points->[$j]->{$key} eq "") && ($points->[$j]->{$key}  =~ /^$number_regexp$/o) ) {
             $sum1{$key} += $points->[$j]->{$key};
             $sum0{$key} ++;
           }
@@ -4856,6 +5414,8 @@ sub removeDuplicatePoints {
           $newPoint{$key} = $sum1{$key} / $sum0{$key};
         }
       }
+      # a merged point is covered by the annotations of any of the points merged
+      $newPoint{spans} = spanUnion(@spans) if (@spans);
       push @pNew, { %newPoint };
 
       # if this wrapped around, also replace the first point
@@ -5378,9 +5938,9 @@ sub simplifyPoints {
     $s1 = $points->[-1]->{distance};
   }
 
-  # search for segment boundaries
+  # search for segment boundaries, and boundaries of annotations (spans)
   for my $i ( 0 .. $#$points - 1 ) {
-    if ($points->[$i]->{segment} != $points->[$i + 1]->{segment}) {
+    if (($points->[$i]->{segment} != $points->[$i + 1]->{segment}) || (($points->[$i]->{spans} // "") ne ($points->[$i + 1]->{spans} // ""))) {
       my $p1 = simplifyPoints(points=> [@$points[0 .. $i]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
       my $p2 = simplifyPoints(points=> [@$points[$i + 1 .. $#$points]], z0 => $z0, r0 => $r0, r00 => $r00, lambda=> $lambda, minSpacing=> $minSpacing);
       return [@$p1, @$p2];
@@ -10616,6 +11176,15 @@ and for BikeTerra route data (as opposed to GPX files) you need:
 
  JSON         : used for parsing JSON-formatted files.
 
+To write BikeTerra JSON with terrain elevations from BikeTerra's
+elevation tiles (C<-btTerrain tiles>, the default) you need:
+
+ HTTP::Tiny   : with IO::Socket::SSL; otherwise the curl command is used
+ dwebp        : the WebP decoder from libwebp (not a Perl module)
+ File::Temp   : temporary files for decoding tiles
+
+Without them, terrain elevation is set to road elevation, with a warning.
+
 =head1 SPECIFYING INPUT SOURCES
 
 There are a number of ways to specify input sources.
@@ -10654,6 +11223,13 @@ information about surface types, bridges, tunnels, and other
 contains only the geometry points, without the annotations.  Note
 the editor also allows exporting a GPX file, which is handled
 like any other GPX file.
+
+A file whose name ends in F<.json> is read as a BikeTerra JSON file
+without the prefix.  The annotations are kept through processing (see
+C<-btJSON>), and the output is BikeTerra JSON unless C<-nobtJSON> or
+an output file name ending in F<.gpx> or F<.csv> asks for something
+else.  If neither C<-loop> nor C<-noloop> is given, the file's
+C<isLoop> sets which applies.
 
 You can shortcut these as C<BTGPX:> and C<BTRoute:> and C<BTJSON>,
 for example.  Generally the "Bike" can be shortened to B, and/or the
@@ -11112,6 +11688,59 @@ The minimum length of a road section to be auto-straightened, in
 meters.  This is an alternative to providing a second argument to an
 C<-autoStraighten> option. It can be used in conjunction with
 C<-autoStraightenDeviation> to request auto-straightening.
+
+=item B<C<-btJSON>>
+
+Write the result as a BikeTerra JSON file (route editor version 2.0)
+rather than GPX.  This is the default when the input is a BikeTerra
+JSON file or the output file name ends in F<.json>; C<-nobtJSON> turns
+it off.  The default output file name is the input with
+F<_processed.json>.
+
+BikeTerra annotations (bridges, tunnels and surfaces) read from a
+BikeTerra JSON file are carried through processing.  Each annotation
+end is put on a point the way the route editor does when it loads a
+route: an existing point within 1 meter, else a point interpolated
+there, with a bridge or tunnel end moving only outward so a structure
+never shrinks.  Annotations then follow those points: simplification,
+minimum spacing and pruning keep every point where an annotation
+begins or ends, and a point added between two points is covered by an
+annotation only if both are.  Smoothing can move an end along the road
+by a meter or so.  On output, each annotation runs from the first point
+carrying it to the last; an out-and-back or lap repeats it.  As the
+editor does on load, any other point within 1 meter of an annotation
+end is dropped, and a bridge or tunnel is kept 0.5 meters inside the
+route ends, where BikeTerra would drop it.
+
+Distances are BikeTerra's: haversine on a sphere of radius 6378137
+meters.  Annotation positions in the input are read against the
+file's own distances, which on some older routes differ from that
+by up to about 0.01%.  The route is a loop (C<isLoop>) if its ends are
+within 1 meter: use C<-closeLoop> to close a loop.  For terrain
+elevation, see C<-btTerrain>.
+
+=item B<C<-btTerrain>> <tiles|road>
+
+Where BikeTerra JSON output gets each point's terrain elevation.
+C<tiles> (the default) samples BikeTerra's own elevation tiles (zoom
+14) the way the route editor does when it imports a route, so the
+file carries the values the editor would compute.  This needs network
+access and the C<dwebp> decoder; if either fails, road elevation is
+used with a warning.  C<road> uses the road elevation.  Terrain
+elevation differs from road elevation by design on bridges and in
+tunnels and cuttings, so C<road> loses that information.
+
+=item B<C<-btTileCache>> <directory>
+
+Keep downloaded BikeTerra elevation tiles in this directory, named
+F<{zoom}_{x}_{y}.webp> (an empty file for a tile BikeTerra does not
+have), and use them on later runs.  Without it tiles are downloaded
+for each run.
+
+=item B<C<-btTileVersion>> <string>
+
+The BikeTerra elevation tile set, part of the tile URL.  The default
+is C<z-2025.1>.  BikeTerra changes this when it rebuilds its tiles.
 
 =item B<C<-circle>> <meters> ... (1 or more)
 
@@ -11939,6 +12568,8 @@ Instead of the default filename, which is the input file with
 F<_processed.gpx>, use this filename instead.  Make sure to specify
 the F<.gpx> suffix if that is what is wanted. A "C<->" implies standard
 output.
+A name ending in F<.json> writes BikeTerra JSON (see C<-btJSON>), and
+one ending in F<.csv> writes CSV.
 
 =item B<C<-outAndBack>>
 
@@ -13840,6 +14471,17 @@ access.
 Better is too download a GPX file from BikeTerra using the "save"
 option in the route editor, then save as a GPX file.  Alternately you
 can save it as a JSON file and use the BTJSON: prefix to the filename.
+
+=head2 processing a BikeTerra JSON file
+
+Save a route from the route editor as a JSON file, which keeps its
+bridges, tunnels and surfaces, and process it:
+
+C<processGPX -auto -minSpacing 2 route.json>
+
+This writes F<route_processed.json>, with the annotations moved onto
+the processed points and terrain elevations sampled from BikeTerra's
+elevation tiles, ready to load back into the route editor.
 
 =head2 BikeTerra best practices
 
